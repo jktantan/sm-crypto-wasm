@@ -11,7 +11,7 @@ import {
 } from './fp2';
 import {
   Fp4, fp4zero, fp4one, fp4copy, fp4isZero, fp4eq, fp4Add, fp4Sub, fp4Neg, fp4Dbl,
-  fp4Mul, fp4MulV, fp4Sqr, fp4SqrV, fp4Inv, fp4Conjugate, fp4MulFp, fp4MulFp2,
+  fp4Mul, fp4MulV, fp4Sqr, fp4SqrV, fp4Inv, fp4Conjugate, fp4MulFp, fp4MulFp2, fp4set,
 } from './fp4';
 import { u256zero } from '../../common/assembly/field256';
 

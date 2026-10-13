@@ -232,6 +232,20 @@ export function reduce512(x: U512, m: U256): U256 {
   return out;
 }
 
+/** 大端字节串（任意长度）mod m：Horner 法 acc = acc*256 + b[i]。用于 SM9 的 40 字节哈希取模。 */
+export function bytesMod(b: StaticArray<u8>, m: U256): U256 {
+  const c256 = new StaticArray<u32>(8);
+  c256[0] = 256;
+  let acc = new StaticArray<u32>(8); // 0
+  for (let i = 0; i < b.length; i++) {
+    acc = modMul(acc, c256, m);
+    const add = new StaticArray<u32>(8);
+    add[0] = <u32>b[i];
+    acc = modAdd(acc, add, m);
+  }
+  return acc;
+}
+
 function cmp9(a: StaticArray<u32>, b: U256): i32 {
   if (a[8] !== 0) return 1;
   for (let i = 7; i >= 0; i--) {
@@ -297,13 +311,22 @@ export function u256shr1(a: U256): void {
   }
 }
 
-/** (a / 2) mod m（m 为奇数素数的情形）。 */
+/** (a / 2) mod m（m 为奇数素数的情形）。
+ *  注意：m 可能 ≥ 2^255，此时 a + m 会超过 256 位，
+ *  因此不能直接 u256addRaw（会丢进位）。改用 (a>>1) + ((a&1) ? (m>>1)+1 : 0)：
+ *    a 偶：(a/2)；a 奇：(a-1)/2 + (m+1)/2 = (a+m)/2。
+ *  此处 m 恒为奇数，(m>>1)+1 == (m+1)/2。
+ */
 export function modHalve(a: U256, m: U256): U256 {
   const r = u256clone(a);
-  if (u256isOdd(r)) {
-    u256addRaw(r, m);
-  }
+  const odd = u256isOdd(r);
   u256shr1(r);
+  if (odd) {
+    const half = u256clone(m);
+    u256shr1(half);
+    u256addRaw(half, u256fromU32(1)); // (m>>1) + 1 = (m+1)/2，不会溢出
+    u256addRaw(r, half);              // r + (m+1)/2 ≤ (a-1)/2 + (m+1)/2 < m，不会溢出
+  }
   return r;
 }
 

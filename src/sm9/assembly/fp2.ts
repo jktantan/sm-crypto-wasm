@@ -16,7 +16,7 @@ import {
   fpInv,
   fpDiv2,
 } from './fp';
-import { u256zero, u256clone, u256isZero, u256eq, u256fromBytes as u256fromBytesShared } from '../../common/assembly/field256';
+import { u256zero, u256clone, u256isZero, u256eq, u256fromBytes as u256fromBytesShared, u256copy } from '../../common/assembly/field256';
 
 /** Fp2 元素：[a0, a1]。 */
 export type Fp2 = StaticArray<U256>;
@@ -54,6 +54,12 @@ export function fp2fromBytes(b: Uint8Array, off: usize): Fp2 {
 
 export function fp2copy(a: Fp2): Fp2 {
   return fp2set(a[0], a[1]);
+}
+
+/** 就地写入：dst := src（保持 dst 的引用不变）。 */
+export function fp2Put(dst: Fp2, src: Fp2): void {
+  u256copy(src[0], dst[0]);
+  u256copy(src[1], dst[1]);
 }
 
 export function fp2isZero(a: Fp2): bool {

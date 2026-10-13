@@ -14,9 +14,11 @@ import {
   modSqr,
   modInv,
   modPow,
+  modHalve,
   u256fromLimbs,
   u256clone,
   u256fromHex,
+  u256isZero,
 } from '../../common/assembly/field256';
 
 export { U256 };
@@ -68,6 +70,13 @@ export function fpSqr(a: U256): U256 {
 /** SM9 素域逆。 */
 export function fpInv(a: U256): U256 {
   return modInv(a, pArr());
+}
+
+/** SM9 素域取负：(-a) mod p。 */
+export function fpNeg(a: U256): U256 {
+  const p = pArr();
+  if (u256isZero(a)) return u256clone(a);
+  return modSub(p, a, p);
 }
 
 /** SM9 素域幂。 */
