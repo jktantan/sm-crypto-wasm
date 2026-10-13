@@ -282,6 +282,31 @@ export function modInv(a: U256, m: U256): U256 {
   return result;
 }
 
+/** a 是否为奇数。 */
+export function u256isOdd(a: U256): bool {
+  return (a[0] & 1) === 1;
+}
+
+/** 原地右移一位（a >>= 1）。 */
+export function u256shr1(a: U256): void {
+  let carry: u32 = 0;
+  for (let i = 7; i >= 0; i--) {
+    const v = a[i];
+    a[i] = ((v >>> 1) | (carry << 31)) & 0xffffffff;
+    carry = v & 1;
+  }
+}
+
+/** (a / 2) mod m（m 为奇数素数的情形）。 */
+export function modHalve(a: U256, m: U256): U256 {
+  const r = u256clone(a);
+  if (u256isOdd(r)) {
+    u256addRaw(r, m);
+  }
+  u256shr1(r);
+  return r;
+}
+
 /**
  * 模幂 a^k mod m（平方-乘，k 为 256-bit，MSB-first）。
  * k 为 8×u32 小端。
