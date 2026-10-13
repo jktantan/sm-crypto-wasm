@@ -18,7 +18,7 @@ import {
 } from './field';
 import { JPoint, basePoint, scalarMul, scalarMulG, toAffine, infinity, addPoints } from './point';
 import { addModN, subModN, mulModN, invModN, nArr } from './modn';
-import { sm3HashInto } from './sm3core';
+import { sm3HashInto } from '../../sm3/assembly/sm3-core';
 
 // ---------- 工具 ----------
 

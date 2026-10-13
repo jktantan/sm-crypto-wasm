@@ -1,11 +1,13 @@
-// SM3 核心（AssemblyScript），供 sm3.wasm 与 sm2.wasm 共用。
+// SM3 纯计算核心（AssemblyScript）—— 归属 SM3 模块。
 //
-// 纯计算，不含内存分配导出（由各 wasm 入口自行包装）。
-// 参考：GM/T 0004-2014。
+// 本文件**不**包含内存分配导出，只提供纯哈希计算，供：
+// - `src/sm3/assembly/index.ts`（编译为 sm3.wasm）
+// - `src/sm2/assembly/crypto.ts`（编译进 sm2.wasm，用于 Z 值/KDF/C3）
 //
-// 对外接口：
-//   sm3HashBytes(dataPtr, dataLen) -> 返回新 StaticArray<u8>(32)
-//   sm3HashInto(dataPtr, dataLen, outPtr)
+// 两个 wasm 在**编译期**各自内联一份（AssemblyScript 是 AOT 编译器），
+// 运行期互不依赖 —— 因此 sm2.wasm 与 sm3.wasm 完全解耦。
+//
+// 参考：GB/T 32905-2016 / GM/T 0004-2014。
 
 const IV: StaticArray<u32> = [
   0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600,
@@ -25,6 +27,12 @@ function gg1(x: u32, y: u32, z: u32): u32 { return (x & y) | (~x & z); }
 function p0(x: u32): u32 { return x ^ rotl(x, 9) ^ rotl(x, 17); }
 function p1(x: u32): u32 { return x ^ rotl(x, 15) ^ rotl(x, 23); }
 
+/**
+ * 单次压缩：处理 64 字节块，state 原地更新。
+ *
+ * @param statePtr 8 个 u32（共 32 字节）状态指针，big-endian 字节布局。
+ * @param blockPtr 64 字节块指针。
+ */
 function compress(statePtr: usize, blockPtr: usize): void {
   const W = new StaticArray<u32>(68);
   const Wp = new StaticArray<u32>(64);
@@ -91,7 +99,7 @@ function compress(statePtr: usize, blockPtr: usize): void {
 }
 
 /**
- * 计算 SM3 摘要，写入 outPtr（32 字节）。
+ * 计算 SM3 摘要，写入 outPtr（32 字节，big-endian）。
  *
  * @param inputPtr 输入起始地址。
  * @param inputLen 输入字节数。
