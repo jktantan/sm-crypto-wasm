@@ -12,8 +12,14 @@
 //   fp2SqrOut(aPtr, outPtr)
 //   fp2InvOut(aPtr, outPtr)
 
-import { Fp2, fp2fromBytes, fp2Mul, fp2Sqr, fp2Inv } from './fp2';
-import { u256toBytes } from '../../common/assembly/field256';
+import { Fp2, fp2fromBytes, fp2Mul, fp2Sqr, fp2Inv, fp2zero } from './fp2';
+import {
+  Fp4, fp4zero, fp4Mul, fp4Sqr, fp4Inv,
+} from './fp4';
+import {
+  Fp12, fp12zero, fp12Mul, fp12Sqr, fp12Inv,
+} from './fp12';
+import { u256toBytes, u256fromBytes as u256fromBytesShared } from '../../common/assembly/field256';
 
 const pinned: Array<StaticArray<u8>> = [];
 
@@ -38,6 +44,36 @@ function writeFp2(a: Fp2, ptr: usize): void {
   u256toBytes(a[1], ptr + 32);
 }
 
+function readFp4(ptr: usize): Fp4 {
+  return fp4set_(readFp2(ptr), readFp2(ptr + 64));
+}
+
+function fp4set_(a0: Fp2, a1: Fp2): Fp4 {
+  const r = new StaticArray<Fp2>(2);
+  r[0] = a0;
+  r[1] = a1;
+  return r;
+}
+
+function writeFp4(a: Fp4, ptr: usize): void {
+  writeFp2(a[0], ptr);
+  writeFp2(a[1], ptr + 64);
+}
+
+function readFp12(ptr: usize): Fp12 {
+  const r = new StaticArray<Fp4>(3);
+  r[0] = readFp4(ptr);
+  r[1] = readFp4(ptr + 128);
+  r[2] = readFp4(ptr + 256);
+  return r;
+}
+
+function writeFp12(a: Fp12, ptr: usize): void {
+  writeFp4(a[0], ptr);
+  writeFp4(a[1], ptr + 128);
+  writeFp4(a[2], ptr + 256);
+}
+
 /** 诊断：Fp2 乘。 */
 export function fp2MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
   writeFp2(fp2Mul(readFp2(aPtr), readFp2(bPtr)), outPtr);
@@ -52,3 +88,35 @@ export function fp2SqrOut(aPtr: usize, outPtr: usize): void {
 export function fp2InvOut(aPtr: usize, outPtr: usize): void {
   writeFp2(fp2Inv(readFp2(aPtr)), outPtr);
 }
+
+/** 诊断：Fp4 乘。 */
+export function fp4MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
+  writeFp4(fp4Mul(readFp4(aPtr), readFp4(bPtr)), outPtr);
+}
+
+/** 诊断：Fp4 平方。 */
+export function fp4SqrOut(aPtr: usize, outPtr: usize): void {
+  writeFp4(fp4Sqr(readFp4(aPtr)), outPtr);
+}
+
+/** 诊断：Fp4 逆。 */
+export function fp4InvOut(aPtr: usize, outPtr: usize): void {
+  writeFp4(fp4Inv(readFp4(aPtr)), outPtr);
+}
+
+/** 诊断：Fp12 乘。 */
+export function fp12MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
+  writeFp12(fp12Mul(readFp12(aPtr), readFp12(bPtr)), outPtr);
+}
+
+/** 诊断：Fp12 平方。 */
+export function fp12SqrOut(aPtr: usize, outPtr: usize): void {
+  writeFp12(fp12Sqr(readFp12(aPtr)), outPtr);
+}
+
+/** 诊断：Fp12 逆。 */
+export function fp12InvOut(aPtr: usize, outPtr: usize): void {
+  writeFp12(fp12Inv(readFp12(aPtr)), outPtr);
+}
+
+void fp2zero; void fp4zero; void fp12zero; void u256fromBytesShared;

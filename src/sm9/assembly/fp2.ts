@@ -114,13 +114,23 @@ export function fp2Mul(a: Fp2, b: Fp2): Fp2 {
 }
 
 /**
- * 乘 u：(a0 + a1 u) * u = a0 u + a1 u² = -2 a1 + a0 u
+ * (a * b) * u（对齐 GmSSL fp2_mul_u）：
+ *   r0 = -2·(a0 b1 + a1 b0)
+ *   r1 = a0 b0 - 2·a1 b1
+ */
+export function fp2MulU(a: Fp2, b: Fp2): Fp2 {
+  const r0 = fpSub(u256zero(), fpAdd(fpAdd(fpMul(a[0], b[1]), fpMul(a[1], b[0])), fpAdd(fpMul(a[0], b[1]), fpMul(a[1], b[0]))));
+  const r1 = fpSub(fpMul(a[0], b[0]), fpAdd(fpMul(a[1], b[1]), fpMul(a[1], b[1])));
+  return fp2set(r0, r1);
+}
+
+/**
+ * a * u（单参，a·u）：
  *   r0 = -2 a1
  *   r1 = a0
  */
-export function fp2MulU(a: Fp2): Fp2 {
-  const r0 = fpSub(u256zero(), fpAdd(a[1], a[1]));
-  return fp2set(r0, a[0]);
+export function fp2TimesU(a: Fp2): Fp2 {
+  return fp2set(fpSub(u256zero(), fpAdd(a[1], a[1])), a[0]);
 }
 
 /**
