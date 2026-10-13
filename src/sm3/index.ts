@@ -9,8 +9,8 @@
  *
  * spec/plan 对应：plan Task 7；spec §6 API、§9 安全姿态。
  */
-import { loadWasm } from '@/runtime/loadWasm';
-import { fromBytes, toBytes } from '@/runtime/convert';
+import { loadWasm } from '../runtime/loadWasm.js';
+import { fromBytes, toBytes } from '../runtime/convert.js';
 
 /** WASM 暴露的导出类型。 */
 interface Sm3Exports extends WebAssembly.Exports {

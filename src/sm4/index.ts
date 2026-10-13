@@ -6,8 +6,8 @@
  *
  * spec/plan 对应：plan Task 9；spec §6 API。
  */
-import { loadWasm } from '@/runtime/loadWasm';
-import { fromBytes, toBytes } from '@/runtime/convert';
+import { loadWasm } from '../runtime/loadWasm.js';
+import { fromBytes, toBytes } from '../runtime/convert.js';
 
 interface Sm4Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -177,7 +177,7 @@ export function cryptCTR(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CTR: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
-  const counter = v.slice();
+  const counter: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
     const ks = encryptBlock(k, counter);
     const take = Math.min(16, d.length - off);
@@ -220,7 +220,7 @@ function cfb(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
-  let feedback = v.slice();
+  let feedback: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
     const ks = encryptBlock(k, feedback);
     const take = Math.min(16, d.length - off);
@@ -248,7 +248,7 @@ export function cryptOFB(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 OFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
-  let state = v.slice();
+  let state: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
     state = encryptBlock(k, state);
     const take = Math.min(16, d.length - off);

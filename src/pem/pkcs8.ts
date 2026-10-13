@@ -17,8 +17,8 @@ import {
   asn1Oid,
   asn1Seq,
   parseDer,
-} from './asn1.ts';
-import { InvalidKeyError } from '../runtime/errors.ts';
+} from './asn1.js';
+import { InvalidKeyError } from '../runtime/errors.js';
 
 /**
  * PrivateKeyInfo 的最小化解析结果。

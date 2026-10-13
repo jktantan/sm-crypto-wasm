@@ -3,7 +3,7 @@
  *
  * 注释约定：中文为主、英文为辅（spec §11）。
  */
-export * from './convert.ts';
-export * from './errors.ts';
-export * from './loadWasm.ts';
-export * from './random.ts';
+export * from './convert.js';
+export * from './errors.js';
+export * from './loadWasm.js';
+export * from './random.js';

@@ -15,9 +15,9 @@
  *
  * spec/plan 对应：plan Task 6/8；spec §6 API、§12.1 Q1（默认 C1C3C2）。
  */
-import { loadWasm } from '@/runtime/loadWasm';
-import { fromBytes, toBytes } from '@/runtime/convert';
-import { randomScalarBelow } from '@/runtime/random';
+import { loadWasm } from '../runtime/loadWasm.js';
+import { fromBytes, toBytes } from '../runtime/convert.js';
+import { randomScalarBelow } from '../runtime/random.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;

@@ -7,8 +7,8 @@
  *
  * spec/plan 对应：plan Task 11；spec §3 算法清单、§6 API。
  */
-import { loadWasm } from '@/runtime/loadWasm';
-import { toBytes } from '@/runtime/convert';
+import { loadWasm } from '../runtime/loadWasm.js';
+import { toBytes } from '../runtime/convert.js';
 
 interface ZucExports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;

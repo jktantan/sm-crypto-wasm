@@ -28,39 +28,32 @@
   "bugs": {
     "url": "https://github.com/jktantan/sm-crypto-wasm/issues"
   },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.js"
     },
     "./sm2": {
       "types": "./dist/sm2/index.d.ts",
-      "import": "./dist/sm2/index.js",
-      "require": "./dist/sm2/index.cjs"
+      "import": "./dist/sm2/index.js"
     },
     "./sm3": {
       "types": "./dist/sm3/index.d.ts",
-      "import": "./dist/sm3/index.js",
-      "require": "./dist/sm3/index.cjs"
+      "import": "./dist/sm3/index.js"
     },
     "./sm4": {
       "types": "./dist/sm4/index.d.ts",
-      "import": "./dist/sm4/index.js",
-      "require": "./dist/sm4/index.cjs"
+      "import": "./dist/sm4/index.js"
     },
     "./sm9": {
       "types": "./dist/sm9/index.d.ts",
-      "import": "./dist/sm9/index.js",
-      "require": "./dist/sm9/index.cjs"
+      "import": "./dist/sm9/index.js"
     },
     "./zuc": {
       "types": "./dist/zuc/index.d.ts",
-      "import": "./dist/zuc/index.js",
-      "require": "./dist/zuc/index.cjs"
+      "import": "./dist/zuc/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -71,16 +64,15 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm clean && pnpm build:wasm:all && pnpm build:ts && pnpm build:bundle",
+    "build": "pnpm clean && pnpm build:wasm:all && pnpm build:ts",
     "build:wasm": "pnpm run build:wasm:sm3",
     "build:wasm:sm3": "asc src/sm3/assembly/index.ts --outFile dist/sm3/sm3.wasm --optimize",
     "build:wasm:sm2": "asc src/sm2/assembly/index.ts --outFile dist/sm2/sm2.wasm --optimize",
     "build:wasm:sm4": "asc src/sm4/assembly/index.ts --outFile dist/sm4/sm4.wasm --optimize",
     "build:wasm:sm9": "asc src/sm9/assembly/index.ts --outFile dist/sm9/sm9.wasm --optimize",
     "build:wasm:zuc": "asc src/zuc/assembly/index.ts --outFile dist/zuc/zuc.wasm --optimize",
-    "build:wasm:all": "pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:zuc",
+    "build:wasm:all": "pnpm run build:wasm:sm2 && pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:zuc",
     "build:ts": "tsc -p tsconfig.build.json",
-    "build:bundle": "rollup -c rollup.config.mjs",
     "clean": "rm -rf dist",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
@@ -92,17 +84,14 @@
     "prepack": "pnpm build && pnpm test"
   },
   "devDependencies": {
-    "@assemblyscript/loader": "^0.28.20",
     "@biomejs/biome": "^2.5.15",
-    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/node": "^26.6.5",
     "assemblyscript": "^0.28.20",
     "fast-check": "^4.10.2",
     "gmkitx": "^0.10.1",
     "happy-dom": "21.0.1",
     "mitata": "^1.0.34",
     "release-it": "^21.1.1",
-    "rollup": "^4.27.4",
-    "rollup-plugin-copy": "^3.5.0",
     "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
