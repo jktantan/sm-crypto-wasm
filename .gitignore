@@ -1,0 +1,30 @@
+# Editor
+.idea/
+.vscode/
+.DS_Store
+
+# Worktree scratch
+.worktrees/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+bench/reports/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Scratch / debug probes（临时探针，不提交）
+tmp-probe/
+/tmp-out.txt
+tmp-*.out
+tmp-*.log
+
+# 第三方参考源码（gmkit 上游，仅本地参考用，不提交）
+view/
+/pnpm-lock.yaml
+/pnpm-workspace.yaml

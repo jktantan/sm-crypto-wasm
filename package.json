@@ -1,0 +1,114 @@
+{
+  "name": "sm-crypto-wasm",
+  "version": "0.1.0",
+  "description": "国密 SM2/SM3/SM4/SM9/ZUC 的 WASM 实现，Node 18+ 与现代浏览器均可使用，按算法分包懒加载。",
+  "description:en": "SM2/SM3/SM4/SM9/ZUC (China crypto) implemented in AssemblyScript -> WASM. Node 18+ & modern browsers, per-algorithm lazy loading.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "sm2",
+    "sm3",
+    "sm4",
+    "sm9",
+    "zuc",
+    "gm",
+    "wasm",
+    "assemblyscript",
+    "国密",
+    "chinese-crypto"
+  ],
+  "homepage": "https://github.com/jktantan/sm-crypto-wasm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jktantan/sm-crypto-wasm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jktantan/sm-crypto-wasm/issues"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./sm2": {
+      "types": "./dist/sm2/index.d.ts",
+      "import": "./dist/sm2/index.js",
+      "require": "./dist/sm2/index.cjs"
+    },
+    "./sm3": {
+      "types": "./dist/sm3/index.d.ts",
+      "import": "./dist/sm3/index.js",
+      "require": "./dist/sm3/index.cjs"
+    },
+    "./sm4": {
+      "types": "./dist/sm4/index.d.ts",
+      "import": "./dist/sm4/index.js",
+      "require": "./dist/sm4/index.cjs"
+    },
+    "./sm9": {
+      "types": "./dist/sm9/index.d.ts",
+      "import": "./dist/sm9/index.js",
+      "require": "./dist/sm9/index.cjs"
+    },
+    "./zuc": {
+      "types": "./dist/zuc/index.d.ts",
+      "import": "./dist/zuc/index.js",
+      "require": "./dist/zuc/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "pnpm clean && pnpm build:wasm:all && pnpm build:ts && pnpm build:bundle",
+    "build:wasm": "pnpm run build:wasm:sm3",
+    "build:wasm:sm3": "asc src/sm3/assembly/index.ts --outFile dist/sm3/sm3.wasm --optimize",
+    "build:wasm:sm2": "asc src/sm2/assembly/index.ts --outFile dist/sm2/sm2.wasm --optimize",
+    "build:wasm:sm4": "asc src/sm4/assembly/index.ts --outFile dist/sm4/sm4.wasm --optimize",
+    "build:wasm:sm9": "asc src/sm9/assembly/index.ts --outFile dist/sm9/sm9.wasm --optimize",
+    "build:wasm:zuc": "asc src/zuc/assembly/index.ts --outFile dist/zuc/zuc.wasm --optimize",
+    "build:wasm:all": "pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:zuc",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build:bundle": "rollup -c rollup.config.mjs",
+    "clean": "rm -rf dist",
+    "test": "vitest run --config vitest.config.ts",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:fuzz": "vitest run --config vitest.config.ts tests/fuzz",
+    "lint": "biome check src tests bench",
+    "format": "biome format --write src tests bench",
+    "typecheck": "tsc --noEmit",
+    "bench": "node --import tsx bench/run.ts",
+    "prepack": "pnpm build && pnpm test"
+  },
+  "devDependencies": {
+    "@assemblyscript/loader": "^0.28.20",
+    "@biomejs/biome": "^2.5.15",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "assemblyscript": "^0.28.20",
+    "fast-check": "^4.10.2",
+    "gmkitx": "^0.10.1",
+    "happy-dom": "21.0.1",
+    "mitata": "^1.0.34",
+    "release-it": "^21.1.1",
+    "rollup": "^4.27.4",
+    "rollup-plugin-copy": "^3.5.0",
+    "tsx": "^4.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
