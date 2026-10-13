@@ -23,6 +23,8 @@ import {
   mul512Debug,
   reduce512Debug,
 } from './field';
+import { JPoint, basePoint, scalarMulG, toAffine, scalarMul } from './point';
+import { computeZ, computeZDefaultId, sign, verify, kdf, encrypt, decrypt } from './crypto';
 
 const pinned: Array<StaticArray<u8>> = [];
 
@@ -79,4 +81,86 @@ export function reduce512Out(aPtr: usize, bPtr: usize, outPtr: usize): void {
   const prod = mul512Debug(read(aPtr), read(bPtr));
   const r = reduce512Debug(prod);
   u256toBytes(r, outPtr);
+}
+
+// ---------- 点运算（供 oracle 验证） ----------
+
+/** 标量乘 G，输出仿射坐标 X || Y（64 字节）。 */
+export function scalarMulGOut(kPtr: usize, outPtr: usize): void {
+  const k = read(kPtr);
+  const r = toAffine(scalarMulG(k));
+  u256toBytes(r.x, outPtr);
+  u256toBytes(r.y, outPtr + 32);
+}
+
+/** 标量乘任意点，输出仿射坐标 X || Y（64 字节）。 */
+export function scalarMulOut(kPtr: usize, pxPtr: usize, pyPtr: usize, outPtr: usize): void {
+  const k = read(kPtr);
+  const p = new JPoint();
+  p.x = read(pxPtr);
+  p.y = read(pyPtr);
+  const z = new StaticArray<u32>(8);
+  z[0] = 1;
+  p.z = z;
+  const r = toAffine(scalarMul(k, p));
+  u256toBytes(r.x, outPtr);
+  u256toBytes(r.y, outPtr + 32);
+}
+
+// ---------- 签名 / 验签 / KDF ----------
+
+/** 计算 Z 值（默认 ID）。 */
+export function computeZOut(pubXPtr: usize, pubYPtr: usize, outPtr: usize): void {
+  computeZDefaultId(pubXPtr, pubYPtr, outPtr);
+}
+
+/** SM2 签名：out = r(32) || s(32)。返回 0 成功，1 需重试。 */
+export function signOut(
+  privPtr: usize, pubXPtr: usize, pubYPtr: usize,
+  msgPtr: usize, msgLen: usize,
+  kPtr: usize, outPtr: usize,
+): i32 {
+  const z = new StaticArray<u8>(32);
+  computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
+  return sign(privPtr, changetype<usize>(z), msgPtr, msgLen, kPtr, outPtr, outPtr + 32);
+}
+
+/** SM2 验签。sigPtr = r || s。返回 1 有效，0 无效。 */
+export function verifyOut(
+  pubXPtr: usize, pubYPtr: usize,
+  msgPtr: usize, msgLen: usize,
+  sigPtr: usize,
+): i32 {
+  const z = new StaticArray<u8>(32);
+  computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
+  return verify(
+    pubXPtr, pubYPtr, changetype<usize>(z), msgPtr, msgLen,
+    sigPtr, sigPtr + 32,
+  );
+}
+
+/** KDF。返回 1 成功，0 表示输出全 0。 */
+export function kdfOut(zPtr: usize, zLen: usize, outPtr: usize, klen: usize): i32 {
+  return kdf(zPtr, zLen, outPtr, klen);
+}
+
+/** 从私钥 d 计算公钥 (x, y)。 */
+export function publicKeyOut(dPtr: usize, outPtr: usize): void {
+  const d = read(dPtr);
+  const p = toAffine(scalarMulG(d));
+  u256toBytes(p.x, outPtr);
+  u256toBytes(p.y, outPtr + 32);
+}
+
+/** SM2 加密：out = C1(65)||C3(32)||C2。返回 1 成功。 */
+export function encryptOut(
+  pubXPtr: usize, pubYPtr: usize, msgPtr: usize, msgLen: usize,
+  kPtr: usize, outPtr: usize,
+): i32 {
+  return encrypt(pubXPtr, pubYPtr, msgPtr, msgLen, kPtr, outPtr);
+}
+
+/** SM2 解密：ctLen = 97 + ml。返回 1 成功（C3 校验过）。 */
+export function decryptOut(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usize): i32 {
+  return decrypt(privPtr, ctPtr, ctLen, outPtr);
 }

@@ -26,5 +26,5 @@ tmp-*.log
 
 # 第三方参考源码（gmkit 上游，仅本地参考用，不提交）
 view/
-/pnpm-lock.yaml
-/pnpm-workspace.yaml
+pnpm-lock.yaml
+pnpm-workspace.yaml
