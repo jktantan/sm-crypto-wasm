@@ -71,7 +71,7 @@
     "build:wasm:sm4": "asc src/sm4/assembly/index.ts --outFile dist/sm4/sm4.wasm --optimize",
     "build:wasm:sm9": "asc src/sm9/assembly/index.ts --outFile dist/sm9/sm9.wasm --optimize",
     "build:wasm:zuc": "asc src/zuc/assembly/index.ts --outFile dist/zuc/zuc.wasm --optimize",
-    "build:wasm:all": "pnpm run build:wasm:sm2 && pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:zuc",
+    "build:wasm:all": "pnpm run build:wasm:sm2 && pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:sm9 && pnpm run build:wasm:zuc",
     "build:ts": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "pretest": "pnpm run build:wasm:all",
