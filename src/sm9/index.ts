@@ -24,7 +24,7 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
-import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem } from '../pem/sm9.js';
+import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem, parseSm9PublicKeyPem } from '../pem/sm9.js';
 import { DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
@@ -38,6 +38,14 @@ interface Sm9Exports extends WebAssembly.Exports {
   readonly encPubOut: (kePtr: number, outPtr: number) => void;
   readonly signDsOut: (ksPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly encDeOut: (kePtr: number, idPtr: number, idLen: number, outPtr: number) => void;
+  readonly sm9VerifyPubOut: (
+    pubPtr: number, idPtr: number, idLen: number, msgPtr: number, msgLen: number, sigPtr: number,
+  ) => number;
+  readonly sm9EncryptPubOut: (
+    pubPtr: number, idPtr: number, idLen: number, msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
+  ) => number;
+  readonly sm9UserEncPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
+  readonly sm9UserSignPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly sm9SignOut: (
     ksPtr: number, idPtr: number, idLen: number,
     msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
@@ -150,6 +158,56 @@ function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Arr
   return b;
 }
 
+/** 主公钥参数归一化：64（加密 G1）或 128（签名 G2）字节点，或 SPKI 主公钥 PEM。 */
+function masterPublicBytes(input: string | Uint8Array, label: string): Uint8Array {
+  if (typeof input === 'string' && input.includes('-----BEGIN')) {
+    const pub = parseSm9PublicKeyPem(input);
+    if (pub.length !== 64 && pub.length !== 128) {
+      throw new InvalidKeyError(
+        `sm9: ${label} 作为 PEM 主公钥必须是 64 或 128 字节，实际 ${pub.length}`,
+      );
+    }
+    return pub;
+  }
+  const b = toBytes(input, label);
+  if (b.length !== 64 && b.length !== 128) {
+    throw new InvalidKeyError(
+      `sm9: ${label} 必须是 64（加密）或 128（签名）字节主公钥，实际 ${b.length}`,
+    );
+  }
+  return b;
+}
+
+/** `verify` / `encrypt` 第一参数的解析结果。 */
+type KeyArg = { kind: 'secret'; bytes: Uint8Array } | { kind: 'public'; bytes: Uint8Array };
+
+/**
+ * 解析 `verify` / `encrypt` 的密钥参数：主私钥（32 字节 / PKCS#8 私钥 PEM）
+ * 或主公钥（`publicLen` 字节点 / SPKI 公钥 PEM）。
+ *
+ * 两者的长度区间不重叠（主私钥恒为 32 字节），因此按长度即可判别。
+ */
+function keyArg(input: string | Uint8Array, publicLen: 64 | 128, label: string): KeyArg {
+  if (typeof input === 'string' && input.includes('-----BEGIN')) {
+    if (input.includes('PUBLIC KEY')) {
+      const pub = parseSm9PublicKeyPem(input);
+      if (pub.length !== publicLen) {
+        throw new InvalidKeyError(
+          `sm9: ${label} 作为 PEM 主公钥应为 ${publicLen} 字节，实际 ${pub.length}`,
+        );
+      }
+      return { kind: 'public', bytes: pub };
+    }
+    return { kind: 'secret', bytes: masterPrivateBytes(input, label) };
+  }
+  const b = toBytes(input, label);
+  if (b.length === 32) return { kind: 'secret', bytes: b };
+  if (b.length === publicLen) return { kind: 'public', bytes: b };
+  throw new InvalidKeyError(
+    `sm9: ${label} 必须是 32 字节主私钥或 ${publicLen} 字节主公钥，实际 ${b.length}`,
+  );
+}
+
 /**
  * 校验字节长度。默认按**密钥支**（`InvalidKeyError`）抛错 —— SM9 各入口的参数绝大多数
  * 是主私钥 / 标量；密文、签名、协议消息的调用点显式传 `'cipher'`。
@@ -200,8 +258,6 @@ export interface Sm9KeyPairOptions {
 
 /**
  * SM9 密钥对（PEM 形态：PKCS#8 私钥 / SPKI 公钥，算法 OID `1.2.156.10197.1.100`）。
- *
- * SM9 的用户"公钥"是 `(id, 主公钥)` 的确定函数、不是独立持有物，故不单独编码。
  */
 export interface Sm9KeyPair {
   /** 主私钥（32 字节标量：签名 ks / 加密 ke）。 */
@@ -210,6 +266,13 @@ export interface Sm9KeyPair {
   masterPublicPem: string;
   /** 用户私钥点：签名 ds（G1，64B）/ 加密 de（G2，128B）。 */
   userPrivatePem: string;
+  /**
+   * 用户公钥点 `Q = [H1(id,hid)]P1|P2 + Ppub`：签名（G2，128B）/ 加密（G1，64B）。
+   *
+   * 它是 `(id, 主公钥)` 的确定函数、不是独立秘密，第三方可用
+   * `getUserPublicKey(masterPublicPem, id)` 自行复算。
+   */
+  userPublicPem: string;
 }
 
 /**
@@ -234,6 +297,7 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
   const idPtr = exports.alloc(idB.length);
   const pubPtr = exports.alloc(128);
   const userPtr = exports.alloc(128);
+  const userPubPtr = exports.alloc(128);
   try {
     putHex(masterHex, masterPtr);
     putBytes(idB, idPtr);
@@ -250,6 +314,12 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
       pubLen = 64;
       userLen = 128;
     }
+    // 用户公钥 Q = [H1(id, hid)]P1|P2 + Ppub —— (id, 主公钥) 的确定函数。
+    if (purpose === 'sign') {
+      exports.sm9UserSignPubOut(pubPtr, idPtr, idB.length, userPubPtr);
+    } else {
+      exports.sm9UserEncPubOut(pubPtr, idPtr, idB.length, userPubPtr);
+    }
     // 调用后重新取 buffer 视图：WASM 内存可能在分配后增长。
     const memView = mem();
     return {
@@ -259,6 +329,9 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
       ),
       userPrivatePem: encodeSm9PrivateKeyPem(
         new Uint8Array(memView.buffer, userPtr, userLen).slice(),
+      ),
+      userPublicPem: encodeSm9PublicKeyPem(
+        new Uint8Array(memView.buffer, userPubPtr, pubLen).slice(),
       ),
     };
   } finally {
@@ -335,32 +408,39 @@ export function sign(
 }
 
 /**
- * SM9 验签。内部用 ks 重新派生 ppubs。
+ * SM9 验签（GM/T 0044 §5）。
+ *
+ * @param publicKey 32 字节签名主私钥（hex / PKCS#8 私钥 PEM），或 128 字节签名主公钥
+ *   `[ks]P2`（点字节 / SPKI 公钥 PEM）—— 后者是 spec §6 里的形态，长度即可区分。
  * @returns true = 通过；false = 拒绝（签错、id 错、msg 错、tampered）
  */
 export function verify(
-  ks: string | Uint8Array,
+  publicKey: string | Uint8Array,
   id: string | Uint8Array,
   msg: string | Uint8Array,
   sig: string | Uint8Array,
 ): boolean {
-  const ksB = masterPrivateBytes(ks, 'ks');
+  const key = keyArg(publicKey, 128, 'publicKey');
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const sigB = toBytes(sig, 'sig');
   requireLen(sigB, 96, 'sig', 'cipher');
 
   const { exports } = getModule();
-  const ksP = exports.alloc(32);
   const idP = exports.alloc(idB.length);
   const msgP = exports.alloc(msgB.length);
   const sigP = exports.alloc(96);
+  const keyP = exports.alloc(key.bytes.length);
   try {
-    putBytes(ksB, ksP);
     putBytes(idB, idP);
     putBytes(msgB, msgP);
     putBytes(sigB, sigP);
-    return exports.sm9VerifyOut(ksP, idP, idB.length, msgP, msgB.length, sigP) === 1;
+    putBytes(key.bytes, keyP);
+    const ok =
+      key.kind === 'public'
+        ? exports.sm9VerifyPubOut(keyP, idP, idB.length, msgP, msgB.length, sigP)
+        : exports.sm9VerifyOut(keyP, idP, idB.length, msgP, msgB.length, sigP);
+    return ok === 1;
   } finally {
     exports.freeAll();
   }
@@ -368,38 +448,79 @@ export function verify(
 
 /**
  * SM9 加密（GM/T 0044 §6）。
- * @param ke  32 字节加密主私钥 hex
+ *
+ * @param publicKey 32 字节加密主私钥（hex / PKCS#8 私钥 PEM），或 64 字节加密主公钥
+ *   `[ke]P1`（点字节 / SPKI 公钥 PEM）—— 后者是 spec §6 里的形态，长度即可区分。
  * @param id  接收方标识
  * @param msg 明文（字符串按 UTF-8；也可传 Uint8Array 或 hex）
  * @param r   32 字节随机数 hex（可选）
  * @returns   密文 hex（C1=65B + C3=32B + C2=|msg|B = 65+32+|msg| 字节）
  */
 export function encrypt(
-  ke: string | Uint8Array,
+  publicKey: string | Uint8Array,
   id: string | Uint8Array,
   msg: string | Uint8Array,
   r?: string | Uint8Array,
 ): string {
-  const keB = masterPrivateBytes(ke, 'ke');
+  const key = keyArg(publicKey, 64, 'publicKey');
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
   requireLen(rB, 32, 'r');
 
   const { exports } = getModule();
-  const keP = exports.alloc(32);
+  const keyP = exports.alloc(key.bytes.length);
   const idP = exports.alloc(idB.length);
   const msgP = exports.alloc(msgB.length);
   const rP = exports.alloc(32);
   const ctP = exports.alloc(4096);
   try {
-    putBytes(keB, keP);
+    putBytes(key.bytes, keyP);
     putBytes(idB, idP);
     putBytes(msgB, msgP);
     putBytes(rB, rP);
-    const ctLen = exports.sm9EncryptOut(keP, idP, idB.length, msgP, msgB.length, rP, ctP);
+    const ctLen =
+      key.kind === 'public'
+        ? exports.sm9EncryptPubOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP)
+        : exports.sm9EncryptOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP);
     if (ctLen < 0) throw new Error('sm9: encrypt 失败');
     return readHex(ctP, ctLen);
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/**
+ * 从主公钥与用户标识推导用户公钥（PEM），第三方无需 KGC 参与即可复算。
+ *
+ * 签名主公钥（128B G2）→ `[H1(id, hid=1)]P2 + Ppub-s`（G2，128B）；
+ * 加密主公钥（64B G1）→ `[H1(id, hid=3)]P1 + Ppub-e`（G1，64B）。
+ *
+ * @param masterPublicKey 主公钥（点字节 / SPKI 公钥 PEM）。
+ * @param id 用户标识。
+ */
+export function getUserPublicKey(
+  masterPublicKey: string | Uint8Array,
+  id: string | Uint8Array,
+): string {
+  const pub = masterPublicBytes(masterPublicKey, 'masterPublicKey');
+  const idB = toBytes(id, 'id');
+  if (idB.length === 0) throw new RangeError('sm9.getUserPublicKey: 用户标识不能为空');
+  const { exports } = getModule();
+  const pubP = exports.alloc(pub.length);
+  const idP = exports.alloc(idB.length);
+  const userPubPtr = exports.alloc(128);
+  try {
+    putBytes(pub, pubP);
+    putBytes(idB, idP);
+    if (pub.length === 128) {
+      exports.sm9UserSignPubOut(pubP, idP, idB.length, userPubPtr);
+    } else {
+      exports.sm9UserEncPubOut(pubP, idP, idB.length, userPubPtr);
+    }
+    return encodeSm9PublicKeyPem(
+      new Uint8Array(mem().buffer, userPubPtr, pub.length).slice(),
+    );
   } finally {
     exports.freeAll();
   }

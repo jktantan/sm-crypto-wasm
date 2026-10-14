@@ -87,3 +87,51 @@ describe('SM9 generateKeyPair', () => {
     expect(sm9.verify(kp.masterPrivatePem, weirdId, msg, sig)).toBe(true);
   });
 });
+
+/**
+ * 主公钥形态：`verify` / `encrypt` 的密钥参数既接受主私钥（沿用旧形态），
+ * 也接受主公钥（PEM 或点字节）—— 后者是 spec §6 里写的那一种。
+ */
+describe('SM9 主公钥支持', () => {
+  beforeAll(async () => {
+    await sm9.ensureLoaded();
+  });
+
+  it('verify 接受主公钥 PEM 与点字节，结果与主私钥一致', async () => {
+    const kp = await sm9.generateKeyPair({ id: 'alice@foo.com' });
+    const msg = new Uint8Array([1, 2, 3]);
+    const sig = sm9.sign(kp.masterPrivatePem, 'alice@foo.com', msg);
+
+    expect(sm9.verify(kp.masterPublicPem, 'alice@foo.com', msg, sig)).toBe(true);
+    expect(
+      sm9.verify(parseSm9PublicKeyPem(kp.masterPublicPem), 'alice@foo.com', msg, sig),
+    ).toBe(true);
+  });
+
+  it('verify 用别的密钥对的主公钥返回 false', async () => {
+    const a = await sm9.generateKeyPair({ id: 'same@x.io' });
+    const b = await sm9.generateKeyPair({ id: 'same@x.io' });
+    const msg = new Uint8Array([1]);
+    const sig = sm9.sign(a.masterPrivatePem, 'same@x.io', msg);
+    expect(sm9.verify(b.masterPublicPem, 'same@x.io', msg, sig)).toBe(false);
+  });
+
+  it('encrypt 接受加密主公钥 PEM', async () => {
+    const kp = await sm9.generateKeyPair({ id: 'bob@bar.com', purpose: 'enc' });
+    const ct = sm9.encrypt(kp.masterPublicPem, 'bob@bar.com', new Uint8Array([9, 9]));
+    expect(sm9.decrypt(kp.masterPrivatePem, 'bob@bar.com', ct)).toBe('0909');
+  });
+
+  it('generateKeyPair 产出 userPublicPem（签名 G2 128B / 加密 G1 64B）', async () => {
+    const signKp = await sm9.generateKeyPair({ id: 'carol@x.io' });
+    expect(parseSm9PublicKeyPem(signKp.userPublicPem).length).toBe(128);
+
+    const encKp = await sm9.generateKeyPair({ id: 'carol@x.io', purpose: 'enc' });
+    expect(parseSm9PublicKeyPem(encKp.userPublicPem).length).toBe(64);
+  });
+
+  it('用户公钥可由第三方从 (id, 主公钥) 复算', async () => {
+    const kp = await sm9.generateKeyPair({ id: 'erin@x.io', purpose: 'enc' });
+    expect(sm9.getUserPublicKey(kp.masterPublicPem, 'erin@x.io')).toBe(kp.userPublicPem);
+  });
+});

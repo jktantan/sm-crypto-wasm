@@ -21,7 +21,7 @@ import {
   Fp12, fp12zero, fp12Mul, fp12Sqr, fp12Inv, fp12Pow,
 } from './fp12';
 import {
-  G1, g1Generator, g1MulG, g1ToAffine,
+  G1, g1Add, g1Generator, g1MulG, g1ToAffine,
   G2, g2Generator, g2MulG, g2ToAffine, g2Double, g2Add, g2AddFull,
 } from './point';
 import { sm9Pairing, millerLoop, millerStepT, millerStepF, evalGTangent, evalGLine, twistPi1, twistPi2, twistNegPi2, finalExponent } from './pairing';
@@ -403,6 +403,40 @@ export function encPubOut(kePtr: usize, outPtr: usize): void {
   const r = g1ToAffine(encMasterPublic(readU256(kePtr)));
   u256toBytes(r.X, outPtr);
   u256toBytes(r.Y, outPtr + 32);
+}
+
+// ---------- 主公钥形态入口（spec §6：verify / encrypt 直接吃主公钥） ----------
+
+/** 用签名主公钥（G2 仿射 128B）验签。通过返回 1。 */
+export function sm9VerifyPubOut(
+  pubPtr: usize, idPtr: usize, idLen: i32, msgPtr: usize, msgLen: i32, sigPtr: usize,
+): i32 {
+  return sm9Verify(readG2Affine(pubPtr), idPtr, idLen, msgPtr, msgLen, sigPtr);
+}
+
+/** 用加密主公钥（G1 仿射 64B）加密。返回密文总长度。 */
+export function sm9EncryptPubOut(
+  pubPtr: usize, idPtr: usize, idLen: i32, msgPtr: usize, msgLen: i32, rPtr: usize, outPtr: usize,
+): i32 {
+  return sm9Encrypt(readG1Affine(pubPtr), idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr);
+}
+
+/** 用户加密公钥 Q = [H1(id, hid=3)]P1 + Ppub-e（G1 仿射 64B）。输入加密主公钥 64B。 */
+export function sm9UserEncPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  const ppube = readG1Affine(pubPtr);
+  const t = hash1(readBytes(idPtr, idLen), idLen, 3);
+  const r = g1ToAffine(g1Add(g1MulG(t), ppube));
+  u256toBytes(r.X, outPtr);
+  u256toBytes(r.Y, outPtr + 32);
+}
+
+/** 用户签名公钥 Q = [H1(id, hid=1)]P2 + Ppub-s（G2 仿射 128B）。输入签名主公钥 128B。 */
+export function sm9UserSignPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  const ppubs = readG2Affine(pubPtr);
+  const t = hash1(readBytes(idPtr, idLen), idLen, 1);
+  const r = g2ToAffine(g2Add(g2MulG(t), ppubs));
+  writeFp2(r.X, outPtr);
+  writeFp2(r.Y, outPtr + 64);
 }
 
 function readBytes(ptr: usize, len: i32): StaticArray<u8> {

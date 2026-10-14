@@ -365,3 +365,27 @@ GREEN；全量套件 112/112。
 - `Ruling:` helper 按"参数角色"命名而非"看起来像不像 PEM"。理由：Task 4 要加主公钥
   PEM 支持，届时新增 `masterPublicBytes` 即可，`toBytes` 不必再改第二次。
   代价：多一层 helper 间接。
+
+### Task 4 — SM9 主公钥支持 + userPublicPem（含 wasm 改动）
+
+- wasm（`src/sm9/assembly/index.ts`）新增 4 个导出，全部是对既有函数的薄封装：
+  - `sm9VerifyPubOut`：用签名主公钥（G2 仿射）验签；
+  - `sm9EncryptPubOut`：用加密主公钥（G1 仿射）加密；
+  - `sm9UserEncPubOut`：`Q = [H1(id,hid=3)]P1 + Ppub-e`；
+  - `sm9UserSignPubOut`：`Q = [H1(id,hid=1)]P2 + Ppub-s`。
+  只新增导出、未改既有导出；`sm9.wasm` 已重编（输出仅余既有的 AS201 警告）。
+- TS 层：
+  - `keyArg()` 让 `verify` / `encrypt` 的密钥参数同时接受主私钥（32B / PKCS#8）与
+    主公钥（点字节 / SPKI）—— 两者长度不重叠（32 vs 64/128），按长度判别即可；
+  - `generateKeyPair` 增出 `userPublicPem`；新增 `getUserPublicKey(masterPublicKey, id)`
+    供第三方自行复算。
+- 测试：`tests/sm9-keys.spec.ts` 新增 5 条 → 14/14；全量 → 20 文件 144/144 pass。
+- `Ruling:` 签名场景也产出 `userPublicPem`（`[H1(id,hid=1)]P2 + Ppub-s`），即使 SM9
+  验签本身不需要它。理由：plan 要求四件套形状固定，且该点数学上良定义；只给 enc 返回
+  会让 `purpose: 'sign'` 的形状与 enc 不同。代价：该字段在签名场景是"便利信息"，
+  并非标准定义的对象。
+- `Ruling:` 主公钥用**长度**判别而不是新增显式参数。理由：spec §6 的形态就是"同一位置
+  传主私钥或主公钥"，加参数会破坏它；长度区间不重叠使判别无歧义。代价：若将来出现
+  32 字节的主公钥（SM9 里不存在），需换判别方式。
+- `Ruling:` wasm 只加薄封装、不动既有函数。理由：既有导出的行为已被 KAT 向量钉住，
+  改它们的风险大于收益。代价：wasm 多 4 个仅供 TS 层调用的入口。
