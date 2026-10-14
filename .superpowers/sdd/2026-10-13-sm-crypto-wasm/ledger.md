@@ -262,3 +262,44 @@ GREEN；全量套件 112/112。
   "摘要类除外"；#3 / #4 / #5 标注现状（#4 的 `safeMode` 选项仍未实现）。
 - `Ruling:` 只加注、不改写 plan 的表格原文。理由：plan 是当时批准的记录，改原文会让
   "当时怎么定的、现在怎么做的"这条线索断掉。代价：读表的人要读表下的注记。
+
+---
+
+## Final review（P2 批次）
+
+`Final review: self-review (no subagent tool)` —— 审查范围 `de6647c..HEAD`
+（4 个实现/文档提交），按 `requesting-code-review/code-reviewer.md` 的清单自查。
+
+### Strengths
+
+- 每条修复都先写了会失败的测试：空输入 2 条、错误类型 4 条、公钥合法性 5 条。
+- `isOnCurve` 带**对照用例**（真公钥仍能 encrypt / verify 通过）—— 没有它，公式写错
+  也会"全部通过"（坏点被拒的原因可能只是公式恒 false）。
+- 错误类型只做增量收紧：`DecryptionError` / `InvalidPublicKeyError` 分别继承
+  `SmCryptoError` / `InvalidKeyError`，既有的 `instanceof` 捕获路径不受影响。
+
+### Issues
+
+- **Critical**：无。
+- **Important**：无。
+- **Minor（deferred）**：
+  - `InvalidCiphertextError` 与 `NotImplementedError` 至今没有任何代码抛出 —— 调用方
+    catch 它们会永远落空。（`NotImplementedError` 情有可原：已过 stub 阶段。
+    `InvalidCiphertextError` 本可用于"密文长度 / 结构错"，但按 `errors.ts` 的约定
+    那类保留了 `RangeError`。）
+  - `sm9.kemDecrypt` 的失败仍是裸 `Error`（Task 2 的 ruling）。
+  - `hash('')` 由抛错改为返回摘要是**破坏性**变更 —— 已在 spec §14 与 plan 注记里说明。
+
+### Fix pass
+
+`Final: fixed 重复 import` —— `src/sm9/index.ts` 中两行同源 `../runtime/errors.js`
+合并为一行（本批次我自己引入的瑕疵，零风险）。验证：`npx tsc --noEmit` +
+`tests/{sm9-keys,errors}.spec.ts` → 14/14 仍绿；纯导入整理，无新增测试。
+
+### Declined to judge
+
+- `InvalidKeyError.name` 类型由字面量放宽为 `string` —— 裁决：要让子类能覆盖 `name`
+  必须如此，运行时字符串未变、无行为影响，保留。
+- `sm2.encrypt` 现在会拒绝以前"能跑通"的坏公钥 —— 裁决：这正是加强校验的目的，保留。
+- sm9 的 `kemDecrypt` 与 exchange 状态机仍抛裸 `Error` —— 裁决：超出本轮 P2 清单
+  （用户只选了空输入、错误类型、公钥校验三条），保留。

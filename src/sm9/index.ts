@@ -25,8 +25,7 @@
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem } from '../pem/sm9.js';
-import { InvalidKeyError } from '../runtime/errors.js';
-import { DecryptionError } from '../runtime/errors.js';
+import { DecryptionError, InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
