@@ -109,9 +109,28 @@ function lLinearKey(b: u32): u32 {
   return (b ^ rotl(b, 13) ^ rotl(b, 23)) & 0xffffffff;
 }
 
-/** 合成变换 T（加密轮）。 */
-function tTransform(x: u32): u32 {
-  return lLinear(tau(x));
+// ---------- T-table（S 盒 + L 变换合并） ----------
+//
+// 一轮是 X_{i+4} = X_i ^ L(τ(X_{i+1}^X_{i+2}^X_{i+3}^rk_i))。L 在 GF(2) 上是线性的，
+// 而 τ 只是逐字节查盒，于是可以把它拆开预计算：
+//   L(τ(t)) = T0[t>>>24] ^ T1[(t>>>16)&0xff] ^ T2[(t>>>8)&0xff] ^ T3[t&0xff]
+//   Ti[j] = L(S[j] << (24-8i))
+// 轮函数因此从"4 次逐字节查表 + 重组 + 4 次 rotl + 4 次 xor"降到 4 次 32-bit
+// 查表 + 3 次 xor。表共 4 KB，仍在 L1 内；从 SBOX 在模块初始化时生成，不手写常量。
+//
+// 密钥扩展用另一套线性变换 L'，量级只有加密轮的 ~1/65（每次调用 32 轮 vs 每块 32 轮），
+// 故保持原样，不额外占 4 KB 表。
+const T0: usize = heap.alloc(256 * 4);
+const T1: usize = heap.alloc(256 * 4);
+const T2: usize = heap.alloc(256 * 4);
+const T3: usize = heap.alloc(256 * 4);
+for (let i = 0; i < 256; i++) {
+  const s = <u32>load<u8>(SBOX + i);
+  const o = (<usize>i) << 2;
+  store<u32>(T0 + o, lLinear(s << 24));
+  store<u32>(T1 + o, lLinear(s << 16));
+  store<u32>(T2 + o, lLinear(s << 8));
+  store<u32>(T3 + o, lLinear(s));
 }
 
 /** 合成变换 T'（密钥扩展）。 */
@@ -156,11 +175,18 @@ function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
   let x2 = readU32BE(inPtr + 8);
   let x3 = readU32BE(inPtr + 12);
   for (let i = 0; i < 32; i++) {
-    const t = (x0 ^ tTransform(x1 ^ x2 ^ x3 ^ load<u32>(rk + ((<usize>i) << 2)))) & 0xffffffff;
+    const t = (x1 ^ x2 ^ x3 ^ load<u32>(rk + ((<usize>i) << 2))) & 0xffffffff;
+    // L(τ(t)) 由 4 张预计算表合成，省掉逐字节查盒后的重组与单独的 L 变换。
+    const k0: usize = (<usize>((t >>> 24) & 0xff)) << 2;
+    const k1: usize = (<usize>((t >>> 16) & 0xff)) << 2;
+    const k2: usize = (<usize>((t >>> 8) & 0xff)) << 2;
+    const k3: usize = (<usize>(t & 0xff)) << 2;
+    const tt = load<u32>(T0 + k0) ^ load<u32>(T1 + k1) ^ load<u32>(T2 + k2) ^ load<u32>(T3 + k3);
+    const n = (x0 ^ tt) & 0xffffffff;
     x0 = x1;
     x1 = x2;
     x2 = x3;
-    x3 = t;
+    x3 = n;
   }
   // 输出反序：X35..X32 即最后的 x3..x0。
   writeU32BE(outPtr, x3);

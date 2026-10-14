@@ -43,12 +43,12 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 |---|---|---|---|---|
 | SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs（1 KB） | 快 1.4× |
 | SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 快 1.2× |
-| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs（1 KB） | 快 1.5× |
-| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | 快 1.5× |
-| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | 快 1.1× |
-| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | 快 1.4× |
-| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | 快 1.3× |
-| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | 快 5.2× |
+| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs（1 KB） | 快 1.7× |
+| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | 快 1.6× |
+| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | 快 1.4× |
+| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | 快 1.4× |
+| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | 快 1.6× |
+| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | 快 5.0× |
 | SM2 | 密钥对生成 | 172 µs | — | — |
 | SM2 | 公钥派生 | 115 µs | 154 µs | 快 1.3× |
 | SM2 | 签名 64 B | 300 µs | 347 µs | 快 1.2× |
@@ -76,6 +76,11 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 - **SM4 的 CFB / OFB 曾比纯 JS 慢 1.4~1.5×**：这两种模式原先在 TS 侧逐块调用
   wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
   同款的批量导出后降到 24 µs 一带，反过来快 1.3~1.4×；
+- **SM4 轮函数用 T-table**（把 S 盒与 L 变换合成 4 张 256×32-bit 表，从 SBOX 在
+  模块初始化时生成）：只拿到 8~10% 的提升，因为瓶颈不在 ALU 而在**每轮 4 次查表的
+  内存访问**——原实现与 T-table 的查表次数一样。这也解释了为什么追不上 C：同机
+  SM4-ECB 64 KB，OpenSSL 372 µs 而本库 1.25 ms，它靠 ARMv8 的 `SM4E` 指令用电路
+  做 S 盒、**根本不查表**，而 WebAssembly 不暴露该指令集（只给通用 SIMD）；
 - **SM9 没有可比实现**（纯 JS 生态普遍如此，pairing 在纯 JS 里成本过高），故只给
   本库的绝对耗时；
 - **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
@@ -369,12 +374,12 @@ left as `—`**. Measured on Apple M4 / Node 26.7 / macOS 27, reproducible with
 |---|---|---|---|---|
 | SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | 1.4× faster |
 | SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 1.2× faster |
-| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs (1 KB) | 1.5× faster |
-| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | 1.5× faster |
-| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | 1.1× faster |
-| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | 1.4× faster |
-| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | 1.3× faster |
-| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | 5.2× faster |
+| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs (1 KB) | 1.7× faster |
+| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | 1.6× faster |
+| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | 1.4× faster |
+| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | 1.4× faster |
+| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | 1.6× faster |
+| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | 5.0× faster |
 | SM2 | generateKeyPair | 172 µs | — | — |
 | SM2 | public key derive | 115 µs | 154 µs | 1.3× faster |
 | SM2 | sign 64 B | 300 µs | 347 µs | 1.2× faster |
@@ -403,6 +408,14 @@ Notes:
   were driven block-by-block from the TS side (alloc + call + copy back every 16
   bytes — 64 wasm crossings per KB). With the same batched export CBC/CTR already
   had, they now land at ~24 µs, i.e. **1.3–1.4× faster** than the reference;
+- **SM4's round function now uses T-tables** (S-box and L transform merged into four
+  256×32-bit tables, generated from SBOX at module init): this bought only 8–10%,
+  because the bottleneck is not ALU work but the **four table lookups per round** —
+  the old code and the T-table version perform the same number of lookups. It also
+  explains the remaining gap to C: on the same machine, SM4-ECB over 64 KB takes
+  372 µs in OpenSSL versus 1.25 ms here. OpenSSL uses ARMv8's `SM4E` instruction to
+  implement the S-box in circuitry with **no table lookup at all**, and WebAssembly
+  does not expose that instruction set (only generic SIMD);
 - **SM9 has no comparable implementation** (as usual for pure JS, where pairing is
   prohibitively expensive), so only this library's absolute timings are given;
 - **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
@@ -739,12 +752,12 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 |---|---|---|---|---|
 | SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | в 1.4× быстрее |
 | SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | в 1.2× быстрее |
-| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs (1 KB) | в 1.5× быстрее |
-| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | в 1.5× быстрее |
-| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | в 1.1× быстрее |
-| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | в 1.4× быстрее |
-| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | в 1.3× быстрее |
-| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | в 5.2× быстрее |
+| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs (1 KB) | в 1.7× быстрее |
+| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | в 1.6× быстрее |
+| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | в 1.4× быстрее |
+| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | в 1.4× быстрее |
+| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | в 1.6× быстрее |
+| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | в 5.0× быстрее |
 | SM2 | generateKeyPair | 172 µs | — | — |
 | SM2 | вывод открытого ключа | 115 µs | 154 µs | в 1.3× быстрее |
 | SM2 | подпись 64 B | 300 µs | 347 µs | в 1.2× быстрее |
@@ -773,6 +786,14 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   вызывались поблочно со стороны TS (alloc + вызов + копирование на каждые 16 байт —
   64 пересечения границы на 1 KB). С тем же пакетным экспортом, что уже был у CBC/CTR,
   они теперь ~24 µs, то есть **в 1.3–1.4× быстрее** аналога;
+- **Раундовая функция SM4 теперь использует T-таблицы** (S-блок и L-преобразование
+  слиты в четыре таблицы 256×32 бита, генерируемые из SBOX при инициализации модуля):
+  это дало лишь 8–10%, потому что узкое место — не ALU, а **четыре обращения к таблицам
+  за раунд** (старый код и вариант с T-таблицами делают одинаковое число обращений).
+  Это же объясняет оставшийся разрыв с C: на той же машине SM4-ECB 64 KB занимает 372 µs
+  в OpenSSL против 1.25 ms здесь. OpenSSL использует инструкцию ARMv8 `SM4E`, реализующую
+  S-блок схемой **вообще без обращений к таблицам**, а WebAssembly этого набора инструкций
+  не предоставляет (только общий SIMD);
 - **У SM9 нет сопоставимой реализации** (обычная ситуация для чистого JS, где
   спаривания запредельно дороги), поэтому приведены только абсолютные времена
   этой библиотеки;
