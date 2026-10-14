@@ -150,10 +150,26 @@ export function zucMac(
  * 密钥流重复使用是机密性事故（同密钥流异或两条明文即泄露异或值），
  * 因此加密路径显式拒绝复用，而不是静默放行。
  */
-const usedNonces = new Set<string>();
+const usedNonces = new Map<string, true>();
+
+/**
+ * 复用记录的容量上限。超出后按 FIFO 淘汰最旧一条 —— 记录必须有界，
+ * 否则长生命周期进程里这张表会无界增长（每条记录约 100 字符）。
+ */
+const REUSE_GUARD_CAPACITY = 4096;
 
 function nonceId(k: Uint8Array, v: Uint8Array, counter: number): string {
   return `${bytesToHex(k)}:${bytesToHex(v)}:${counter}`;
+}
+
+/** 记录一条已用过的 (key, iv, counter)，超出容量时淘汰最旧一条。 */
+function rememberNonce(id: string): void {
+  usedNonces.set(id, true);
+  while (usedNonces.size > REUSE_GUARD_CAPACITY) {
+    const oldest = usedNonces.keys().next();
+    if (oldest.done) break;
+    usedNonces.delete(oldest.value);
+  }
 }
 
 /** 清空 (key, iv, counter) 复用记录。仅供测试与明确的密钥轮换场景使用。 */
@@ -200,7 +216,7 @@ export function zucEncrypt(
     );
   }
   const out = xorKeystream(k, v, data);
-  usedNonces.add(id);
+  rememberNonce(id);
   return out;
 }
 

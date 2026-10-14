@@ -112,4 +112,19 @@ describe('ZUC (key, iv, counter) reuse guard', () => {
     const ct = zucEncrypt(k, iv, msg);
     expect(Buffer.from(zucDecrypt(k, iv, ct)).toString('hex')).toBe('01020304');
   });
+
+  it('keeps the guard bounded — the oldest entry is evicted, recent ones still protected', () => {
+    const k = randomBytes(16);
+    const iv = randomBytes(16);
+    const one = new Uint8Array([1]);
+
+    zucEncrypt(k, iv, one, 0);
+    // 越过上限，把 counter=0 挤出窗口。
+    for (let i = 1; i <= 4096; i++) zucEncrypt(k, iv, one, i);
+
+    // 最旧的一条已被淘汰：可再次使用。
+    expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 0)).not.toThrow();
+    // 最近的一条仍在保护中。
+    expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 4096)).toThrow(/复用/);
+  });
 });

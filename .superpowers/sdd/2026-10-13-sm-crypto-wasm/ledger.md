@@ -151,3 +151,45 @@ dispatch. See spec §12.1 Q3.
 - `Ruling:` 不改写 spec 的历史决策章节（§4 工程栈的 rollup、§5 的 ESM+CJS 双产物），
   只在 §14 记录"实际走 `asc` + `tsc` 单产物"。理由：spec 是已批准的决策记录，改历史
   会让 plan/spec 的对照失去意义。代价：读 §4/§5 的人要读到 §14 才知道现状。
+
+---
+
+## Final review
+
+`Final review: self-review (no subagent tool)` —— 审查范围 `01d466d..HEAD`（5 个提交，
+15 文件 +1021/-49），按 `requesting-code-review/code-reviewer.md` 的清单自查。
+
+### Strengths
+
+- 每个新能力都先写了会失败的测试：EIA3 用 GM/T 0001.3-2012 三组官方向量
+  （1 / 577 / 5670 bit，覆盖非整字节），复用保护用随机 key 避免用例互相污染；
+- C1C2C3 的重排留在 TS 层，wasm 里已验证的曲线 / pairing 代码一行未动；
+- 别名用 `toBe` 钉住"同一函数引用"，避免日后悄悄漂移。
+
+### Issues
+
+- **Important**：`src/zuc/index.ts` 的复用记录用 `Set` 且无上限 —— 长生命周期进程里
+  会无界增长（每条约 100 字符）。已进入 fix pass。
+- Minor（deferred，见下）。
+
+### Fix pass
+
+`Final: fixed 复用记录无界增长` —— 新增测试
+"keeps the guard bounded — the oldest entry is evicted, recent ones still protected"
+先 RED（旧实现不淘汰），改成 `Map` + FIFO 淘汰（上限 `REUSE_GUARD_CAPACITY = 4096`）后
+GREEN；全量套件 112/112。
+
+### Deferred minors
+
+- `eia3Iv`（COUNT/BEARER/DIRECTION → 16 字节 IV）目前只存在于测试里，调用方要自己拼
+  比特布局；可考虑导出成 `zucEia3Iv()`。
+- `zucDecrypt` 的 `counter` 参数被忽略（`void counter`），仅为与 `zucEncrypt` 签名对称。
+- `generateKeyPair` 产出的 PEM 是明文 PKCS#8（与 SM2 一致；spec 未要求加密私钥）。
+
+### Declined to judge（自查时列出并裁决的项）
+
+- `zucEncrypt` 变成有状态 API（同 (key,iv,counter) 二次加密抛错）—— 裁决：按 plan
+  Review Focus #5 保留；0.1.0 尚未发布，破坏性可控，代价已记在 Task 1 的 ruling 里。
+- `sm2.decrypt` 的 auto 模式会为错误密文多跑一次解密 —— 裁决：常数级开销，
+  换来"无需外部提示即可识别两种顺序"，保留。
+- spec §4/§5 与 §13 与实际的 rollup / CJS 差异 —— 裁决：已写入 spec §14，不再改历史章节。
