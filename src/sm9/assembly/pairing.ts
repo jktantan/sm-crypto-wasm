@@ -33,10 +33,12 @@ import {
   fp12Inv,
   fp12Mul,
   fp12MulLine,
+  fp12MulLineTo,
   fp12one,
   fp12Pow,
   fp12PowSmall,
   fp12Sqr,
+  fp12SqrTo,
   fp12zero,
 } from './fp12';
 import { G1, G2, g2Add, g2AddFull, g2Copy, g2Double } from './point';
@@ -347,18 +349,18 @@ for (let i = 0; i < ABITS_LEN; i++) ABITS_BITS[i] = ABITS.charCodeAt(i) - 0x30;
  */
 export function millerLoop(Q: G2, P: G1): Fp12 {
   let T = g2Copy(Q);
-  let f = fp12one();
+  const f = fp12one();
 
   for (let i = 0; i < ABITS_LEN; i++) {
-    f = fp12Sqr(f);
+    fp12SqrTo(f, f);
     evalGTangentInto(T, P);
-    f = fp12MulLine(f, L_A0, L_A1, L_A4);
+    fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
 
     T = g2Double(T);
 
     if (ABITS_BITS[i] === 1) {
       evalGLineInto(T, Q, P);
-      f = fp12MulLine(f, L_A0, L_A1, L_A4);
+      fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
       T = g2Add(T, Q);
     }
   }
@@ -367,11 +369,11 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
   const Q2 = twistNegPi2(Q);
 
   evalGLineInto(T, Q1, P);
-  f = fp12MulLine(f, L_A0, L_A1, L_A4);
+  fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
   T = g2AddFull(T, Q1);
 
   evalGLineInto(T, Q2, P);
-  f = fp12MulLine(f, L_A0, L_A1, L_A4);
+  fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
   T = g2AddFull(T, Q2);
 
   return f;

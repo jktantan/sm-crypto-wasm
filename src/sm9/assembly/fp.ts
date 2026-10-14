@@ -8,12 +8,17 @@
 
 import {
   modAdd,
+  modAddInto,
   modHalve,
+  modHalveInto,
   modInv,
   modMul,
+  modMulInto,
   modPow,
   modSqr,
+  modSqrInto,
   modSub,
+  modSubInto,
   U256,
   u256clone,
   u256fromHex,
@@ -54,6 +59,31 @@ export function nArr(): U256 {
 /** SM9 素域加：(a + b) mod p。 */
 export function fpAdd(a: U256, b: U256): U256 {
   return modAdd(a, b, pArr());
+}
+
+/** 原地：(a + b) mod p → out（供扩域层 To 算子用，零分配）。 */
+export function fpAddTo(out: U256, a: U256, b: U256): void {
+  modAddInto(out, a, b, pArr());
+}
+
+/** 原地：(a - b) mod p → out。 */
+export function fpSubTo(out: U256, a: U256, b: U256): void {
+  modSubInto(out, a, b, pArr());
+}
+
+/** 原地：(a · b) mod p → out。 */
+export function fpMulTo(out: U256, a: U256, b: U256): void {
+  modMulInto(out, a, b, pArr());
+}
+
+/** 原地：a² mod p → out。 */
+export function fpSqrTo(out: U256, a: U256): void {
+  modSqrInto(out, a, pArr());
+}
+
+/** 原地：(a / 2) mod p → out。 */
+export function fpDiv2To(out: U256, a: U256): void {
+  modHalveInto(out, a, pArr());
 }
 
 /** SM9 素域减。 */

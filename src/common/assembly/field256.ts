@@ -180,6 +180,57 @@ export function modAdd(a: U256, b: U256, m: U256): U256 {
   return r;
 }
 
+/**
+ * out = (a + b) mod m（原地变体，允许 out 与 a / b 别名）。
+ *
+ * 供 fp2 / fp4 层的 `*To` 算子使用：整条扩域运算链不再产生逐次的
+ * `new StaticArray<u32>(8)`，这是 pairing 里分配压力的主要来源。
+ */
+export function modAddInto(out: U256, a: U256, b: U256, m: U256): void {
+  let carry: u64 = 0;
+  for (let i = 0; i < 8; i++) {
+    const s: u64 = u64(a[i]) + u64(b[i]) + carry;
+    out[i] = <u32>(s & 0xffffffff);
+    carry = s >>> 32;
+  }
+  if (carry !== 0 || u256cmp(out, m) >= 0) {
+    let borrow: i64 = 0;
+    for (let i = 0; i < 8; i++) {
+      const d: i64 = i64(out[i]) - i64(m[i]) - borrow;
+      if (d < 0) {
+        out[i] = <u32>(d + 0x100000000);
+        borrow = 1;
+      } else {
+        out[i] = <u32>d;
+        borrow = 0;
+      }
+    }
+  }
+}
+
+/** out = (a - b) mod m（原地变体，允许 out 与 a / b 别名）。 */
+export function modSubInto(out: U256, a: U256, b: U256, m: U256): void {
+  let borrow: i64 = 0;
+  for (let i = 0; i < 8; i++) {
+    const d: i64 = i64(a[i]) - i64(b[i]) - borrow;
+    if (d < 0) {
+      out[i] = <u32>(d + 0x100000000);
+      borrow = 1;
+    } else {
+      out[i] = <u32>d;
+      borrow = 0;
+    }
+  }
+  if (borrow !== 0) {
+    let c: u64 = 0;
+    for (let i = 0; i < 8; i++) {
+      const s: u64 = u64(out[i]) + u64(m[i]) + c;
+      out[i] = <u32>(s & 0xffffffff);
+      c = s >>> 32;
+    }
+  }
+}
+
 /** (a - b) mod m。要求 a、b < m。 */
 export function modSub(a: U256, b: U256, m: U256): U256 {
   const r = u256clone(a);
@@ -190,8 +241,7 @@ export function modSub(a: U256, b: U256, m: U256): U256 {
   return r;
 }
 
-/** a(8) × b(8) → 512-bit(16)，学校算法。 */
-export function mul512(a: U256, b: U256): U512 {
+/** a(8) × b(8) → 512-bit(16)，学校算法。 */export function mul512(a: U256, b: U256): U512 {
   const r = new StaticArray<u32>(16);
   for (let i = 0; i < 16; i++) r[i] = 0;
   for (let i = 0; i < 8; i++) {
@@ -372,6 +422,27 @@ export function modMul(a: U256, b: U256, m: U256): U256 {
 }
 
 /**
+ * out = (a · b) mod m（原地变体，允许 out 与 a / b 别名）。
+ *
+ * 读 a / b 只发生在 mul512Into 阶段、结果落在 MUL_X；写 out 在归约末尾，
+ * 因此 out 与任一入参共享内存都安全。
+ */
+export function modMulInto(out: U256, a: U256, b: U256, m: U256): void {
+  mul512Into(a, b, MUL_X);
+  const mu = barrettMu(m);
+  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
+  else reduce512Into(MUL_X, m, out);
+}
+
+/** out = a² mod m（原地变体，允许 out 与 a 别名）。 */
+export function modSqrInto(out: U256, a: U256, m: U256): void {
+  sqr512Into(a, MUL_X);
+  const mu = barrettMu(m);
+  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
+  else reduce512Into(MUL_X, m, out);
+}
+
+/**
  * a² mod m。平方特化：对角项 a_i·a_i 只算一次，交叉项 a_i·a_j（i<j）只算一次再
  * 翻倍进位——比通用 modMul(a,a) 少 20 个 32×32 部分积（64 → 36+加法）。
  * 归约路径与 modMul 一致（Barrett / 长除法）。
@@ -540,6 +611,35 @@ export function modHalve(a: U256, m: U256): U256 {
     u256addRaw(r, half); // r + (m+1)/2 ≤ (a-1)/2 + (m+1)/2 < m，不会溢出
   }
   return r;
+}
+
+const HALF_TMP = new StaticArray<u32>(8); // modHalveInto 的 (m>>1) 暂存
+const HALF_ONE = new StaticArray<u32>(8);
+HALF_ONE[0] = 1;
+
+/** out = a / 2 mod m（原地变体，允许 out 与 a 别名）。 */
+export function modHalveInto(out: U256, a: U256, m: U256): void {
+  const odd = u256isOdd(a);
+  let carry: u32 = 0;
+  for (let i = 7; i >= 0; i--) {
+    const v = a[i];
+    out[i] = ((v >>> 1) | (carry << 31)) & 0xffffffff;
+    carry = v & 1;
+  }
+  if (odd) {
+    let hc: u32 = 0;
+    for (let i = 7; i >= 0; i--) {
+      const v = m[i];
+      HALF_TMP[i] = ((v >>> 1) | (hc << 31)) & 0xffffffff;
+      hc = v & 1;
+    }
+    let c: u64 = 1; // (m>>1) + 1
+    for (let i = 0; i < 8; i++) {
+      const s: u64 = u64(out[i]) + u64(HALF_TMP[i]) + c;
+      out[i] = <u32>(s & 0xffffffff);
+      c = s >>> 32;
+    }
+  }
 }
 
 /**
