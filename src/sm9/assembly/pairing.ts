@@ -15,13 +15,20 @@ import {
   fp2Conjugate,
   fp2copy,
   fp2Div2,
+  fp2Div2To,
   fp2Mul,
   fp2MulFp,
+  fp2MulFpTo,
+  fp2MulTo,
   fp2Neg,
+  fp2NegTo,
   fp2Put,
   fp2Sqr,
+  fp2SqrTo,
   fp2Sub,
+  fp2SubTo,
   fp2Tri,
+  fp2TriTo,
   fp2zero,
 } from './fp2';
 import {
@@ -41,7 +48,17 @@ import {
   fp12SqrTo,
   fp12zero,
 } from './fp12';
-import { G1, G2, g2Add, g2AddFull, g2Copy, g2Double } from './point';
+import {
+  G1,
+  G2,
+  g2Add,
+  g2AddFull,
+  g2AddFullInto,
+  g2AddInto,
+  g2Copy,
+  g2Double,
+  g2DoubleInto,
+} from './point';
 
 // ---------- twist 点自同构 ----------
 
@@ -84,6 +101,14 @@ const L_A0: Fp2 = fp2zero();
 const L_A1: Fp2 = fp2zero();
 const L_A4: Fp2 = fp2zero();
 
+// line function 内部工作区（To 算子，零堆分配；非重入：evalG*Into 是叶子，
+// 内部只调 fp2 层的 To 算子，它们有各自独立的 scratch）。
+const LE0: Fp2 = fp2zero();
+const LE1: Fp2 = fp2zero();
+const LE2: Fp2 = fp2zero();
+const LE3: Fp2 = fp2zero();
+const LE4: Fp2 = fp2zero();
+
 /**
  * 切线（tangent）系数版：把分子的三个非零 Fp2 系数写入 L_A0/L_A1/L_A4。
  *   num = L_A0 + L_A1·v + L_A4·w²（den 恒被 final exponent 消掉，不产出）
@@ -95,26 +120,24 @@ export function evalGTangentInto(T: G2, Q: G1): void {
   const xQ = Q.X,
     yQ = Q.Y;
 
-  let t0 = fp2Sqr(ZP);
-  let t1 = fp2Mul(t0, ZP);
-  const b1v = fp2Mul(t1, YP);
-  const a1v = fp2Neg(fp2MulFp(b1v, yQ));
+  // 全程走 fp2 的 To 算子（原地写 scratch），不再逐次分配 Fp2。
+  fp2SqrTo(LE0, ZP); // t0 = ZP²
+  fp2MulTo(LE1, LE0, ZP); // t1 = t0·ZP
+  fp2MulTo(LE2, LE1, YP); // b1v = t1·YP
+  fp2MulFpTo(L_A1, LE2, yQ);
+  fp2NegTo(L_A1, L_A1); // a1v = -(b1v·yQ)
 
-  t1 = fp2Sqr(XP);
-  t0 = fp2Mul(t0, t1);
-  t0 = fp2MulFp(t0, xQ);
-  t0 = fp2Tri(t0);
-  const a4v = fp2Div2(t0);
+  fp2SqrTo(LE1, XP); // t1 = XP²
+  fp2MulTo(LE0, LE0, LE1); // t0 = t0·t1
+  fp2MulFpTo(LE0, LE0, xQ);
+  fp2TriTo(LE2, LE0);
+  fp2Div2To(L_A4, LE2); // a4v = 3·t0 / 2
 
-  t1 = fp2Mul(t1, XP);
-  t1 = fp2Tri(t1);
-  t1 = fp2Div2(t1);
-  t0 = fp2Sqr(YP);
-  const a0v = fp2Sub(t0, t1);
-
-  fp2Put(L_A0, a0v);
-  fp2Put(L_A1, a1v);
-  fp2Put(L_A4, a4v);
+  fp2MulTo(LE1, LE1, XP);
+  fp2TriTo(LE2, LE1);
+  fp2Div2To(LE1, LE2); // t1 = 3·t1 / 2
+  fp2SqrTo(LE0, YP);
+  fp2SubTo(L_A0, LE0, LE1); // a0v = YP² - t1
 }
 
 /**
@@ -130,36 +153,35 @@ export function evalGLineInto(T: G2, P: G2, Q: G1): void {
   const xQ = Q.X,
     yQ = Q.Y;
 
-  let T0 = fp2Sqr(ZP);
-  let T1 = fp2Mul(T0, XT);
-  T0 = fp2Mul(T0, ZP);
-  let T2 = fp2Sqr(ZT);
-  let T3 = fp2Mul(T2, XP);
-  T2 = fp2Mul(T2, ZT);
-  T2 = fp2Mul(T2, YP);
-  T1 = fp2Sub(T1, T3);
-  T1 = fp2Mul(T1, ZT);
-  T1 = fp2Mul(T1, ZP);
-  const T4 = fp2Mul(T1, T0);
+  // 全程走 fp2 的 To 算子（原地写 scratch），不再逐次分配 Fp2。
+  fp2SqrTo(LE0, ZP); // T0 = ZP²
+  fp2MulTo(LE1, LE0, XT); // T1 = T0·XT
+  fp2MulTo(LE0, LE0, ZP); // T0 = T0·ZP
+  fp2SqrTo(LE2, ZT); // T2 = ZT²
+  fp2MulTo(LE3, LE2, XP); // T3 = T2·XP
+  fp2MulTo(LE2, LE2, ZT); // T2 = T2·ZT
+  fp2MulTo(LE2, LE2, YP); // T2 = T2·YP
+  fp2SubTo(LE1, LE1, LE3); // T1 = T1 - T3
+  fp2MulTo(LE1, LE1, ZT);
+  fp2MulTo(LE1, LE1, ZP);
+  fp2MulTo(LE4, LE1, LE0); // T4 = T1·T0
 
-  T1 = fp2Mul(T1, YP);
-  T3 = fp2Mul(T0, YT);
-  T3 = fp2Sub(T3, T2);
-  T0 = fp2Mul(T0, T3);
-  T0 = fp2MulFp(T0, xQ);
-  const a4v = fp2copy(T0);
+  fp2MulTo(LE1, LE1, YP);
+  fp2MulTo(LE3, LE0, YT); // T3 = T0·YT
+  fp2SubTo(LE3, LE3, LE2); // T3 = T3 - T2
+  fp2MulTo(LE0, LE0, LE3); // T0 = T0·T3
+  fp2MulFpTo(LE0, LE0, xQ); // T0 = a4v
 
-  T3 = fp2Mul(T3, XP);
-  T3 = fp2Mul(T3, ZP);
-  T1 = fp2Sub(T1, T3);
-  const a0v = fp2copy(T1);
+  fp2MulTo(LE3, LE3, XP);
+  fp2MulTo(LE3, LE3, ZP);
+  fp2SubTo(LE1, LE1, LE3); // T1 = a0v
 
-  T2 = fp2MulFp(T4, yQ);
-  const a1v = fp2Neg(T2);
+  fp2MulFpTo(LE2, LE4, yQ); // T2 = T4·yQ
+  fp2NegTo(LE2, LE2); // a1v = -T2
 
-  fp2Put(L_A0, a0v);
-  fp2Put(L_A1, a1v);
-  fp2Put(L_A4, a4v);
+  fp2Put(L_A0, LE1);
+  fp2Put(L_A4, LE0);
+  fp2Put(L_A1, LE2);
 }
 
 /**
@@ -356,12 +378,12 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
     evalGTangentInto(T, P);
     fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
 
-    T = g2Double(T);
+    g2DoubleInto(T, T);
 
     if (ABITS_BITS[i] === 1) {
       evalGLineInto(T, Q, P);
       fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
-      T = g2Add(T, Q);
+      g2AddInto(T, T, Q);
     }
   }
 
@@ -370,11 +392,11 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
 
   evalGLineInto(T, Q1, P);
   fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
-  T = g2AddFull(T, Q1);
+  g2AddFullInto(T, T, Q1);
 
   evalGLineInto(T, Q2, P);
   fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
-  T = g2AddFull(T, Q2);
+  g2AddFullInto(T, T, Q2);
 
   return f;
 }

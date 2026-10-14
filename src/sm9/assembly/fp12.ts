@@ -43,18 +43,21 @@ import {
   fp4copy,
   fp4eq,
   fp4Inv,
+  fp4InvTo,
   fp4isZero,
   fp4Mul,
   fp4MulFp,
   fp4MulFp2To,
   fp4MulTo,
   fp4MulV,
+  fp4MulVTo,
   fp4Neg,
   fp4NegTo,
   fp4one,
   fp4Sqr,
   fp4SqrTo,
   fp4SqrV,
+  fp4SqrVTo,
   fp4Sub,
   fp4SubTo,
   fp4set,
@@ -155,6 +158,17 @@ const W20: Fp2 = fp2zero();
 const W21: Fp2 = fp2zero();
 const W22: Fp2 = fp2zero();
 const W23: Fp2 = fp2zero();
+
+// fp12Pow 持有的逆元（与 U0..U7 分开：To 算子会用 U 槽）。
+const INV_HOLD: Fp12 = fp12zero();
+
+/** 就地拷贝：dst := src（保持 dst 引用不变）。 */
+export function fp12CopyInto(dst: Fp12, src: Fp12): void {
+  for (let i = 0; i < 3; i++) {
+    fp2Put(dst[i][0], src[i][0]);
+    fp2Put(dst[i][1], src[i][1]);
+  }
+}
 
 /**
  * out = a · b（对齐 fp12_mul），w³ = v：
@@ -260,38 +274,56 @@ export function fp12Sqr(a: Fp12): Fp12 {
 }
 
 /**
+ * out = a^{-1}（对齐 fp12_inv，分 a2 == 0 与否两支）。允许 out 与 a 别名。
+ */
+export function fp12InvTo(out: Fp12, a: Fp12): void {
+  if (fp4isZero(a[2])) {
+    // k = 1/(a0³ + v·a1³)
+    fp4SqrTo(U0, a[0]);
+    fp4MulTo(U1, U0, a[0]); // a0³
+    fp4SqrVTo(U2, a[1]);
+    fp4MulTo(U2, U2, a[1]); // v·a1³
+    fp4AddTo(U1, U1, U2);
+    fp4InvTo(U2, U1); // k
+
+    fp4SqrTo(U3, a[1]);
+    fp4MulTo(out[2], U3, U2); // r2 = a1²·k
+    fp4MulTo(U4, a[0], a[1]);
+    fp4MulTo(U4, U4, U2);
+    fp4NegTo(out[1], U4); // r1 = -(a0 a1 k)
+    fp4MulTo(out[0], U0, U2); // r0 = a0²·k
+    return;
+  }
+  // 通用分支
+  fp4SqrTo(U0, a[1]);
+  fp4MulTo(U1, a[0], a[2]);
+  fp4SubTo(U0, U0, U1); // t0 = a1² - a0 a2
+  fp4MulTo(U1, a[0], a[1]);
+  fp4SqrVTo(U2, a[2]);
+  fp4SubTo(U1, U1, U2); // t1 = a0 a1 - v a2²
+  fp4SqrTo(U2, a[0]);
+  fp4MulVTo(U3, a[1], a[2]);
+  fp4SubTo(U2, U2, U3); // t2 = a0² - v(a1 a2)
+
+  fp4SqrTo(U3, U1);
+  fp4MulTo(U4, U0, U2);
+  fp4SubTo(U3, U3, U4);
+  fp4InvTo(U3, U3); // t3 = 1/(t1² - t0 t2)
+  fp4MulTo(U3, a[2], U3); // t3 = a2·t3
+
+  fp4MulTo(out[0], U2, U3); // r0 = t2 t3
+  fp4MulTo(U4, U1, U3);
+  fp4NegTo(out[1], U4); // r1 = -(t1 t3)
+  fp4MulTo(out[2], U0, U3); // r2 = t0 t3
+}
+
+/**
  * 逆（对齐 fp12_inv，分 a2 == 0 与否两支）。
  */
 export function fp12Inv(a: Fp12): Fp12 {
-  if (fp4isZero(a[2])) {
-    // k = 1/(a0³ + v·a1³)
-    let k = fp4Sqr(a[0]);
-    k = fp4Mul(k, a[0]);
-    let t = fp4SqrV(a[1]);
-    t = fp4Mul(t, a[1]);
-    k = fp4Add(k, t);
-    k = fp4Inv(k);
-
-    const r2 = fp4Mul(fp4Sqr(a[1]), k);
-    const r1 = fp4Neg(fp4Mul(fp4Mul(a[0], a[1]), k));
-    const r0 = fp4Mul(fp4Sqr(a[0]), k);
-    return fp12set(r0, r1, r2);
-  }
-  // 通用分支
-  const t0 = fp4Sub(fp4Sqr(a[1]), fp4Mul(a[0], a[2]));
-  const t1 = fp4Sub(fp4Mul(a[0], a[1]), fp4SqrV(a[2]));
-  const t2 = fp4Sub(fp4Sqr(a[0]), fp4MulV(a[1], a[2]));
-
-  let t3 = fp4Sqr(t1);
-  const prod = fp4Mul(t0, t2);
-  t3 = fp4Sub(t3, prod);
-  t3 = fp4Inv(t3);
-  t3 = fp4Mul(a[2], t3);
-
-  const r0 = fp4Mul(t2, t3);
-  const r1 = fp4Neg(fp4Mul(t1, t3));
-  const r2 = fp4Mul(t0, t3);
-  return fp12set(r0, r1, r2);
+  const r = fp12zero();
+  fp12InvTo(r, a);
+  return r;
 }
 
 /**
@@ -425,15 +457,16 @@ export function fp12Pow(a: Fp12, k: U256): Fp12 {
     u256shr1(kWork);
   }
 
-  // 逐位：从最高非零 NAF 位起步
-  const inv = fp12Inv(a); // 每次调用算一次，之后 O(1) 使用
+  // 逐位：从最高非零 NAF 位起步。逆元算一次存 INV_HOLD，循环全程原地（零分配）。
+  fp12InvTo(INV_HOLD, a);
   let top = msb + 1;
   while (top >= 0 && naf[top] === 0) top--;
-  let result = naf[top] === 1 ? fp12copy(a) : fp12copy(inv);
+  const result = fp12zero();
+  fp12CopyInto(result, naf[top] === 1 ? a : INV_HOLD);
   for (let i = top - 1; i >= 0; i--) {
-    result = fp12Sqr(result);
-    if (naf[i] === 1) result = fp12Mul(result, a);
-    else if (naf[i] === -1) result = fp12Mul(result, inv);
+    fp12SqrTo(result, result);
+    if (naf[i] === 1) fp12MulTo(result, result, a);
+    else if (naf[i] === -1) fp12MulTo(result, result, INV_HOLD);
   }
   return result;
 }

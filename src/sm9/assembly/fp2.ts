@@ -88,6 +88,12 @@ const S3 = u256zero();
 const S4 = u256zero();
 const S5 = u256zero();
 const ZERO = u256zero(); // 只读零常量
+const TRIPLE_TMP: Fp2 = fp2TriTmpInit();
+
+/** fp2TriTo 的 Fp2 级暂存（声明位置无关：模块初始化时先于任何调用执行）。 */
+function fp2TriTmpInit(): Fp2 {
+  return fp2zero();
+}
 
 // ---------- 加法 / 减法 / 取负 ----------
 
@@ -135,9 +141,20 @@ export function fp2Dbl(a: Fp2): Fp2 {
   return fp2Add(a, a);
 }
 
+/** out = 2a。 */
+export function fp2DblTo(out: Fp2, a: Fp2): void {
+  fp2AddTo(out, a, a);
+}
+
 /** 乘 3（= 2a + a）。 */
 export function fp2Tri(a: Fp2): Fp2 {
   return fp2Add(fp2Dbl(a), a);
+}
+
+/** out = 3a（允许 out 与 a 别名：先算到 scratch，避免第二次加法读到被覆盖的 a）。 */
+export function fp2TriTo(out: Fp2, a: Fp2): void {
+  fp2AddTo(TRIPLE_TMP, a, a); // TRIPLE_TMP = 2a
+  fp2AddTo(out, TRIPLE_TMP, a); // out = 2a + a
 }
 
 /** out = a / 2（逐分量）。 */
