@@ -12,6 +12,30 @@
 
 ---
 
+## 执行状态（2026-10-14 对账）
+
+| Task | 状态 | 说明 |
+|---|---|---|
+| 1 runtime / WASM loader | ✅ | `src/runtime/loadWasm.ts`（记忆化）；无独立单测 |
+| 2 runtime / convert + errors | ✅ | `src/runtime/{convert,errors}.ts`；无独立单测 |
+| 3 runtime / random | ✅ | `src/runtime/random.ts`（宿主 CSPRNG + 拒绝采样）；无独立单测 |
+| 4 PEM / ASN.1 | ✅ | `src/pem/{asn1,pkcs8,sm2,sm9}.ts`；plan 的 `spki.ts` 并入 `pkcs8.ts`，`sm2/pem.ts` 实为 `pem/sm2.ts` |
+| 5 测试向量 | ◐ | 未落 `{sm3,sm4,zuc}/official.json`；改用 gmkitx/OpenSSL/GmSSL 交叉验证 + 按需落盘（EIA3 用 GM/T 0001.3-2012 官方三组） |
+| 6 SM2 核心 | ✅ | sign/verify/encrypt/decrypt/getPublicKey；`generateKeyPair` 与 C1C2C3 于 2026-10-14 补齐 |
+| 7 SM3 | ✅ | hash + hmac |
+| 8 SM2 密钥交换 | ✅ | GM/T 0003.3，含官方向量 + gmkitx 对拍 |
+| 9 SM4 六模式 | ✅ | 含 GCM（OpenSSL KAT）；CTR/OFB 现名 `cryptCTR`/`cryptOFB`，另有别名 |
+| 10 SM9 | ✅ | sign/verify/encrypt/decrypt + KEM + 密钥交换；`generateKeyPair` 于 2026-10-14 补齐 |
+| 11 ZUC | ✅ | EEA3 + EIA3（2026-10-14 补齐）+ 复用保护 |
+| 12 构建 / 打包 | ◐ | `asc` + `tsc` 可用；缺 rollup、CJS 产物、`vitest.browser.config.ts`、`biome.json` |
+| 13 CI / 发布 | ❌ | `.github/workflows` 与 `.release-it.json` 均缺 |
+| 14 bench | ❌ | `bench/` 不存在，而 `package.json` 已引用 `bench/run.ts` |
+| 15 README | ❌ | 仅标题两行 |
+
+✅ 完成 · ◐ 部分完成 · ❌ 未做。剩余缺口的完整清单见 spec §14。
+
+---
+
 ## Global Constraints
 
 - Package name: `sm-crypto-wasm`; version starts at `0.1.0`; license `MIT`; `engines.node: ">=18"`.

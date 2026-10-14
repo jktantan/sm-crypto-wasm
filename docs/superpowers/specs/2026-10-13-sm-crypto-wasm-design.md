@@ -63,13 +63,13 @@
 
 ## 3. 范围算法清单
 
-| 算法 | 规格 | 暴露 API |
-|---|---|---|
-| SM2 | GM/T 0003-2014（含密钥交换协议、加密、签名） | `sm2.encrypt / sm2.decrypt / sm2.sign / sm2.verify / sm2.keyExchange / sm2.generateKeyPair` |
-| SM3 | GM/T 0004-2014 | `sm3.hash / sm3.hmac` |
-| SM4 | GM/T 0002-2014 | `sm4.encrypt / sm4.decrypt`，分组模式：ECB / CBC / CTR / CFB / OFB / GCM |
-| SM9 | GM/T 0044-2016（含签名、密钥封装） | `sm9.sign / sm9.verify / sm9.encrypt / sm9.decrypt / sm9.generateKeyPair` |
-| ZUC | GM/T 0001-2012 + GM/T 0001.1-2012 128 比特 | `zuc.encrypt (EEA3) / zuc.mac (EIA3) / zuc.generateKeystream` |
+| 算法 | 规格 | 设计 API | 实际导出（2026-10-14 对账） |
+|---|---|---|---|
+| SM2 | GM/T 0003-2014（含密钥交换协议、加密、签名） | `sm2.encrypt / decrypt / sign / verify / keyExchange / generateKeyPair` | `generateKeyPair`（async，PEM 密钥对）、`encrypt`（`{ outputFormat: 'C1C3C2' \| 'C1C2C3' }`，默认 C1C3C2）、`decrypt`（自动识别两种顺序）、`sign / verify / getPublicKey`、`createExchangeInitiator / createExchangeResponder` |
+| SM3 | GM/T 0004-2014 | `sm3.hash / sm3.hmac` | 同设计（另有 `ensureLoaded()` 预热） |
+| SM4 | GM/T 0002-2014 | ECB / CBC / CTR / CFB / OFB / GCM | `encryptECB/decryptECB`、`encryptCBC/decryptCBC`、`encryptCFB/decryptCFB`、`encryptGCM/decryptGCM`、`cryptCTR`（别名 `encryptCTR` / `decryptCTR`）、`cryptOFB`（别名 `encryptOFB` / `decryptOFB`） |
+| SM9 | GM/T 0044-2016（含签名、密钥封装、密钥交换） | `sm9.sign / verify / encrypt / decrypt / generateKeyPair` | `generateKeyPair`（async，PKCS#8/SPKI PEM）、`sign / verify / encrypt / decrypt`（主私钥可传 hex 或 PEM）、`kemEncrypt / kemDecrypt`、`getSignPublicKey / getEncPublicKey`、`createExchangeInitiator / createExchangeResponder` |
+| ZUC | GM/T 0001-2012 + GM/T 0001.1-2012 128 比特 | `zuc.encrypt (EEA3) / zuc.mac (EIA3) / zuc.generateKeystream` | `zucKeystream`（别名 `generateKeystream`）、`zucEncrypt`（别名 `encrypt`，带 (key,iv,counter) 复用保护）、`zucDecrypt`、`zucMac`（别名 `mac` / `eia3`） |
 
 不重复造"密钥交换"作独立算法：SM2 内置密钥交换协议、SM9 内置密钥封装，合并覆盖。
 
@@ -286,10 +286,63 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 
 ## 13. 完成定义（Definition of Done）
 
-- [ ] `pnpm install` 一键装齐依赖；
-- [ ] `pnpm build` 产出 `dist/`，体积符合第 5 节；
-- [ ] `pnpm test` 在 Node 与浏览器两套 runner 全绿；
-- [ ] `pnpm bench` 跑通，给出 micro-bench 报告；
-- [ ] README 含 5 大块算法的 5 分钟速查；
-- [ ] GitHub Actions `ci.yml` + `release.yml` 都通过；
+勾选状态以 §14 的对账为准（2026-10-14）。
+
+- [x] `pnpm install` 一键装齐依赖；
+- [x] `pnpm build` 产出 `dist/`，体积符合第 5 节（实际走 `asc` + `tsc`，未用 rollup）；
+- [ ] `pnpm test` 在 Node 与浏览器两套 runner 全绿（**Node 端已全绿；浏览器 runner 不存在**）；
+- [ ] `pnpm bench` 跑通，给出 micro-bench 报告（**`bench/` 不存在**）；
+- [ ] README 含 5 大块算法的 5 分钟速查（**README 目前只有标题**）；
+- [ ] GitHub Actions `ci.yml` + `release.yml` 都通过（**两个 workflow 均未创建**）；
 - [ ] `npm publish --dry-run` 报出正确字段（name、version、license、engines、exports、types）。
+
+---
+
+## 14. 实现状态对账（2026-10-14）
+
+本节由一次 spec/plan ↔ 代码的对账产生，是第 13 节勾选状态的依据。
+
+### 已完成
+
+- 五大算法的 WASM 核心各一份 `.wasm` + TS 胶水：SM2（曲线/签名/加密/密钥交换）、
+  SM3、SM4（六种模式含 GCM）、SM9（pairing / KEM / 密钥交换）、ZUC（EEA3 + EIA3）；
+- `runtime`（`loadWasm` 记忆化、hex/base64/PEM 嗅探、宿主 CSPRNG）与
+  `pem`（ASN.1 + PKCS#8/SPKI + SM2/SM9 算法 OID）；
+- 标准向量与交叉验证：GM/T 0001.3-2012（EIA3 三组）、GM/T 0003-2014 密钥交换
+  官方向量，以及 gmkitx / OpenSSL / GmSSL 的对拍；
+- `sm9` 已从 facade 导出；`sm2.generateKeyPair`（PEM 密钥对）与
+  `sm9.generateKeyPair`（PKCS#8/SPKI + OID `1.2.156.10197.1.100`）可用；
+- SM2 密文 C1C3C2（默认）/ C1C2C3（可选，解密端自动识别）；
+- ZUC EIA3 完整性算法 + `(key, iv, counter)` 复用保护；
+- SM4 / ZUC 的"文档名"别名（见 §3 表）。
+
+### 未完成
+
+**P1 — 工程化与发布（§2 Goals、§10、§13）**
+
+- `bench/` 不存在，而 `package.json` 的 `bench` script 已指向 `bench/run.ts` → 命令直接失败；
+- `vitest.browser.config.ts` 不存在 → `pnpm test:browser` 失败，浏览器 runner 缺位；
+- `.github/workflows/ci.yml`、`.github/workflows/release.yml`、`.release-it.json` 全缺；
+- fuzz 用例（`tests/fuzz/` + fast-check）零引用 —— Wycheproof 风格攻击向量未做；
+- `biome.json` 缺失：`pnpm lint` 没有配置，且其目标包含不存在的 `bench/`；
+- README 仅标题两行，四档速查未写；
+- 打包仍为纯 `tsc` ESM：无 CJS 产物、`exports` 无 `require`、无 `rollup.config.mjs`；
+- `tests/runtime/{loadWasm,convert,random}.spec.ts` 与 `tests/packaging/smoke.spec.ts` 缺失。
+
+**P2 — 已实现但与本文档不符**
+
+- `sm2.decrypt` 与 SM4-GCM 校验失败抛 `Error`，而不是 `errors.ts` 已定义的
+  `DecryptionError` / `InvalidCiphertextError`；
+- `InvalidPublicKeyError` 不存在（plan Review Focus #3 要求 encrypt 对不在曲线上的公钥抛它）；
+- 空输入策略不一致：`sm3.hash('')` 会算出合法摘要，而 plan Review Focus #1 要求空输入抛 `TypeError`；
+- 文件结构与 plan 有出入（plan 的 `pem/spki.ts`、`sm2/pem.ts`、`sm4/modes.ts`、
+  `sm9/pairing.ts` 等不存在，功能合并到别处）；
+- 向量文件清单与 plan Task 5 不一致（实际以 oracle 交叉验证为主）。
+
+**本轮明确留作后续的缺口（2026-10-14）**
+
+- `sm9.verify` / `sm9.encrypt` 尚不接受**主公钥** PEM：wasm 的 `sm9VerifyOut` /
+  `sm9EncryptOut` 内部自行从主私钥派生主公钥，要支持点字节输入需新增 2 个 AS 导出
+  并重编 `sm9.wasm`；
+- `sm9.generateKeyPair` 不产出 `userPublicPem`：SM9 的用户公钥是 `(id, 主公钥)` 的
+  确定函数，不是独立持有物。
