@@ -160,17 +160,21 @@ function fFunction(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u32>
 }
 
 /**
- * 生成 nbytes 字节 ZUC 密钥流。
+ * 键加载 + 32 轮初始化 + 丢弃一拍（GM/T 0001-2012 §5.2、§5.3），
+ * 建立工作模式状态。EEA3 密钥流与 EIA3 完整性共用。
  */
-export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes: i32): void {
-  const s = new StaticArray<u32>(16);
+function initState(
+  s: StaticArray<u32>,
+  x: StaticArray<u32>,
+  r: StaticArray<u32>,
+  keyPtr: usize,
+  ivPtr: usize,
+): void {
   for (let i = 0; i < 16; i++) {
     const k = <u32>load<u8>(keyPtr + i);
     const v = <u32>load<u8>(ivPtr + i);
     s[i] = ((k << 23) | (D[i] << 8) | v) & 0x7fffffff;
   }
-  const x = new StaticArray<u32>(4);
-  const r = new StaticArray<u32>(2);
   r[0] = 0;
   r[1] = 0;
 
@@ -182,16 +186,103 @@ export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes:
   // 丢弃一拍。
   fFunction(s, x, r);
   lfsrWithWorkMode(s);
+}
+
+/** 推进一拍，返回该拍密钥字（W ^ X3）。 */
+function nextKeyword(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u32>): u32 {
+  const w = fFunction(s, x, r);
+  const ks = (w ^ x[3]) & 0xffffffff;
+  lfsrWithWorkMode(s);
+  return ks;
+}
+
+/**
+ * 生成 nbytes 字节 ZUC 密钥流。
+ */
+export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes: i32): void {
+  const s = new StaticArray<u32>(16);
+  const x = new StaticArray<u32>(4);
+  const r = new StaticArray<u32>(2);
+  initState(s, x, r, keyPtr, ivPtr);
 
   // 生成密钥流：密钥字 = W ^ X3。
   let written = 0;
   while (written < nbytes) {
-    const w = fFunction(s, x, r);
-    const ks = (w ^ x[3]) & 0xffffffff;
-    lfsrWithWorkMode(s);
+    const ks = nextKeyword(s, x, r);
     for (let i = 0; i < 4 && written < nbytes; i++) {
       store<u8>(outPtr + written, <u8>((ks >>> ((3 - i) * 8)) & 0xff));
       written++;
     }
   }
+}
+
+/**
+ * ZUC-128 EIA3 完整性标签（GM/T 0001.3-2012 / 3GPP TS 35.221）。
+ *
+ * 与 GmSSL `zuc_mac_init/update/finish` 逐位对齐：
+ * - IV 由调用方按 COUNT/BEARER/DIRECTION 组装后传入（16 字节）；
+ * - K0 初值 = 第一拍密钥字，T 初值 = 0；
+ * - 消息第 i 位为 1 时 T ^= 密钥流在位置 i 的 32-bit 滑动窗口；
+ * - 收尾：T ^= 窗口(nbits)，再 T ^= 下一拍完整密钥字，得 32-bit MAC（大端写出）。
+ *
+ * @param nbits 参与计算的消息比特数（可小于 `msgLen * 8`，用于非整字节消息）。
+ */
+export function zucEia3Out(
+  keyPtr: usize,
+  ivPtr: usize,
+  msgPtr: usize,
+  msgLen: i32,
+  nbits: i32,
+  macPtr: usize,
+): void {
+  const s = new StaticArray<u32>(16);
+  const x = new StaticArray<u32>(4);
+  const r = new StaticArray<u32>(2);
+  initState(s, x, r, keyPtr, ivPtr);
+
+  let K0 = nextKeyword(s, x, r);
+  let T: u32 = 0;
+  let bitPos = 0;
+
+  // 完整 32-bit 消息字。
+  while (bitPos + 32 <= nbits) {
+    const base = <usize>(bitPos >> 3);
+    let M: u32 = 0;
+    for (let i = 0; i < 4; i++) M = (M << 8) | <u32>load<u8>(msgPtr + base + <usize>i);
+    let K1 = nextKeyword(s, x, r);
+    for (let i = 0; i < 32; i++) {
+      if (M & 0x80000000) T ^= K0;
+      M = M << 1;
+      K0 = (K0 << 1) | (K1 >>> 31);
+      K1 = K1 << 1;
+    }
+    bitPos += 32;
+  }
+
+  // 尾部不足 32 位的消息比特：按字节大端对齐，缺位补 0。
+  const rem = nbits - bitPos;
+  if (rem > 0) {
+    const base = <usize>(bitPos >> 3);
+    let M: u32 = 0;
+    for (let i = 0; i < 4; i++) {
+      const off = base + <usize>i;
+      M = (M << 8) | (off < <usize>msgLen ? <u32>load<u8>(msgPtr + off) : 0);
+    }
+    let K1 = nextKeyword(s, x, r);
+    for (let i = 0; i < rem; i++) {
+      if (M & 0x80000000) T ^= K0;
+      M = M << 1;
+      K0 = (K0 << 1) | (K1 >>> 31);
+      K1 = K1 << 1;
+    }
+  }
+
+  T ^= K0;
+  T ^= nextKeyword(s, x, r);
+
+  // 大端写出 4 字节 MAC。
+  store<u8>(macPtr, <u8>((T >>> 24) & 0xff));
+  store<u8>(macPtr + 1, <u8>((T >>> 16) & 0xff));
+  store<u8>(macPtr + 2, <u8>((T >>> 8) & 0xff));
+  store<u8>(macPtr + 3, <u8>(T & 0xff));
 }

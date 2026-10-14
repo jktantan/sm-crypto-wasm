@@ -3,17 +3,27 @@
  *
  * 支持：
  * - `zucKeystream(key, iv, nBytes)`：生成 nBytes 字节密钥流
- * - `zucEncrypt(key, iv, data)`：EEA3 加密/解密（异或，自反）
+ * - `zucEncrypt(key, iv, data, counter?)`：EEA3 加密（带 (key,iv,counter) 复用保护）
+ * - `zucDecrypt(key, iv, data, counter?)`：EEA3 解密（异或密钥流，自反；豁免复用保护）
+ * - `zucMac(key, iv, msg, bitLength?, tagBits?)`：EIA3 完整性标签（GM/T 0001.3-2012）
  *
  * spec/plan 对应：plan Task 11；spec §3 算法清单、§6 API。
  */
 import { loadWasm } from '../runtime/loadWasm.js';
-import { toBytes } from '../runtime/convert.js';
+import { bytesToHex, toBytes } from '../runtime/convert.js';
 
 interface ZucExports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
   readonly freeAll: () => void;
   readonly zucKeystream: (keyPtr: number, ivPtr: number, outPtr: number, nbytes: number) => void;
+  readonly zucEia3Out: (
+    keyPtr: number,
+    ivPtr: number,
+    msgPtr: number,
+    msgLen: number,
+    nbits: number,
+    macPtr: number,
+  ) => void;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -37,6 +47,15 @@ function getModule(): ZucModule {
   return mod;
 }
 
+/** 校验 16 字节 key / iv 并归一化为字节数组。 */
+function keyIv(key: string | Uint8Array, iv: string | Uint8Array): { k: Uint8Array; v: Uint8Array } {
+  const k = toBytes(key, 'key');
+  const v = toBytes(iv, 'iv');
+  if (k.length !== 16) throw new RangeError('zuc: key must be 16 bytes');
+  if (v.length !== 16) throw new RangeError('zuc: iv must be 16 bytes');
+  return { k, v };
+}
+
 /**
  * 生成 ZUC-128 密钥流。
  *
@@ -50,10 +69,7 @@ export function zucKeystream(
   iv: string | Uint8Array,
   nBytes: number,
 ): Uint8Array {
-  const k = toBytes(key, 'key');
-  const v = toBytes(iv, 'iv');
-  if (k.length !== 16) throw new RangeError('zuc: key must be 16 bytes');
-  if (v.length !== 16) throw new RangeError('zuc: iv must be 16 bytes');
+  const { k, v } = keyIv(key, iv);
   if (!Number.isInteger(nBytes) || nBytes < 0) throw new RangeError('zuc: bad nBytes');
   if (nBytes === 0) return new Uint8Array(0);
   const { exports, memory } = getModule();
@@ -71,22 +87,140 @@ export function zucKeystream(
   }
 }
 
+// ---------------- EIA3 完整性算法（GM/T 0001.3-2012） ----------------
+
 /**
- * ZUC-128 EEA3 加密/解密（异或密钥流，自反）。
+ * 计算 EIA3 完整性标签（GM/T 0001.3-2012 / 3GPP TS 35.221）。
+ *
+ * IV 由调用方按 `COUNT(32) || BEARER(5) || DIRECTION(1) || 0(26)` 两段等长
+ * 结构组装后传入（与 GmSSL `zuc_set_eia_iv` 一致），因此本函数对
+ * LTE 场景与裸 IV 场景都可用。
+ *
+ * @param key 16 字节完整性密钥。
+ * @param iv 16 字节 IV。
+ * @param msg 消息（hex / base64 / Uint8Array）。
+ * @param bitLength 参与计算的消息比特数，默认取完整字节长度 `msg.length * 8`；
+ *   非整字节消息（如 577 位）需显式给值。
+ * @param tagBits MAC 长度，**仅支持 32**（ZUC-256 的 64/128 位属 Non-Goals）。
+ * @returns 4 字节（32 位）标签，大端。
+ */
+export function zucMac(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  msg: string | Uint8Array,
+  bitLength?: number,
+  tagBits = 32,
+): Uint8Array {
+  if (tagBits !== 32) {
+    throw new RangeError(
+      `zuc EIA3: 仅支持 32 位标签，收到 ${tagBits}（ZUC-256 的 64/128 位不在本期范围）`,
+    );
+  }
+  const { k, v } = keyIv(key, iv);
+  const m = toBytes(msg, 'msg');
+  const nbits = bitLength ?? m.length * 8;
+  if (!Number.isInteger(nbits) || nbits < 0 || nbits > m.length * 8) {
+    throw new RangeError(
+      `zuc EIA3: bitLength 必须是 [0, ${m.length * 8}] 内的整数，收到 ${nbits}`,
+    );
+  }
+
+  const { exports, memory } = getModule();
+  const keyPtr = exports.alloc(16);
+  const ivPtr = exports.alloc(16);
+  const msgPtr = exports.alloc(m.length === 0 ? 1 : m.length);
+  const macPtr = exports.alloc(4);
+  try {
+    const mem = new Uint8Array(memory.buffer);
+    mem.set(k, keyPtr);
+    mem.set(v, ivPtr);
+    mem.set(m, msgPtr);
+    exports.zucEia3Out(keyPtr, ivPtr, msgPtr, m.length, nbits, macPtr);
+    return new Uint8Array(memory.buffer, macPtr, 4).slice();
+  } finally {
+    exports.freeAll();
+  }
+}
+
+// ---------------- EEA3 机密性算法（GM/T 0001.2-2012） ----------------
+
+/**
+ * 已使用过的 (key, iv, counter) 组合。
+ *
+ * 密钥流重复使用是机密性事故（同密钥流异或两条明文即泄露异或值），
+ * 因此加密路径显式拒绝复用，而不是静默放行。
+ */
+const usedNonces = new Set<string>();
+
+function nonceId(k: Uint8Array, v: Uint8Array, counter: number): string {
+  return `${bytesToHex(k)}:${bytesToHex(v)}:${counter}`;
+}
+
+/** 清空 (key, iv, counter) 复用记录。仅供测试与明确的密钥轮换场景使用。 */
+export function resetReuseGuard(): void {
+  usedNonces.clear();
+}
+
+/** 异或密钥流（EEA3 的加解密本体）。 */
+function xorKeystream(k: Uint8Array, v: Uint8Array, data: string | Uint8Array): Uint8Array {
+  const bytes = toBytes(data, 'data');
+  const ks = zucKeystream(k, v, bytes.length);
+  const out = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) out[i] = (bytes[i] ?? 0) ^ (ks[i] ?? 0);
+  return out;
+}
+
+/**
+ * ZUC-128 EEA3 加密。
+ *
+ * 同一 (key, iv, counter) 只允许加密一次：重复调用抛错（Review Focus #5）。
+ * 解密请用 `zucDecrypt`。
  *
  * @param key 16 字节密钥。
  * @param iv 16 字节 IV。
- * @param data 明文或密文。
- * @returns 密文或明文。
+ * @param data 明文。
+ * @param counter 计数器，参与复用判定（默认 0）。
+ * @throws Error 当 (key, iv, counter) 已被使用过。
  */
 export function zucEncrypt(
   key: string | Uint8Array,
   iv: string | Uint8Array,
   data: string | Uint8Array,
+  counter = 0,
 ): Uint8Array {
-  const bytes = toBytes(data, 'data');
-  const ks = zucKeystream(key, iv, bytes.length);
-  const out = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) out[i] = (bytes[i] ?? 0) ^ (ks[i] ?? 0);
+  const { k, v } = keyIv(key, iv);
+  if (!Number.isInteger(counter) || counter < 0) {
+    throw new RangeError(`zuc: counter 必须是非负整数，收到 ${counter}`);
+  }
+  const id = nonceId(k, v, counter);
+  if (usedNonces.has(id)) {
+    throw new Error(
+      `zuc: (key, iv, counter) 复用拒绝 —— 该组合已加密过一次（counter=${counter}）；` +
+        '重复使用同一密钥流会破坏机密性。解密请用 zucDecrypt()。',
+    );
+  }
+  const out = xorKeystream(k, v, data);
+  usedNonces.add(id);
   return out;
+}
+
+/**
+ * ZUC-128 EEA3 解密（异或密钥流，自反）。
+ *
+ * 解密路径豁免复用保护：密文可能被多次校验/重放处理。
+ *
+ * @param key 16 字节密钥。
+ * @param iv 16 字节 IV。
+ * @param data 密文。
+ * @param counter 与加密时一致的计数器（保留参数，解密不参与判定）。
+ */
+export function zucDecrypt(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  data: string | Uint8Array,
+  counter = 0,
+): Uint8Array {
+  void counter;
+  const { k, v } = keyIv(key, iv);
+  return xorKeystream(k, v, data);
 }
