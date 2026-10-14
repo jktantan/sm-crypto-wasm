@@ -84,3 +84,20 @@ dispatch. See spec §12.1 Q3.
   抛错，但 EEA3 加解密同构，同一密钥流必然要用于解密，"加密一次 / 可重复解密"
   是唯一自洽的形态。代价：`zucEncrypt` 成为有状态 API，长生命周期调用方需
   `resetReuseGuard()`。
+
+### Task 2 — SM2 generateKeyPair + C1C2C3（plan Task 6/8 的 P0 补口）
+
+- 新增 `generateKeyPair(): Promise<{ privateKeyPem, publicKeyPem }>`（spec §6、§12.1 Q2），
+  复用已有 `encodeSm2PrivateKeyPem` / `encodeSm2PublicKeyPem` + `randomScalarBelow(n)`。
+- `encrypt(pub, msg, { outputFormat })`：默认 C1C3C2，可选 C1C2C3（spec §12.1 Q1）。
+- `decrypt(priv, ct, { inputFormat })`：默认 `auto` —— 先按 C1C3C2，C3 校验失败
+  且密文含 C2 时按 C1C2C3 重排重试。
+- 测试：`npx vitest run --config vitest.config.ts tests/sm2.spec.ts` → 11/11 pass；
+  相邻 6 个 SM2 spec + pem 合计 42/42 pass；`npx tsc --noEmit` 干净。
+- `Ruling:` C1C2C3 的重排放在 TS 层，wasm 的 `encryptOut` / `decryptOut` 仍只认
+  C1C3C2。理由：重排是纯字节搬运，放 TS 层不动已验证的曲线代码。代价：多一次
+  97+n 字节拷贝。
+- `Ruling:` 自动识别用"试错"（先 C1C3C2 再 C1C2C3），空 C2 时不重试。理由：C3 是
+  SM3 校验值，失败即说明顺序或密钥不对，这是唯一无需外部提示的判别方式。
+  代价：错误密文多跑一次解密（常数级）。
+- 注：plan Task 6 写的 `DecryptionError` 仍按现状抛 `Error` —— 属 P2 项，未在本轮范围。

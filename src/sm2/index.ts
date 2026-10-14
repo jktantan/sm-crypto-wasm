@@ -19,6 +19,7 @@ import { loadWasm } from '../runtime/loadWasm.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
+import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -86,6 +87,62 @@ export function getPublicKey(privateKey: string | Uint8Array): string {
   } finally {
     exports.freeAll();
   }
+}
+
+/** SM2 密钥对（PEM 形态：PKCS#8 私钥 + SPKI 公钥）。 */
+export interface Sm2KeyPair {
+  privateKeyPem: string;
+  publicKeyPem: string;
+}
+
+/** SM2 密文分量顺序。 */
+export type Sm2CipherFormat = 'C1C3C2' | 'C1C2C3';
+
+/** `encrypt` 选项。 */
+export interface Sm2EncryptOptions {
+  /** 输出顺序，默认 `C1C3C2`（spec §12.1 Q1）。 */
+  outputFormat?: Sm2CipherFormat;
+}
+
+/** `decrypt` 选项。 */
+export interface Sm2DecryptOptions {
+  /** 输入顺序，默认 `auto`（先按 C1C3C2 解，失败再按 C1C2C3 重排重试）。 */
+  inputFormat?: Sm2CipherFormat | 'auto';
+}
+
+/**
+ * 生成 SM2 密钥对（异步：含 wasm 实例化 + 宿主 CSPRNG 取 d）。
+ *
+ * @returns PKCS#8 私钥 PEM 与 SPKI 公钥 PEM。
+ */
+export async function generateKeyPair(): Promise<Sm2KeyPair> {
+  await ensureLoaded();
+  const d = randomScalarBelow(N).toString(16).padStart(64, '0');
+  const pub = getPublicKey(d);
+  return {
+    privateKeyPem: encodeSm2PrivateKeyPem(d, pub),
+    publicKeyPem: encodeSm2PublicKeyPem(pub),
+  };
+}
+
+/** C1C3C2 → C1C2C3（返回新数组，不改动入参）。 */
+function c1c3c2ToC1c2c3(ct: Uint8Array): Uint8Array {
+  const n = ct.length - 97;
+  const out = new Uint8Array(ct.length);
+  out.set(ct.subarray(0, 65), 0);
+  out.set(ct.subarray(97, 97 + n), 65);
+  out.set(ct.subarray(65, 97), 65 + n);
+  return out;
+}
+
+/** C1C2C3 → C1C3C2（返回新数组，不改动入参）。 */
+function c1c2c3ToC1c3c2(ct: Uint8Array): Uint8Array {
+  const n = ct.length - 97;
+  const out = new Uint8Array(ct.length);
+  out.set(ct.subarray(0, 65), 0);
+  out.set(ct.subarray(65 + n, 65 + n + 32), 65);
+  out.set(ct.subarray(65, 65 + n), 97);
+  return out;
 }
 
 function splitPub(pub: string | Uint8Array): { x: Uint8Array; y: Uint8Array } {
@@ -175,11 +232,20 @@ export function verify(
 /**
  * SM2 加密。
  *
- * @param publicKey 64 或 65 字节公钥。
+ * @param publicKey 64 或 65 字节公钥（hex / Uint8Array / PEM）。
  * @param message 明文。
- * @returns 密文 hex（C1C3C2：C1(65) || C3(32) || C2）。
+ * @param opts `outputFormat`：`'C1C3C2'`（默认）或 `'C1C2C3'`。
+ * @returns 密文 hex，默认按 C1(65) || C3(32) || C2 组装。
  */
-export function encrypt(publicKey: string | Uint8Array, message: string | Uint8Array): string {
+export function encrypt(
+  publicKey: string | Uint8Array,
+  message: string | Uint8Array,
+  opts: Sm2EncryptOptions = {},
+): string {
+  const format = opts.outputFormat ?? 'C1C3C2';
+  if (format !== 'C1C3C2' && format !== 'C1C2C3') {
+    throw new RangeError(`sm2.encrypt: 未知的 outputFormat ${String(format)}`);
+  }
   const { x, y } = splitPub(publicKey);
   const m = toBytes(message, 'message');
   const { exports } = getModule();
@@ -197,7 +263,8 @@ export function encrypt(publicKey: string | Uint8Array, message: string | Uint8A
       mem.set(randomK(), kp);
       const rc = exports.encryptOut(pxp, pyp, mp, m.length, kp, ctp);
       if (rc === 1) {
-        return fromBytes(new Uint8Array(mem.buffer, ctp, 97 + m.length).slice(), 'hex');
+        const raw = new Uint8Array(mem.buffer, ctp, 97 + m.length).slice();
+        return fromBytes(format === 'C1C2C3' ? c1c3c2ToC1c2c3(raw) : raw, 'hex');
       }
     }
     throw new Error('sm2.encrypt: KDF produced all-zero output after retries');
@@ -209,12 +276,46 @@ export function encrypt(publicKey: string | Uint8Array, message: string | Uint8A
 /**
  * SM2 解密。
  *
+ * 默认自动识别密文顺序：先按 C1C3C2 解，C3 校验失败且密文含 C2 时，
+ * 再按 C1C2C3 重排重试（spec §12.1 Q1「解密端按输入自动识别」）。
+ *
+ * @param privateKey 32 字节私钥（hex / Uint8Array / PEM）。
+ * @param ciphertext 密文。
+ * @param opts `inputFormat`，默认 `'auto'`。
  * @returns 明文的 hex。
  */
-export function decrypt(privateKey: string | Uint8Array, ciphertext: string | Uint8Array): string {
+export function decrypt(
+  privateKey: string | Uint8Array,
+  ciphertext: string | Uint8Array,
+  opts: Sm2DecryptOptions = {},
+): string {
   const d = toPrivateKeyBytes(privateKey);
   const ct = toBytes(ciphertext, 'ciphertext');
   if (ct.length < 97) throw new RangeError('sm2: ciphertext too short');
+
+  const format = opts.inputFormat ?? 'auto';
+  if (format === 'C1C3C2') return decryptRaw(d, ct);
+  if (format === 'C1C2C3') return decryptRaw(d, c1c2c3ToC1c3c2(ct));
+  if (format !== 'auto') {
+    throw new RangeError(`sm2.decrypt: 未知的 inputFormat ${String(format)}`);
+  }
+  try {
+    return decryptRaw(d, ct);
+  } catch (err) {
+    // 空 C2 时两种顺序字节相同，重试没有意义。
+    if (ct.length > 97) {
+      try {
+        return decryptRaw(d, c1c2c3ToC1c3c2(ct));
+      } catch {
+        // 两种顺序都不成立：抛原始错误，保留 C1C3C2 路径的诊断信息。
+      }
+    }
+    throw err;
+  }
+}
+
+/** 按 C1C3C2 布局解密（wasm 侧约定的布局）。 */
+function decryptRaw(d: Uint8Array, ct: Uint8Array): string {
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);
   const dp = exports.alloc(32);
