@@ -21,7 +21,18 @@ import {
   u256isZero,
   u256zero,
 } from '../../common/assembly/field256';
-import { fpAdd, fpAddTo, fpDiv2To, fpInv, fpMul, fpMulTo, fpSqr, fpSqrTo, fpSubTo, U256 } from './fp';
+import {
+  fpAdd,
+  fpAddTo,
+  fpDiv2To,
+  fpInv,
+  fpMul,
+  fpMulTo,
+  fpSqr,
+  fpSqrTo,
+  fpSubTo,
+  U256,
+} from './fp';
 
 /** Fp2 元素：[a0, a1]。 */
 export type Fp2 = StaticArray<U256>;

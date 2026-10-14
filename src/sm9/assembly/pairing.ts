@@ -40,7 +40,6 @@ import {
   fp12Frobenius6,
   fp12Inv,
   fp12Mul,
-  fp12MulLine,
   fp12MulLineTo,
   fp12one,
   fp12Pow,
@@ -372,7 +371,7 @@ for (let i = 0; i < ABITS_LEN; i++) ABITS_BITS[i] = ABITS.charCodeAt(i) - 0x30;
  * GmSSL 的实现保留了分子分母两路，每次迭代要多一次 fp12Sqr 和 fp12Mul。
  */
 export function millerLoop(Q: G2, P: G1): Fp12 {
-  let T = g2Copy(Q);
+  const T = g2Copy(Q);
   const f = fp12one();
 
   for (let i = 0; i < ABITS_LEN; i++) {

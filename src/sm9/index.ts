@@ -183,7 +183,8 @@ interface Sm9Module {
 }
 
 /** 预热 WASM 模块。 */
-export async function ensureLoaded(): Promise<void> {  if ((globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm) return;
+export async function ensureLoaded(): Promise<void> {
+  if ((globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm) return;
   const mod = await loadWasm('sm9');
   (globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm = {
     exports: mod.exports as unknown as Sm9Exports,

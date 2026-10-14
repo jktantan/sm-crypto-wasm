@@ -25,6 +25,17 @@ export function freeAll(): void {
   pinned.length = 0;
 }
 
+/**
+ * LFSR(s) / 比特重组(x) / F 函数(r) 状态：模块级线性内存裸指针。
+ *
+ * 原先每个入口都 `new StaticArray<u32>(16/4/2)`，且每拍对这些数组做大量
+ * `__get`/`__set` runtime 调用。`zucKeystream` 与 `zucEia3Out` 各自独占一次
+ * 调用（互不嵌套），因此跨调用复用安全。
+ */
+const S_PTR: usize = heap.alloc(16 * 4);
+const X_PTR: usize = heap.alloc(4 * 4);
+const R_PTR: usize = heap.alloc(2 * 4);
+
 /** 32-bit 循环左移。 */
 function rotl32(x: u32, n: i32): u32 {
   return ((x << n) | (x >>> (32 - n))) & 0xffffffff;
@@ -47,13 +58,14 @@ function mulByPow2(x: u32, k: i32): u32 {
 }
 
 // D 常量（15-bit，键加载用）。
-const D: StaticArray<u32> = [
+const D: usize = memory.data<u32>([
   0x44d7, 0x26bc, 0x626b, 0x135e, 0x5789, 0x35e2, 0x7135, 0x09af, 0x4d78, 0x2f13, 0x6bc4, 0x1af1,
   0x5e26, 0x3c4d, 0x789a, 0x47ac,
-];
+]);
 
-// S0、S1 盒。
-const S0: StaticArray<u8> = [
+// S0、S1 盒（内存数据段裸指针：每拍 4 次查表，StaticArray 索引会退化成
+// `__get` runtime 调用，是每拍成本的大头）。
+const S0: usize = memory.data<u8>([
   0x3e, 0x72, 0x5b, 0x47, 0xca, 0xe0, 0x00, 0x33, 0x04, 0xd1, 0x54, 0x98, 0x09, 0xb9, 0x6d, 0xcb,
   0x7b, 0x1b, 0xf9, 0x32, 0xaf, 0x9d, 0x6a, 0xa5, 0xb8, 0x2d, 0xfc, 0x1d, 0x08, 0x53, 0x03, 0x90,
   0x4d, 0x4e, 0x84, 0x99, 0xe4, 0xce, 0xd9, 0x91, 0xdd, 0xb6, 0x85, 0x48, 0x8b, 0x29, 0x6e, 0xac,
@@ -70,9 +82,9 @@ const S0: StaticArray<u8> = [
   0xf6, 0xfa, 0x36, 0xd2, 0x50, 0x68, 0x9e, 0x62, 0x71, 0x15, 0x3d, 0xd6, 0x40, 0xc4, 0xe2, 0x0f,
   0x8e, 0x83, 0x77, 0x6b, 0x25, 0x05, 0x3f, 0x0c, 0x30, 0xea, 0x70, 0xb7, 0xa1, 0xe8, 0xa9, 0x65,
   0x8d, 0x27, 0x1a, 0xdb, 0x81, 0xb3, 0xa0, 0xf4, 0x45, 0x7a, 0x19, 0xdf, 0xee, 0x78, 0x34, 0x60,
-];
+]);
 
-const S1: StaticArray<u8> = [
+const S1: usize = memory.data<u8>([
   0x55, 0xc2, 0x63, 0x71, 0x3b, 0xc8, 0x47, 0x86, 0x9f, 0x3c, 0xda, 0x5b, 0x29, 0xaa, 0xfd, 0x77,
   0x8c, 0xc5, 0x94, 0x0c, 0xa6, 0x1a, 0x13, 0x00, 0xe3, 0xa8, 0x16, 0x72, 0x40, 0xf9, 0xf8, 0x42,
   0x44, 0x26, 0x68, 0x96, 0x81, 0xd9, 0x45, 0x3e, 0x10, 0x76, 0xc6, 0xa7, 0x8b, 0x39, 0x43, 0xe1,
@@ -89,14 +101,14 @@ const S1: StaticArray<u8> = [
   0x5a, 0x6a, 0x54, 0x1e, 0x41, 0x31, 0x92, 0x35, 0xc4, 0x33, 0x07, 0x0a, 0xba, 0x7e, 0x0e, 0x34,
   0x88, 0xb1, 0x98, 0x7c, 0xf3, 0x3d, 0x60, 0x6c, 0x7b, 0xca, 0xd3, 0x1f, 0x32, 0x65, 0x04, 0x28,
   0x64, 0xbe, 0x85, 0x9b, 0x2f, 0x59, 0x8a, 0xd7, 0xb0, 0x25, 0xac, 0xaf, 0x12, 0x03, 0xe2, 0xf2,
-];
+]);
 
 /** S 盒代换：S0||S1 交替作用于 4 字节。 */
 function sTransform(u: u32): u32 {
-  const b0 = <u32>S0[(u >>> 24) & 0xff];
-  const b1 = <u32>S1[(u >>> 16) & 0xff];
-  const b2 = <u32>S0[(u >>> 8) & 0xff];
-  const b3 = <u32>S1[u & 0xff];
+  const b0 = <u32>load<u8>(S0 + ((u >>> 24) & 0xff));
+  const b1 = <u32>load<u8>(S1 + ((u >>> 16) & 0xff));
+  const b2 = <u32>load<u8>(S0 + ((u >>> 8) & 0xff));
+  const b3 = <u32>load<u8>(S1 + (u & 0xff));
   return ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 0xffffffff;
 }
 
@@ -108,54 +120,62 @@ function l2x(x: u32): u32 {
 }
 
 /** LFSR 反馈值 v（mod 2^31-1）。 */
-function lfsrFeedback(s: StaticArray<u32>): u32 {
-  let t = mulByPow2(s[15], 15);
-  t = addMod(t, mulByPow2(s[13], 17));
-  t = addMod(t, mulByPow2(s[10], 21));
-  t = addMod(t, mulByPow2(s[4], 20));
-  t = addMod(t, mulByPow2(s[0], 8));
-  t = addMod(t, s[0]);
+function lfsrFeedback(): u32 {
+  let t = mulByPow2(load<u32>(S_PTR + 15 * 4), 15);
+  t = addMod(t, mulByPow2(load<u32>(S_PTR + 13 * 4), 17));
+  t = addMod(t, mulByPow2(load<u32>(S_PTR + 10 * 4), 21));
+  t = addMod(t, mulByPow2(load<u32>(S_PTR + 4 * 4), 20));
+  t = addMod(t, mulByPow2(load<u32>(S_PTR), 8));
+  t = addMod(t, load<u32>(S_PTR));
   return t;
 }
 
-function shiftLfsr(s: StaticArray<u32>, s16: u32): void {
-  for (let i = 0; i < 15; i++) s[i] = s[i + 1];
-  s[15] = s16 & 0x7fffffff;
+function shiftLfsr(s16: u32): void {
+  for (let i = 0; i < 15; i++) {
+    store<u32>(S_PTR + (<usize>i << 2), load<u32>(S_PTR + (<usize>(i + 1) << 2)));
+  }
+  store<u32>(S_PTR + 15 * 4, s16 & 0x7fffffff);
 }
 
 /** 初始化模式 LFSR：v = feedback + u；0 → 2^31-1。 */
-function lfsrWithInitMode(s: StaticArray<u32>, u: u32): void {
-  let v = addMod(lfsrFeedback(s), u & 0x7fffffff);
+function lfsrWithInitMode(u: u32): void {
+  let v = addMod(lfsrFeedback(), u & 0x7fffffff);
   if (v === 0) v = 0x7fffffff;
-  shiftLfsr(s, v);
+  shiftLfsr(v);
 }
 
 /** 工作模式 LFSR。 */
-function lfsrWithWorkMode(s: StaticArray<u32>): void {
-  let v = lfsrFeedback(s);
+function lfsrWithWorkMode(): void {
+  let v = lfsrFeedback();
   if (v === 0) v = 0x7fffffff;
-  shiftLfsr(s, v);
+  shiftLfsr(v);
 }
 
-/** 比特重组 + 非线性函数 F。返回 W；更新 r1/r2（通过阻塞参数不行，用数组）。 */
-function fFunction(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u32>): u32 {
-  // 比特重组。
-  x[0] = (((s[15] & 0x7fff8000) << 1) | (s[14] & 0xffff)) & 0xffffffff;
-  x[1] = (((s[11] & 0xffff) << 16) | (s[9] >>> 15)) & 0xffffffff;
-  x[2] = (((s[7] & 0xffff) << 16) | (s[5] >>> 15)) & 0xffffffff;
-  x[3] = (((s[2] & 0xffff) << 16) | (s[0] >>> 15)) & 0xffffffff;
+/** 比特重组 + 非线性函数 F。返回 W；R1/R2 写回 R_PTR，X3 存 X_PTR 供下一拍用。 */
+function fFunction(): u32 {
+  // 比特重组（X0..X2 是局部量；X3 需保留给密钥字异或，存回 X_PTR）。
+  const x0 =
+    (((load<u32>(S_PTR + 15 * 4) & 0x7fff8000) << 1) | (load<u32>(S_PTR + 14 * 4) & 0xffff)) &
+    0xffffffff;
+  const x1 =
+    (((load<u32>(S_PTR + 11 * 4) & 0xffff) << 16) | (load<u32>(S_PTR + 9 * 4) >>> 15)) & 0xffffffff;
+  const x2 =
+    (((load<u32>(S_PTR + 7 * 4) & 0xffff) << 16) | (load<u32>(S_PTR + 5 * 4) >>> 15)) & 0xffffffff;
+  const x3 =
+    (((load<u32>(S_PTR + 2 * 4) & 0xffff) << 16) | (load<u32>(S_PTR) >>> 15)) & 0xffffffff;
+  store<u32>(X_PTR + 12, x3);
 
-  const r1 = r[0];
-  const r2 = r[1];
-  const w = ((x[0] ^ r1) + r2) & 0xffffffff;
-  const w1 = (r1 + x[1]) & 0xffffffff;
-  const w2 = (r2 ^ x[2]) & 0xffffffff;
+  const r1 = load<u32>(R_PTR);
+  const r2 = load<u32>(R_PTR + 4);
+  const w = ((x0 ^ r1) + r2) & 0xffffffff;
+  const w1 = (r1 + x1) & 0xffffffff;
+  const w2 = (r2 ^ x2) & 0xffffffff;
   // R1 = S(L1( (W1 & 0xffff) << 16 | (W2 >>> 16) ))
   // R2 = S(L2( (W2 & 0xffff) << 16 | (W1 >>> 16) ))
   const u = l1x((((w1 & 0xffff) << 16) | (w2 >>> 16)) & 0xffffffff);
   const v = l2x((((w2 & 0xffff) << 16) | (w1 >>> 16)) & 0xffffffff);
-  r[0] = sTransform(u);
-  r[1] = sTransform(v);
+  store<u32>(R_PTR, sTransform(u));
+  store<u32>(R_PTR + 4, sTransform(v));
   return w;
 }
 
@@ -163,36 +183,33 @@ function fFunction(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u32>
  * 键加载 + 32 轮初始化 + 丢弃一拍（GM/T 0001-2012 §5.2、§5.3），
  * 建立工作模式状态。EEA3 密钥流与 EIA3 完整性共用。
  */
-function initState(
-  s: StaticArray<u32>,
-  x: StaticArray<u32>,
-  r: StaticArray<u32>,
-  keyPtr: usize,
-  ivPtr: usize,
-): void {
+function initState(keyPtr: usize, ivPtr: usize): void {
   for (let i = 0; i < 16; i++) {
     const k = <u32>load<u8>(keyPtr + i);
     const v = <u32>load<u8>(ivPtr + i);
-    s[i] = ((k << 23) | (D[i] << 8) | v) & 0x7fffffff;
+    store<u32>(
+      S_PTR + (<usize>i << 2),
+      ((k << 23) | (load<u32>(D + (<usize>i << 2)) << 8) | v) & 0x7fffffff,
+    );
   }
-  r[0] = 0;
-  r[1] = 0;
+  store<u32>(R_PTR, 0);
+  store<u32>(R_PTR + 4, 0);
 
   // 初始化 32 轮。
   for (let round = 0; round < 32; round++) {
-    const w = fFunction(s, x, r);
-    lfsrWithInitMode(s, w >>> 1);
+    const w = fFunction();
+    lfsrWithInitMode(w >>> 1);
   }
   // 丢弃一拍。
-  fFunction(s, x, r);
-  lfsrWithWorkMode(s);
+  fFunction();
+  lfsrWithWorkMode();
 }
 
 /** 推进一拍，返回该拍密钥字（W ^ X3）。 */
-function nextKeyword(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u32>): u32 {
-  const w = fFunction(s, x, r);
-  const ks = (w ^ x[3]) & 0xffffffff;
-  lfsrWithWorkMode(s);
+function nextKeyword(): u32 {
+  const w = fFunction();
+  const ks = (w ^ load<u32>(X_PTR + 12)) & 0xffffffff;
+  lfsrWithWorkMode();
   return ks;
 }
 
@@ -200,17 +217,18 @@ function nextKeyword(s: StaticArray<u32>, x: StaticArray<u32>, r: StaticArray<u3
  * 生成 nbytes 字节 ZUC 密钥流。
  */
 export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes: i32): void {
-  const s = new StaticArray<u32>(16);
-  const x = new StaticArray<u32>(4);
-  const r = new StaticArray<u32>(2);
-  initState(s, x, r, keyPtr, ivPtr);
+  initState(keyPtr, ivPtr);
 
-  // 生成密钥流：密钥字 = W ^ X3。
+  // 生成密钥流：密钥字 = W ^ X3。整字用 store<u32>（大端），余数按字节。
   let written = 0;
-  while (written < nbytes) {
-    const ks = nextKeyword(s, x, r);
+  while (written + 4 <= nbytes) {
+    store<u32>(outPtr + <usize>written, bswap<u32>(nextKeyword()));
+    written += 4;
+  }
+  if (written < nbytes) {
+    const ks = nextKeyword();
     for (let i = 0; i < 4 && written < nbytes; i++) {
-      store<u8>(outPtr + written, <u8>((ks >>> ((3 - i) * 8)) & 0xff));
+      store<u8>(outPtr + <usize>written, <u8>((ks >>> ((3 - i) * 8)) & 0xff));
       written++;
     }
   }
@@ -235,12 +253,9 @@ export function zucEia3Out(
   nbits: i32,
   macPtr: usize,
 ): void {
-  const s = new StaticArray<u32>(16);
-  const x = new StaticArray<u32>(4);
-  const r = new StaticArray<u32>(2);
-  initState(s, x, r, keyPtr, ivPtr);
+  initState(keyPtr, ivPtr);
 
-  let K0 = nextKeyword(s, x, r);
+  let K0 = nextKeyword();
   let T: u32 = 0;
   let bitPos = 0;
 
@@ -249,7 +264,7 @@ export function zucEia3Out(
     const base = <usize>(bitPos >> 3);
     let M: u32 = 0;
     for (let i = 0; i < 4; i++) M = (M << 8) | <u32>load<u8>(msgPtr + base + <usize>i);
-    let K1 = nextKeyword(s, x, r);
+    let K1 = nextKeyword();
     for (let i = 0; i < 32; i++) {
       if (M & 0x80000000) T ^= K0;
       M = M << 1;
@@ -268,7 +283,7 @@ export function zucEia3Out(
       const off = base + <usize>i;
       M = (M << 8) | (off < <usize>msgLen ? <u32>load<u8>(msgPtr + off) : 0);
     }
-    let K1 = nextKeyword(s, x, r);
+    let K1 = nextKeyword();
     for (let i = 0; i < rem; i++) {
       if (M & 0x80000000) T ^= K0;
       M = M << 1;
@@ -278,7 +293,7 @@ export function zucEia3Out(
   }
 
   T ^= K0;
-  T ^= nextKeyword(s, x, r);
+  T ^= nextKeyword();
 
   // 大端写出 4 字节 MAC。
   store<u8>(macPtr, <u8>((T >>> 24) & 0xff));

@@ -23,7 +23,9 @@
 // - 输入输出可重叠（逐块就地）。
 
 // S 盒（GB/T 32907-2016 §6.2 表 1）。
-const SBOX: StaticArray<u8> = [
+// 用内存数据段裸指针：每块要做 128 次查表，`StaticArray` 索引会退化成
+// `__get` runtime 调用（含边界检查），实测是每块成本的主要来源。
+const SBOX: usize = memory.data<u8>([
   0xd6, 0x90, 0xe9, 0xfe, 0xcc, 0xe1, 0x3d, 0xb7, 0x16, 0xb6, 0x14, 0xc2, 0x28, 0xfb, 0x2c, 0x05,
   0x2b, 0x67, 0x9a, 0x76, 0x2a, 0xbe, 0x04, 0xc3, 0xaa, 0x44, 0x13, 0x26, 0x49, 0x86, 0x06, 0x99,
   0x9c, 0x42, 0x50, 0xf4, 0x91, 0xef, 0x98, 0x7a, 0x33, 0x54, 0x0b, 0x43, 0xed, 0xcf, 0xac, 0x62,
@@ -40,18 +42,18 @@ const SBOX: StaticArray<u8> = [
   0x0a, 0xc1, 0x31, 0x88, 0xa5, 0xcd, 0x7b, 0xbd, 0x2d, 0x74, 0xd0, 0x12, 0xb8, 0xe5, 0xb4, 0xb0,
   0x89, 0x69, 0x97, 0x4a, 0x0c, 0x96, 0x77, 0x7e, 0x65, 0xb9, 0xf1, 0x09, 0xc5, 0x6e, 0xc6, 0x84,
   0x18, 0xf0, 0x7d, 0xec, 0x3a, 0xdc, 0x4d, 0x20, 0x79, 0xee, 0x5f, 0x3e, 0xd7, 0xcb, 0x39, 0x48,
-];
+]);
 
 // 系统参数 FK（GB/T 32907-2016 §6.3）。
-const FK: StaticArray<u32> = [0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc];
+const FK: usize = memory.data<u32>([0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc]);
 
 // 固定参数 CK（GB/T 32907-2016 §6.4）。
-const CK: StaticArray<u32> = [
+const CK: usize = memory.data<u32>([
   0x00070e15, 0x1c232a31, 0x383f464d, 0x545b6269, 0x70777e85, 0x8c939aa1, 0xa8afb6bd, 0xc4cbd2d9,
   0xe0e7eef5, 0xfc030a11, 0x181f262d, 0x343b4249, 0x50575e65, 0x6c737a81, 0x888f969d, 0xa4abb2b9,
   0xc0c7ced5, 0xdce3eaf1, 0xf8ff060d, 0x141b2229, 0x30373e45, 0x4c535a61, 0x686f767d, 0x848b9299,
   0xa0a7aeb5, 0xbcc3cad1, 0xd8dfe6ed, 0xf4fb0209, 0x10171e25, 0x2c333a41, 0x484f565d, 0x646b7279,
-];
+]);
 
 // 用 Array 持住分配的缓冲，防止 GC 回收。
 const pinned: Array<StaticArray<u8>> = [];
@@ -68,33 +70,32 @@ export function freeAll(): void {
   pinned.length = 0;
 }
 
+/**
+ * 轮密钥工作区（32 个 u32）——线性内存裸指针。
+ * 密钥扩展与块加密都不重入（叶子），跨调用复用安全。
+ */
+const RK_PTR: usize = heap.alloc(32 * 4);
+
 function rotl(x: u32, n: i32): u32 {
   return ((x << n) | (x >>> (32 - n))) & 0xffffffff;
 }
 
-/** big-endian 读 4 字节。 */
+/** big-endian 读 4 字节（一次 load<u32> + bswap，替代 4 次字节 load 拼装）。 */
 function readU32BE(p: usize): u32 {
-  const b0 = <u32>load<u8>(p);
-  const b1 = <u32>load<u8>(p + 1);
-  const b2 = <u32>load<u8>(p + 2);
-  const b3 = <u32>load<u8>(p + 3);
-  return ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 0xffffffff;
+  return bswap<u32>(load<u32>(p));
 }
 
-/** big-endian 写 4 字节。 */
+/** big-endian 写 4 字节（一次 store<u32> + bswap）。 */
 function writeU32BE(p: usize, v: u32): void {
-  store<u8>(p, <u8>(v >>> 24));
-  store<u8>(p + 1, <u8>(v >>> 16));
-  store<u8>(p + 2, <u8>(v >>> 8));
-  store<u8>(p + 3, <u8>v);
+  store<u32>(p, bswap<u32>(v));
 }
 
-/** 非线性变换 tau：对 4 字节逐字节查 S 盒。 */
+/** 非线性变换 tau：对 4 字节逐字节查 S 盒（裸指针 + load<u8>）。 */
 function tau(x: u32): u32 {
-  const b0 = <u32>SBOX[(x >>> 24) & 0xff];
-  const b1 = <u32>SBOX[(x >>> 16) & 0xff];
-  const b2 = <u32>SBOX[(x >>> 8) & 0xff];
-  const b3 = <u32>SBOX[x & 0xff];
+  const b0 = <u32>load<u8>(SBOX + ((x >>> 24) & 0xff));
+  const b1 = <u32>load<u8>(SBOX + ((x >>> 16) & 0xff));
+  const b2 = <u32>load<u8>(SBOX + ((x >>> 8) & 0xff));
+  const b3 = <u32>load<u8>(SBOX + (x & 0xff));
   return ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 0xffffffff;
 }
 
@@ -124,15 +125,20 @@ function tTransformKey(x: u32): u32 {
  * @param keyPtr 密钥首地址。
  * @param rk 输出轮密钥数组（32 个）。
  */
-function keyExpansion(keyPtr: usize, rk: StaticArray<u32>): void {
-  const K = new StaticArray<u32>(36);
-  for (let i = 0; i < 4; i++) {
-    K[i] = readU32BE(keyPtr + i * 4) ^ FK[i];
-  }
+function keyExpansion(keyPtr: usize, rk: usize): void {
+  // 4 个滚动状态量（寄存器），替代 K[36] 数组 —— 后者每轮都要分配并走
+  // `__get`/`__set` runtime 调用。
+  let k0 = readU32BE(keyPtr) ^ load<u32>(FK);
+  let k1 = readU32BE(keyPtr + 4) ^ load<u32>(FK + 4);
+  let k2 = readU32BE(keyPtr + 8) ^ load<u32>(FK + 8);
+  let k3 = readU32BE(keyPtr + 12) ^ load<u32>(FK + 12);
   for (let i = 0; i < 32; i++) {
-    const x = K[i + 1] ^ K[i + 2] ^ K[i + 3] ^ CK[i];
-    K[i + 4] = (K[i] ^ tTransformKey(x)) & 0xffffffff;
-    rk[i] = K[i + 4];
+    const t = (k0 ^ tTransformKey(k1 ^ k2 ^ k3 ^ load<u32>(CK + (<usize>i << 2)))) & 0xffffffff;
+    k0 = k1;
+    k1 = k2;
+    k2 = k3;
+    k3 = t;
+    store<u32>(rk + (<usize>i << 2), t);
   }
 }
 
@@ -143,28 +149,34 @@ function keyExpansion(keyPtr: usize, rk: StaticArray<u32>): void {
  * @param inPtr 16 字节输入。
  * @param outPtr 16 字节输出。
  */
-function cipherBlock(rk: StaticArray<u32>, inPtr: usize, outPtr: usize): void {
-  const X = new StaticArray<u32>(36);
-  for (let i = 0; i < 4; i++) {
-    X[i] = readU32BE(inPtr + i * 4);
-  }
+function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
+  // 4 个滚动状态量（寄存器）：SM4 的标准写法，替代 X[36] 数组的分配与访问。
+  let x0 = readU32BE(inPtr);
+  let x1 = readU32BE(inPtr + 4);
+  let x2 = readU32BE(inPtr + 8);
+  let x3 = readU32BE(inPtr + 12);
   for (let i = 0; i < 32; i++) {
-    const x = X[i + 1] ^ X[i + 2] ^ X[i + 3] ^ rk[i];
-    X[i + 4] = (X[i] ^ tTransform(x)) & 0xffffffff;
+    const t = (x0 ^ tTransform(x1 ^ x2 ^ x3 ^ load<u32>(rk + (<usize>i << 2)))) & 0xffffffff;
+    x0 = x1;
+    x1 = x2;
+    x2 = x3;
+    x3 = t;
   }
-  // 输出反序：X35, X34, X33, X32。
-  writeU32BE(outPtr + 0, X[35]);
-  writeU32BE(outPtr + 4, X[34]);
-  writeU32BE(outPtr + 8, X[33]);
-  writeU32BE(outPtr + 12, X[32]);
+  // 输出反序：X35..X32 即最后的 x3..x0。
+  writeU32BE(outPtr, x3);
+  writeU32BE(outPtr + 4, x2);
+  writeU32BE(outPtr + 8, x1);
+  writeU32BE(outPtr + 12, x0);
 }
 
 /** 反转轮密钥（用于解密）。 */
-function reverseRk(rk: StaticArray<u32>): void {
+function reverseRk(rk: usize): void {
   for (let i = 0; i < 16; i++) {
-    const t = rk[i];
-    rk[i] = rk[31 - i];
-    rk[31 - i] = t;
+    const j = 31 - i;
+    const a = load<u32>(rk + (<usize>i << 2));
+    const b = load<u32>(rk + (<usize>j << 2));
+    store<u32>(rk + (<usize>i << 2), b);
+    store<u32>(rk + (<usize>j << 2), a);
   }
 }
 
@@ -172,7 +184,7 @@ function reverseRk(rk: StaticArray<u32>): void {
  * SM4 ECB 加密（inLen 必须是 16 的倍数）。
  */
 export function sm4EncryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr: usize): void {
-  const rk = new StaticArray<u32>(32);
+  const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
   for (let off: usize = 0; off < inLen; off += 16) {
     cipherBlock(rk, inPtr + off, outPtr + off);
@@ -183,7 +195,7 @@ export function sm4EncryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr:
  * SM4 ECB 解密（inLen 必须是 16 的倍数）。
  */
 export function sm4DecryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr: usize): void {
-  const rk = new StaticArray<u32>(32);
+  const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
   reverseRk(rk);
   for (let off: usize = 0; off < inLen; off += 16) {
@@ -200,10 +212,97 @@ export function sm4DecryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr:
  * @param decrypt 0=加密，1=解密。
  */
 export function sm4Block(keyPtr: usize, inPtr: usize, outPtr: usize, decrypt: i32): void {
-  const rk = new StaticArray<u32>(32);
+  const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
   if (decrypt !== 0) reverseRk(rk);
   cipherBlock(rk, inPtr, outPtr);
+}
+
+// ---------- 批量模式（CBC / CTR） ----------
+//
+// 把整段循环放进 wasm。原先 TS 侧逐块调 `sm4Block`，每块要付一次 JS↔WASM
+// 边界 + `withBuffers` 的 alloc / mem.set / slice（实测 ~0.5µs/块，1KB 即
+// 浪费 ~33µs）。这里一次调用处理整段，模式循环全在 wasm 内完成。
+
+/** 模式工作区（各 16 字节）：CBC 链值 / 异或暂存 / CTR 计数器 / CTR 密钥流。 */
+const CBC_PREV: usize = heap.alloc(16);
+const CBC_TMP: usize = heap.alloc(16);
+const CTR_CB: usize = heap.alloc(16);
+const CTR_KS: usize = heap.alloc(16);
+
+/** 16 字节按 u32 异或：dst = a ^ b（三者均 4 字节对齐）。 */
+function xor16u32(dst: usize, a: usize, b: usize): void {
+  for (let i = 0; i < 16; i += 4) {
+    store<u32>(dst + i, load<u32>(a + i) ^ load<u32>(b + i));
+  }
+}
+
+/**
+ * SM4-CBC 加密（inLen 必须是 16 的倍数；padding 由调用方处理）。
+ */
+export function sm4CbcEncrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  memory.copy(CBC_PREV, ivPtr, 16);
+  for (let off: usize = 0; off < inLen; off += 16) {
+    xor16u32(CBC_TMP, inPtr + off, CBC_PREV);
+    cipherBlock(rk, CBC_TMP, outPtr + off);
+    memory.copy(CBC_PREV, outPtr + off, 16);
+  }
+}
+
+/**
+ * SM4-CBC 解密（inLen 必须是 16 的倍数）。
+ */
+export function sm4CbcDecrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  reverseRk(rk);
+  memory.copy(CBC_PREV, ivPtr, 16);
+  for (let off: usize = 0; off < inLen; off += 16) {
+    memory.copy(CBC_TMP, inPtr + off, 16); // 保留本块密文，作为下一块的链值
+    cipherBlock(rk, inPtr + off, outPtr + off);
+    xor16u32(outPtr + off, outPtr + off, CBC_PREV);
+    memory.copy(CBC_PREV, CBC_TMP, 16);
+  }
+}
+
+/**
+ * SM4-CTR 加解密（自反；inLen 任意长度）。
+ */
+export function sm4CtrCrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  memory.copy(CTR_CB, ivPtr, 16);
+  let off: usize = 0;
+  while (off < inLen) {
+    cipherBlock(rk, CTR_CB, CTR_KS);
+    const rest = inLen - off;
+    const take: usize = rest < 16 ? rest : 16;
+    for (let i: usize = 0; i < take; i++) {
+      store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(CTR_KS + i));
+    }
+    inc32(CTR_CB);
+    off += 16;
+  }
 }
 
 // ---------- GCM（NIST SP 800-38D 的 AEAD，套在 SM4 上） ----------
@@ -366,7 +465,7 @@ function inc32Copy(srcPtr: usize, dstPtr: usize): void {
  * 输入输出可重叠。
  */
 function gctr(
-  rk: StaticArray<u32>,
+  rk: usize,
   icbPtr: usize,
   inPtr: usize,
   inLen: usize,
@@ -412,7 +511,7 @@ export function sm4GcmEncrypt(
   outPtr: usize,
   tagPtr: usize,
 ): void {
-  const rk = new StaticArray<u32>(32);
+  const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
 
   const h = new StaticArray<u8>(16);
@@ -455,7 +554,7 @@ export function sm4GcmDecrypt(
   outPtr: usize,
   tagPtr: usize,
 ): i32 {
-  const rk = new StaticArray<u32>(32);
+  const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
 
   const h = new StaticArray<u8>(16);

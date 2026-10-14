@@ -8,6 +8,7 @@
  * 然后让每个 group 自己注册用例。
  */
 import { run } from 'mitata';
+import { benchCompare } from './compare.bench.js';
 import { benchSm2 } from './sm2.bench.js';
 import { benchSm3 } from './sm3.bench.js';
 import { benchSm4 } from './sm4.bench.js';
@@ -19,5 +20,6 @@ await benchSm3();
 await benchSm4();
 await benchZuc();
 await benchSm9();
+await benchCompare();
 
 run();

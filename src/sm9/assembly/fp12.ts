@@ -5,32 +5,21 @@
 //
 // 参考：GM/T 0044-2016。
 
-import {
-  u256clone,
-  u256isOdd,
-  u256isZero,
-  u256shr1,
-  u256zero,
-} from '../../common/assembly/field256';
+import { u256clone, u256isOdd, u256shr1, u256zero } from '../../common/assembly/field256';
 import { U256 } from './fp';
 import {
   Fp2,
-  fp2Add,
   fp2AddTo,
   fp2Conjugate,
   fp2copy,
   fp2eq,
-  fp2Mul,
   fp2MulFp,
   fp2MulTo,
   fp2Neg,
   fp2one,
   fp2Put,
   fp2set,
-  fp2SqrTo,
-  fp2Sub,
   fp2SubTo,
-  fp2TimesU,
   fp2TimesUTo,
   fp2zero,
 } from './fp2';
@@ -43,26 +32,20 @@ import {
   fp4copy,
   fp4CopyInto,
   fp4eq,
-  fp4Inv,
   fp4InvTo,
   fp4isZero,
   fp4Mul,
   fp4MulFp,
-  fp4MulFp2To,
   fp4MulTo,
-  fp4MulV,
   fp4MulVTo,
   fp4Neg,
   fp4NegTo,
   fp4one,
-  fp4Sqr,
   fp4SqrTo,
-  fp4SqrV,
   fp4SqrVTo,
   fp4Sub,
   fp4SubTo,
   fp4set,
-  fp4TimesV,
   fp4TimesVTo,
   fp4zero,
 } from './fp4';

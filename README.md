@@ -23,12 +23,38 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 国密算法（SM2 / SM3 / SM4 / SM9 / ZUC）的 **AssemblyScript → WebAssembly** 实现，Node 18+ 与现代浏览器（含 Web Worker）均可使用，按算法分包、按需懒加载。
 
-- **性能**：椭圆曲线与双线性对跑在 WASM 里，比纯 JS 实现快一个数量级；
+- **性能**：热点（大整数模运算 / hash 压缩 / 分组密码轮函数）跑在 WASM 里。轻量算法
+  （SM3 / SM4 / ZUC）实测快于纯 JS 参考实现 1.1~3.0×；椭圆曲线部分（SM2）仍在优化中，
+  见下方 **性能** 小节；
 - **零工具链**：发布物是 `.wasm` + 薄 TS 胶水，使用者不需要 `node-gyp` / Rust / 编译器；
 - **跨运行时**：同一份 API 在 Node、浏览器、Worker 下一致；
 - **国标对齐**：实现按 GM/T 0003 / 0004 / 0002 / 0044 / 0001 系列，测试用官方向量与 OpenSSL / GmSSL / gmkitx 交叉对拍。
 
 ---
+
+## 性能
+
+热点（大整数模运算、hash 压缩函数、分组密码轮函数）在 WASM 内执行。实测数据
+（Apple M4 / Node 26.7 / macOS 27，`pnpm bench`，消息 1 KB）：
+
+| 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
+|---|---|---|---|---|
+| SM3 | hash 1 KB | 7.0 µs | 7.7 µs | 快 1.1× |
+| SM4 | ECB 1 KB | 25.8 µs | 43.0 µs | 快 1.7× |
+| SM4 | CBC 1 KB | 30.6 µs | 46.3 µs | 快 1.5× |
+| ZUC | EEA3 1 KB | 7.8 µs | 23.7 µs | 快 3.0× |
+| SM2 | sign 64 B | 6.10 ms | 423 µs | 慢 14× |
+| SM2 | getPublicKey | 2.96 ms | 162 µs | 慢 18× |
+| SM9 | sign / verify 32 B | 16.6 / 31.8 ms | 无纯 JS 实现 | — |
+
+要点：
+
+- **轻量算法（SM3 / SM4 / ZUC）已快于纯 JS 参考实现**；
+- **SM2 目前仍慢于纯 JS**：wasm 侧的大整数用 `StaticArray<u32>` 表示，其索引访问会
+  编译成运行时调用；一次标量乘要做数千次模乘，于是被放大到毫秒级。已知修法是把该表示
+  换成线性内存裸指针（影响面约 3800 行），列为后续工作；
+- SM9 由 pairing 主导，纯 JS 生态没有可比实现；
+- 数字随版本与机器变化，请以本机 `pnpm bench` 为准。
 
 ## 安装
 
@@ -276,8 +302,10 @@ standards (**SM2 / SM3 / SM4 / SM9 / ZUC**). Runs on Node 18+ and modern
 browsers (including Web Workers). Algorithms are split into sub-packages and
 lazy-loaded on demand.
 
-- **Performance**: elliptic curves and bilinear pairings run inside WASM,
-  roughly an order of magnitude faster than pure-JS implementations;
+- **Performance**: hot paths (bignum modular arithmetic, hash compression,
+  block-cipher rounds) run inside WASM. The lightweight algorithms (SM3 / SM4 /
+  ZUC) measure 1.1~3.0× faster than the pure-JS reference implementation; the
+  elliptic-curve side (SM2) is still being optimised — see **Performance** below;
 - **Zero toolchain**: the published artifact is `.wasm` plus a thin TS shim;
   users don't need `node-gyp`, Rust, or a compiler;
 - **Runtime-agnostic**: the same API works in Node, browsers, and Workers;
@@ -286,6 +314,35 @@ lazy-loaded on demand.
   OpenSSL / GmSSL / gmkitx.
 
 ---
+
+## Performance
+
+Hot paths (bignum modular arithmetic, hash compression, block-cipher rounds) run
+inside WASM. Measured on Apple M4 / Node 26.7 / macOS 27 via `pnpm bench`
+(1 KB messages):
+
+| Algorithm | Operation | sm-crypto-wasm | pure-JS reference (gmkitx) | |
+|---|---|---|---|---|
+| SM3 | hash 1 KB | 7.0 µs | 7.7 µs | 1.1× faster |
+| SM4 | ECB 1 KB | 25.8 µs | 43.0 µs | 1.7× faster |
+| SM4 | CBC 1 KB | 30.6 µs | 46.3 µs | 1.5× faster |
+| ZUC | EEA3 1 KB | 7.8 µs | 23.7 µs | 3.0× faster |
+| SM2 | sign 64 B | 6.10 ms | 423 µs | 14× slower |
+| SM2 | getPublicKey | 2.96 ms | 162 µs | 18× slower |
+| SM9 | sign / verify 32 B | 16.6 / 31.8 ms | no pure-JS implementation | — |
+
+Notes:
+
+- The **lightweight algorithms (SM3 / SM4 / ZUC) are faster than the pure-JS
+  reference implementation**;
+- **SM2 is currently slower than pure JS**: on the wasm side big integers are
+  represented as `StaticArray<u32>`, whose indexed access compiles to runtime
+  calls; a single scalar multiplication performs thousands of modular
+  multiplications, amplifying that to milliseconds. The known fix is to switch
+  that representation to linear-memory raw pointers (~3800 lines affected) —
+  tracked as follow-up work;
+- SM9 is dominated by pairings; there is no comparable pure-JS implementation;
+- Numbers vary with version and machine — run `pnpm bench` locally.
 
 ## Installation
 
@@ -566,8 +623,10 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 современных браузерах (включая Web Workers). Алгоритмы разделены по
 подпакетам и подгружаются лениво.
 
-- **Производительность**: эллиптические кривые и билинейные спаривания
-  выполняются в WASM — примерно на порядок быстрее, чем чистый JS;
+- **Производительность**: горячие пути (модульная арифметика больших чисел,
+  сжатие хэша, раунды блочного шифра) выполняются в WASM. Лёгкие алгоритмы
+  (SM3 / SM4 / ZUC) измеренно в 1.1~3.0× быстрее чистой JS-реализации; часть на
+  эллиптических кривых (SM2) ещё оптимизируется — см. **Производительность** ниже;
 - **Без инструментария**: на выходе `.wasm` плюс тонкая TS-прослойка;
   пользователю не нужны `node-gyp`, Rust или компилятор;
 - **Кросс-рантайм**: один и тот же API работает в Node, браузере и
@@ -577,6 +636,33 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   OpenSSL / GmSSL / gmkitx.
 
 ---
+
+## Производительность
+
+Горячие пути (модульная арифметика больших чисел, сжатие хэша, раунды блочного
+шифра) выполняются внутри WASM. Измерено на Apple M4 / Node 26.7 / macOS 27
+через `pnpm bench` (сообщения 1 KB):
+
+| Алгоритм | Операция | sm-crypto-wasm | чистая JS (gmkitx) | |
+|---|---|---|---|---|
+| SM3 | hash 1 KB | 7.0 µs | 7.7 µs | в 1.1× быстрее |
+| SM4 | ECB 1 KB | 25.8 µs | 43.0 µs | в 1.7× быстрее |
+| SM4 | CBC 1 KB | 30.6 µs | 46.3 µs | в 1.5× быстрее |
+| ZUC | EEA3 1 KB | 7.8 µs | 23.7 µs | в 3.0× быстрее |
+| SM2 | sign 64 B | 6.10 ms | 423 µs | в 14× медленнее |
+| SM2 | getPublicKey | 2.96 ms | 162 µs | в 18× медленнее |
+| SM9 | sign / verify 32 B | 16.6 / 31.8 ms | нет чистой JS-реализации | — |
+
+Примечания:
+
+- **Лёгкие алгоритмы (SM3 / SM4 / ZUC) быстрее чистой JS-реализации**;
+- **SM2 пока медленнее чистого JS**: на стороне wasm большие числа представлены
+  как `StaticArray<u32>`, обращение по индексу компилируется в вызовы рантайма;
+  одно скалярное умножение выполняет тысячи модульных умножений, что усиливает
+  это до миллисекунд. Известное исправление — перейти на сырые указатели в
+  линейной памяти (~3800 строк), вынесено в последующие работы;
+- SM9 определяется спариваниями; сопоставимой чистой JS-реализации нет;
+- Цифры зависят от версии и машины — запускайте `pnpm bench` локально.
 
 ## Установка
 

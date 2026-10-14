@@ -27,7 +27,7 @@ describe('SM9 主私钥标量范围校验', () => {
 
   it('边界值 n−1 与 1 被接受', () => {
     const nMinus1 = (N - 1n).toString(16).padStart(64, '0');
-    const one = '00'.repeat(31) + '01';
+    const one = `${'00'.repeat(31)}01`;
     // 签名主公钥是 G2 点（128 字节 = 256 hex）；加密主公钥是 G1 点（64 字节 = 128 hex）
     expect(getSignPublicKey(nMinus1)).toMatch(/^[0-9a-f]{256}$/);
     expect(getSignPublicKey(one)).toMatch(/^[0-9a-f]{256}$/);

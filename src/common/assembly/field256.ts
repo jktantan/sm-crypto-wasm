@@ -271,23 +271,25 @@ export function modSub(a: U256, b: U256, m: U256): U256 {
  */
 export function reduce512(x: U512, m: U256): U256 {
   const out = new StaticArray<u32>(8);
-  reduce512Into(x, m, out);
+  reduce512Into(changetype<usize>(x), m, out);
   return out;
 }
 
 /** reduce512 的 scratch 版（modMul 长除回退路径用，无逐次分配）。 */
-function reduce512Into(x: U512, m: U256, out: StaticArray<u32>): void {
+function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
   const r = RD_R; // 余数（< m · 2^32，故 9 limb 足够）
   const t = RD_T; // q · m
-  for (let k = 0; k < 9; k++) r[k] = 0;
+  for (let k = 0; k < 9; k++) store<u32>(r + (<usize>k << 2), 0);
   const mhi = m[7];
   for (let i = 15; i >= 0; i--) {
     // r = r * 2^32 + x[i]
-    for (let k = 8; k > 0; k--) r[k] = r[k - 1];
-    r[0] = x[i];
+    for (let k = 8; k > 0; k--) {
+      store<u32>(r + (<usize>k << 2), load<u32>(r + (<usize>(k - 1) << 2)));
+    }
+    store<u32>(r, load<u32>(x + (<usize>i << 2)));
 
     // 估商 q = floor((r[8]·2^32 + r[7]) / m[7])，上限 2^32-1
-    const num = (u64(r[8]) << 32) | u64(r[7]);
+    const num = (u64(load<u32>(r + 32)) << 32) | u64(load<u32>(r + 28));
     const qq = num / u64(mhi);
     let q: u32 = qq > u64(0xffffffff) ? 0xffffffff : <u32>qq;
 
@@ -297,19 +299,20 @@ function reduce512Into(x: U512, m: U256, out: StaticArray<u32>): void {
       let carry: u64 = 0;
       for (let j = 0; j < 8; j++) {
         const cur = u64(q) * u64(m[j]) + carry;
-        t[j] = <u32>(cur & 0xffffffff);
+        store<u32>(t + (<usize>j << 2), <u32>(cur & 0xffffffff));
         carry = cur >>> 32;
       }
-      t[8] = <u32>carry;
+      store<u32>(t + 32, <u32>carry);
 
       let borrow: i64 = 0;
       for (let k = 0; k < 9; k++) {
-        const d: i64 = i64(r[k]) - i64(t[k]) - borrow;
+        const d: i64 =
+          i64(load<u32>(r + (<usize>k << 2))) - i64(load<u32>(t + (<usize>k << 2))) - borrow;
         if (d < 0) {
-          r[k] = <u32>(d + 0x100000000);
+          store<u32>(r + (<usize>k << 2), <u32>(d + 0x100000000));
           borrow = 1;
         } else {
-          r[k] = <u32>d;
+          store<u32>(r + (<usize>k << 2), <u32>d);
           borrow = 0;
         }
       }
@@ -318,8 +321,8 @@ function reduce512Into(x: U512, m: U256, out: StaticArray<u32>): void {
       // 恢复 r（加回 t），q 减 1 重试
       let c: u64 = 0;
       for (let k = 0; k < 9; k++) {
-        const s = u64(r[k]) + u64(t[k]) + c;
-        r[k] = <u32>(s & 0xffffffff);
+        const s = u64(load<u32>(r + (<usize>k << 2))) + u64(load<u32>(t + (<usize>k << 2))) + c;
+        store<u32>(r + (<usize>k << 2), <u32>(s & 0xffffffff));
         c = s >>> 32;
       }
       q = (q - 1) & 0xffffffff;
@@ -328,11 +331,11 @@ function reduce512Into(x: U512, m: U256, out: StaticArray<u32>): void {
     }
 
     // 兜底：确保 r < m
-    while (r[8] !== 0 || cmp9(r, m) >= 0) {
+    while (load<u32>(r + 32) !== 0 || cmp9(r, m) >= 0) {
       sub9(r, m);
     }
   }
-  for (let i = 0; i < 8; i++) out[i] = r[i];
+  for (let i = 0; i < 8; i++) out[i] = load<u32>(r + (<usize>i << 2));
 }
 
 /** 大端字节串（任意长度）mod m：Horner 法 acc = acc*256 + b[i]。用于 SM9 的 40 字节哈希取模。 */
@@ -349,25 +352,26 @@ export function bytesMod(b: StaticArray<u8>, m: U256): U256 {
   return acc;
 }
 
-function cmp9(a: StaticArray<u32>, b: U256): i32 {
-  if (a[8] !== 0) return 1;
+function cmp9(a: usize, b: U256): i32 {
+  if (load<u32>(a + 32) !== 0) return 1;
   for (let i = 7; i >= 0; i--) {
-    if (a[i] > b[i]) return 1;
-    if (a[i] < b[i]) return -1;
+    const ai = load<u32>(a + (<usize>i << 2));
+    if (ai > b[i]) return 1;
+    if (ai < b[i]) return -1;
   }
   return 0;
 }
 
-function sub9(a: StaticArray<u32>, b: U256): void {
+function sub9(a: usize, b: U256): void {
   let borrow: i64 = 0;
   for (let i = 0; i < 9; i++) {
     const bi: i64 = i < 8 ? i64(b[i]) : 0;
-    const d: i64 = i64(a[i]) - bi - borrow;
+    const d: i64 = i64(load<u32>(a + (<usize>i << 2))) - bi - borrow;
     if (d < 0) {
-      a[i] = <u32>(d + 0x100000000);
+      store<u32>(a + (<usize>i << 2), <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      a[i] = <u32>d;
+      store<u32>(a + (<usize>i << 2), <u32>d);
       borrow = 0;
     }
   }
@@ -382,30 +386,33 @@ function sub9(a: StaticArray<u32>, b: U256): void {
  * scratch 非重入：modMul/modSqr 是叶子函数（不互相嵌套），调用方拿到的返回值是
  * 独立分配的 U256，不受后续调用影响。
  */
-const MUL_X = new StaticArray<u32>(16); // 512-bit 积
-const BR_Q1 = new StaticArray<u32>(9);
-const BR_Q2 = new StaticArray<u32>(18);
-const BR_Q3 = new StaticArray<u32>(9);
-const BR_R2 = new StaticArray<u32>(17);
-const BR_R = new StaticArray<u32>(10);
-const RD_R = new StaticArray<u32>(9); // reduce512 的余数
-const RD_T = new StaticArray<u32>(9); // reduce512 的 q·m
+// 线性内存裸指针：这些区域在**每次** modMul 里要被访问上百次。用 StaticArray
+// 的索引访问会退化成 `__get`/`__set` runtime 调用（含边界检查），实测是模乘的
+// 主要开销（SM2 的一次数标量乘要做几千次模乘，于是放大成几十毫秒）。
+const MUL_X: usize = heap.alloc(16 * 4); // 512-bit 积
+const BR_Q1: usize = heap.alloc(9 * 4);
+const BR_Q2: usize = heap.alloc(18 * 4);
+const BR_Q3: usize = heap.alloc(9 * 4);
+const BR_R2: usize = heap.alloc(17 * 4);
+const BR_R: usize = heap.alloc(10 * 4);
+const RD_R: usize = heap.alloc(9 * 4); // reduce512 的余数
+const RD_T: usize = heap.alloc(9 * 4); // reduce512 的 q·m
 
-/** mul512 的原地版：a × b → out（16 limb，需先清零语义由本函数保证）。 */
-function mul512Into(a: U256, b: U256, out: StaticArray<u32>): void {
-  for (let i = 0; i < 16; i++) out[i] = 0;
+/** mul512 的原地版：a × b → out（16 limb 裸指针）。 */
+function mul512Into(a: U256, b: U256, out: usize): void {
+  for (let i = 0; i < 16; i++) store<u32>(out + (<usize>i << 2), 0);
   for (let i = 0; i < 8; i++) {
     let carry: u64 = 0;
     const ai = u64(a[i]);
     for (let j = 0; j < 8; j++) {
-      const cur: u64 = u64(out[i + j]) + ai * u64(b[j]) + carry;
-      out[i + j] = <u32>(cur & 0xffffffff);
+      const cur: u64 = u64(load<u32>(out + (<usize>(i + j) << 2))) + ai * u64(b[j]) + carry;
+      store<u32>(out + (<usize>(i + j) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
     }
     let k = i + 8;
     while (carry !== 0 && k < 16) {
-      const cur: u64 = u64(out[k]) + carry;
-      out[k] = <u32>(cur & 0xffffffff);
+      const cur: u64 = u64(load<u32>(out + (<usize>k << 2))) + carry;
+      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
       k++;
     }
@@ -456,9 +463,9 @@ export function modSqr(a: U256, m: U256): U256 {
   return out;
 }
 
-/** a(8) × a(8) → 512-bit(16) 平方，schoolbook 对角折半。 */
-function sqr512Into(a: U256, out: StaticArray<u32>): void {
-  for (let i = 0; i < 16; i++) out[i] = 0;
+/** a(8) × a(8) → 512-bit(16) 平方，schoolbook 对角折半。out 为裸指针。 */
+function sqr512Into(a: U256, out: usize): void {
+  for (let i = 0; i < 16; i++) store<u32>(out + (<usize>i << 2), 0);
   // 交叉项：每对 (i, j>i) 算一次 p = a_i·a_j，加倍加进位置 i+j。
   for (let i = 0; i < 8; i++) {
     const ai = u64(a[i]);
@@ -469,8 +476,8 @@ function sqr512Into(a: U256, out: StaticArray<u32>): void {
         let k = i + j;
         let add: u64 = p;
         while (add !== 0 && k < 16) {
-          const cur = u64(out[k]) + (add & 0xffffffff);
-          out[k] = <u32>(cur & 0xffffffff);
+          const cur = u64(load<u32>(out + (<usize>k << 2))) + (add & 0xffffffff);
+          store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
           add = (add >>> 32) + (cur >>> 32);
           k++;
         }
@@ -483,15 +490,14 @@ function sqr512Into(a: U256, out: StaticArray<u32>): void {
     let k = 2 * i;
     let add: u64 = p;
     while (add !== 0 && k < 16) {
-      const cur = u64(out[k]) + (add & 0xffffffff);
-      out[k] = <u32>(cur & 0xffffffff);
+      const cur = u64(load<u32>(out + (<usize>k << 2))) + (add & 0xffffffff);
+      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
       add = (add >>> 32) + (cur >>> 32);
       k++;
     }
   }
 }
 
-@inline
 function ai2(a: U256, i: i32): u64 {
   const v = u64(a[i]);
   return v * v;
@@ -695,74 +701,75 @@ function barrettMu(m: U256): StaticArray<u32> | null {
   return null;
 }
 
-/** out(na+nb) = a(na) · b(nb)（schoolbook）。 */
-function mulLimbArrays(
-  a: StaticArray<u32>,
-  na: i32,
-  b: StaticArray<u32>,
-  nb: i32,
-  out: StaticArray<u32>,
-): void {
-  for (let i = 0; i < na + nb; i++) out[i] = 0;
+/** out(na+nb) = a(na) · b(nb)（schoolbook）。全部为裸指针。 */
+function mulLimbArrays(a: usize, na: i32, b: usize, nb: i32, out: usize): void {
+  for (let i = 0; i < na + nb; i++) store<u32>(out + (<usize>i << 2), 0);
   for (let i = 0; i < na; i++) {
     let carry: u64 = 0;
-    const ai = u64(a[i]);
+    const ai = u64(load<u32>(a + (<usize>i << 2)));
     for (let j = 0; j < nb; j++) {
-      const cur = u64(out[i + j]) + ai * u64(b[j]) + carry;
-      out[i + j] = <u32>(cur & 0xffffffff);
+      const cur =
+        u64(load<u32>(out + (<usize>(i + j) << 2))) +
+        ai * u64(load<u32>(b + (<usize>j << 2))) +
+        carry;
+      store<u32>(out + (<usize>(i + j) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
     }
     let k = i + nb;
     while (carry !== 0) {
-      const cur = u64(out[k]) + carry;
-      out[k] = <u32>(cur & 0xffffffff);
+      const cur = u64(load<u32>(out + (<usize>k << 2))) + carry;
+      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
       k++;
     }
   }
 }
 
-/** Barrett 归约（scratch 版）：x(16 limb) mod m(8 limb) → out(8 limb)，结果 < m。 */
-function barrettReduceInto(x: U512, m: U256, mu: StaticArray<u32>, out: StaticArray<u32>): void {
+/** Barrett 归约（scratch 版）：x(16 limb 裸指针) mod m(8 limb) → out(8 limb)，结果 < m。 */
+function barrettReduceInto(x: usize, m: U256, mu: StaticArray<u32>, out: StaticArray<u32>): void {
   const q1 = BR_Q1;
-  for (let i = 0; i < 9; i++) q1[i] = x[7 + i]; // x >> 224
+  for (let i = 0; i < 9; i++) store<u32>(q1 + (<usize>i << 2), load<u32>(x + (<usize>(7 + i) << 2))); // x >> 224
   const q2 = BR_Q2;
-  mulLimbArrays(q1, 9, mu, 9, q2);
+  mulLimbArrays(q1, 9, changetype<usize>(mu), 9, q2);
   const q3 = BR_Q3;
-  for (let i = 0; i < 9; i++) q3[i] = q2[9 + i]; // q2 >> 288
+  for (let i = 0; i < 9; i++) store<u32>(q3 + (<usize>i << 2), load<u32>(q2 + (<usize>(9 + i) << 2))); // q2 >> 288
   const r2 = BR_R2;
-  mulLimbArrays(q3, 9, m, 8, r2);
+  mulLimbArrays(q3, 9, changetype<usize>(m), 8, r2);
 
   const r = BR_R;
   let borrow: i64 = 0;
   for (let i = 0; i < 9; i++) {
-    const d: i64 = i64(x[i]) - i64(r2[i]) - borrow;
+    const d: i64 =
+      i64(load<u32>(x + (<usize>i << 2))) - i64(load<u32>(r2 + (<usize>i << 2))) - borrow;
     if (d < 0) {
-      r[i] = <u32>(d + 0x100000000);
+      store<u32>(r + (<usize>i << 2), <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      r[i] = <u32>d;
+      store<u32>(r + (<usize>i << 2), <u32>d);
       borrow = 0;
     }
   }
-  r[9] = <u32>borrow; // r 为负时 +2^288
+  store<u32>(r + 36, <u32>borrow); // r 为负时 +2^288
 
   let guard = 0;
-  while (guard < 4 && (r[9] !== 0 || r[8] !== 0 || cmp9(r, m) >= 0)) {
+  while (
+    guard < 4 &&
+    (load<u32>(r + 36) !== 0 || load<u32>(r + 32) !== 0 || cmp9(r, m) >= 0)
+  ) {
     let b: i64 = 0;
     for (let i = 0; i < 10; i++) {
       const mi: i64 = i < 8 ? i64(m[i]) : 0;
-      const d: i64 = i64(r[i]) - mi - b;
+      const d: i64 = i64(load<u32>(r + (<usize>i << 2))) - mi - b;
       if (d < 0) {
-        r[i] = <u32>(d + 0x100000000);
+        store<u32>(r + (<usize>i << 2), <u32>(d + 0x100000000));
         b = 1;
       } else {
-        r[i] = <u32>d;
+        store<u32>(r + (<usize>i << 2), <u32>d);
         b = 0;
       }
     }
     guard++;
   }
 
-  for (let i = 0; i < 8; i++) out[i] = r[i];
+  for (let i = 0; i < 8; i++) out[i] = load<u32>(r + (<usize>i << 2));
 }

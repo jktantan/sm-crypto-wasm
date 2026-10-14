@@ -21,7 +21,6 @@ import {
 import {
   fpAdd,
   fpAddTo,
-  fpDiv2,
   fpDiv2To,
   fpInv,
   fpMul,
@@ -29,19 +28,15 @@ import {
   fpNeg,
   fpSqr,
   fpSqrTo,
-  fpSub,
   fpSubTo,
   pArr,
   U256,
 } from './fp';
 import {
   Fp2,
-  fp2Add,
   fp2AddTo,
   fp2copy,
-  fp2Dbl,
   fp2DblTo,
-  fp2Div2,
   fp2Div2To,
   fp2Inv,
   fp2isOne,
@@ -53,10 +48,8 @@ import {
   fp2Put,
   fp2Sqr,
   fp2SqrTo,
-  fp2Sub,
   fp2SubTo,
   fp2set,
-  fp2Tri,
   fp2TriTo,
   fp2zero,
 } from './fp2';
@@ -486,8 +479,8 @@ const PE8: Fp2 = fp2zero();
 const PE9: Fp2 = fp2zero();
 const PE10: Fp2 = fp2zero();
 const PE11: Fp2 = fp2zero();
-const PE12: Fp2 = fp2zero();
-const PE13: Fp2 = fp2zero();
+const _PE12: Fp2 = fp2zero();
+const _PE13: Fp2 = fp2zero();
 
 /**
  * out = 2P（Jacobian 倍点，对齐 point_double）。

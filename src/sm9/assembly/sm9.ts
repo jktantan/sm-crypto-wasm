@@ -186,10 +186,10 @@ for (let i = 0; i < 4; i++) SIGN_G_CACHE[i] = new SignGCacheSlot();
 
 function g2FingerprintU(P: G2): u32 {
   let h: u32 = 0x9e3779b9;
-  h = (h ^ P.X[0][0]) *< u32 > 0x01000193;
-  h = (h ^ P.X[1][7]) *< u32 > 0x01000193;
-  h = (h ^ P.Y[0][3]) *< u32 > 0x01000193;
-  h = (h ^ P.Y[1][0]) *< u32 > 0x01000193;
+  h = (h ^ P.X[0][0]) * <u32>0x01000193;
+  h = (h ^ P.X[1][7]) * <u32>0x01000193;
+  h = (h ^ P.Y[0][3]) * <u32>0x01000193;
+  h = (h ^ P.Y[1][0]) * <u32>0x01000193;
   return h;
 }
 
@@ -205,7 +205,7 @@ export function signG(ppubs: G2): Fp12 {
     u256eq(slot.keyY1, a.Y[1]) &&
     u256eq(slot.keyY0, a.Y[0])
   ) {
-    return slot.value!;
+    return slot.value as Fp12;
   }
   const g = sm9Pairing(a, g1Generator());
   slot.keyX1 = u256clone(a.X[1]);
@@ -233,10 +233,10 @@ for (let i = 0; i < 4; i++) ENC_G_CACHE[i] = new EncGCacheSlot();
 
 function g1FingerprintU(P: G1): u32 {
   let h: u32 = 0x9e3779b9;
-  h = (h ^ P.X[0]) *< u32 > 0x01000193;
-  h = (h ^ P.X[7]) *< u32 > 0x01000193;
-  h = (h ^ P.Y[3]) *< u32 > 0x01000193;
-  h = (h ^ P.Y[0]) *< u32 > 0x01000193;
+  h = (h ^ P.X[0]) * <u32>0x01000193;
+  h = (h ^ P.X[7]) * <u32>0x01000193;
+  h = (h ^ P.Y[3]) * <u32>0x01000193;
+  h = (h ^ P.Y[0]) * <u32>0x01000193;
   return h;
 }
 
@@ -246,7 +246,7 @@ export function encG(ppube: G1): Fp12 {
   const slotIdx = g1FingerprintU(a) & 3;
   const slot = ENC_G_CACHE[slotIdx];
   if (slot.value !== null && u256eq(slot.keyX, a.X) && u256eq(slot.keyY, a.Y)) {
-    return slot.value!;
+    return slot.value as Fp12;
   }
   const g = sm9Pairing(g2Generator(), a);
   slot.keyX = u256clone(a.X);

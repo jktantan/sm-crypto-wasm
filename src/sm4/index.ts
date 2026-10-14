@@ -44,6 +44,29 @@ interface Sm4Exports extends WebAssembly.Exports {
     outPtr: number,
     tagPtr: number,
   ) => number;
+  /** 批量 CBC 加密/解密（整段一次调用，循环在 wasm 内）。 */
+  readonly sm4CbcEncrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
+  readonly sm4CbcDecrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
+  /** 批量 CTR（自反，长度任意）。 */
+  readonly sm4CtrCrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -136,7 +159,7 @@ function encryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
 }
 
 /** 单块解密。 */
-function decryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
+function _decryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
   return withBuffers(key, block, 16, (kp, ip, op) => {
     const { exports, memory } = getModule();
     exports.sm4Block(kp, ip, op, 1);
@@ -144,7 +167,7 @@ function decryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
   });
 }
 
-function xor16(a: Uint8Array, b: Uint8Array): Uint8Array {
+function _xor16(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(16);
   for (let i = 0; i < 16; i++) out[i] = (a[i] ?? 0) ^ (b[i] ?? 0);
   return out;
@@ -162,14 +185,13 @@ export function encryptCBC(
   if (k.length !== 16 || v.length !== 16)
     throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
   const padded = pkcs7Pad(m);
-  const out = new Uint8Array(padded.length);
-  let prev = v;
-  for (let off = 0; off < padded.length; off += 16) {
-    const block = xor16(padded.subarray(off, off + 16), prev);
-    const enc = encryptBlock(k, block);
-    out.set(enc, off);
-    prev = enc;
-  }
+  const out = withBuffers(k, padded, padded.length, (kp, ip, op) => {
+    const { exports, memory } = getModule();
+    const ivPtr = exports.alloc(16);
+    new Uint8Array(memory.buffer).set(v, ivPtr);
+    exports.sm4CbcEncrypt(kp, ivPtr, ip, padded.length, op);
+    return new Uint8Array(memory.buffer, op, padded.length).slice();
+  });
   return fromBytes(out, 'hex');
 }
 
@@ -185,14 +207,13 @@ export function decryptCBC(
   if (k.length !== 16 || v.length !== 16)
     throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
   if (c.length % 16 !== 0) throw new InvalidCiphertextError('sm4 CBC: 密文长度必须是 16 的倍数');
-  const out = new Uint8Array(c.length);
-  let prev = v;
-  for (let off = 0; off < c.length; off += 16) {
-    const block = c.subarray(off, off + 16);
-    const dec = decryptBlock(k, block);
-    out.set(xor16(dec, prev), off);
-    prev = block;
-  }
+  const out = withBuffers(k, c, c.length, (kp, ip, op) => {
+    const { exports, memory } = getModule();
+    const ivPtr = exports.alloc(16);
+    new Uint8Array(memory.buffer).set(v, ivPtr);
+    exports.sm4CbcDecrypt(kp, ivPtr, ip, c.length, op);
+    return new Uint8Array(memory.buffer, op, c.length).slice();
+  });
   const unpadded = pkcs7Unpad(out);
   return fromBytes(unpadded, 'hex');
 }
@@ -208,18 +229,14 @@ export function cryptCTR(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16)
     throw new InvalidKeyError('sm4 CTR: key/iv must be 16 bytes');
-  const out = new Uint8Array(d.length);
-  const counter: Uint8Array = new Uint8Array(v);
-  for (let off = 0; off < d.length; off += 16) {
-    const ks = encryptBlock(k, counter);
-    const take = Math.min(16, d.length - off);
-    for (let i = 0; i < take; i++) out[off + i] = (d[off + i] ?? 0) ^ (ks[i] ?? 0);
-    // 计数器自增（big-endian）。到 0 回绕。
-    for (let i = 15; i >= 0; i--) {
-      counter[i] = ((counter[i] ?? 0) + 1) & 0xff;
-      if (counter[i] !== 0) break;
-    }
-  }
+  if (d.length === 0) return fromBytes(new Uint8Array(0), 'hex');
+  const out = withBuffers(k, d, d.length, (kp, ip, op) => {
+    const { exports, memory } = getModule();
+    const ivPtr = exports.alloc(16);
+    new Uint8Array(memory.buffer).set(v, ivPtr);
+    exports.sm4CtrCrypt(kp, ivPtr, ip, d.length, op);
+    return new Uint8Array(memory.buffer, op, d.length).slice();
+  });
   return fromBytes(out, 'hex');
 }
 
