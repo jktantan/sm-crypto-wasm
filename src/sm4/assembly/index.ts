@@ -133,6 +133,16 @@ for (let i = 0; i < 256; i++) {
   store<u32>(T3 + o, lLinear(s));
 }
 
+/** 合成变换 T = L∘τ：4 次 32-bit 查表 + 3 次 xor。 */
+function tableT(t: u32): u32 {
+  return (
+    load<u32>(T0 + ((<usize>((t >>> 24) & 0xff)) << 2)) ^
+    load<u32>(T1 + ((<usize>((t >>> 16) & 0xff)) << 2)) ^
+    load<u32>(T2 + ((<usize>((t >>> 8) & 0xff)) << 2)) ^
+    load<u32>(T3 + ((<usize>(t & 0xff)) << 2))
+  );
+}
+
 /** 合成变换 T'（密钥扩展）。 */
 function tTransformKey(x: u32): u32 {
   return lLinearKey(tau(x));
@@ -177,11 +187,7 @@ function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
   for (let i = 0; i < 32; i++) {
     const t = (x1 ^ x2 ^ x3 ^ load<u32>(rk + ((<usize>i) << 2))) & 0xffffffff;
     // L(τ(t)) 由 4 张预计算表合成，省掉逐字节查盒后的重组与单独的 L 变换。
-    const k0: usize = (<usize>((t >>> 24) & 0xff)) << 2;
-    const k1: usize = (<usize>((t >>> 16) & 0xff)) << 2;
-    const k2: usize = (<usize>((t >>> 8) & 0xff)) << 2;
-    const k3: usize = (<usize>(t & 0xff)) << 2;
-    const tt = load<u32>(T0 + k0) ^ load<u32>(T1 + k1) ^ load<u32>(T2 + k2) ^ load<u32>(T3 + k3);
+    const tt = tableT(t);
     const n = (x0 ^ tt) & 0xffffffff;
     x0 = x1;
     x1 = x2;
@@ -193,6 +199,185 @@ function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
   writeU32BE(outPtr + 4, x2);
   writeU32BE(outPtr + 8, x1);
   writeU32BE(outPtr + 12, x0);
+}
+
+/**
+ * 4 块标量交错：不依赖 SIMD，用 T-table 交错 4 个独立块，靠乱序执行隐藏
+ * L1 查表延迟。每块的查表次数与 `cipherBlock` 相同，但省掉了 `cipher4` 的
+ * 4x4 transpose 与 extract/replace 开销，实测比 `cipher4` 快。
+ *
+ * 服务 ECB 与 CTR 的 64~127 字节尾段；主路径是 `cipher8s`。
+ */
+function cipher4s(rk: usize, inPtr: usize, outPtr: usize): void {
+  let a0 = readU32BE(inPtr);
+  let a1 = readU32BE(inPtr + 4);
+  let a2 = readU32BE(inPtr + 8);
+  let a3 = readU32BE(inPtr + 12);
+  let b0 = readU32BE(inPtr + 16);
+  let b1 = readU32BE(inPtr + 20);
+  let b2 = readU32BE(inPtr + 24);
+  let b3 = readU32BE(inPtr + 28);
+  let c0 = readU32BE(inPtr + 32);
+  let c1 = readU32BE(inPtr + 36);
+  let c2 = readU32BE(inPtr + 40);
+  let c3 = readU32BE(inPtr + 44);
+  let d0 = readU32BE(inPtr + 48);
+  let d1 = readU32BE(inPtr + 52);
+  let d2 = readU32BE(inPtr + 56);
+  let d3 = readU32BE(inPtr + 60);
+  for (let i = 0; i < 32; i++) {
+    const rkv = load<u32>(rk + ((<usize>i) << 2));
+    const na = (a0 ^ tableT(a1 ^ a2 ^ a3 ^ rkv)) & 0xffffffff;
+    const nb = (b0 ^ tableT(b1 ^ b2 ^ b3 ^ rkv)) & 0xffffffff;
+    const nc = (c0 ^ tableT(c1 ^ c2 ^ c3 ^ rkv)) & 0xffffffff;
+    const nd = (d0 ^ tableT(d1 ^ d2 ^ d3 ^ rkv)) & 0xffffffff;
+    a0 = a1;
+    a1 = a2;
+    a2 = a3;
+    a3 = na;
+    b0 = b1;
+    b1 = b2;
+    b2 = b3;
+    b3 = nb;
+    c0 = c1;
+    c1 = c2;
+    c2 = c3;
+    c3 = nc;
+    d0 = d1;
+    d1 = d2;
+    d2 = d3;
+    d3 = nd;
+  }
+  writeU32BE(outPtr, a3);
+  writeU32BE(outPtr + 4, a2);
+  writeU32BE(outPtr + 8, a1);
+  writeU32BE(outPtr + 12, a0);
+  writeU32BE(outPtr + 16, b3);
+  writeU32BE(outPtr + 20, b2);
+  writeU32BE(outPtr + 24, b1);
+  writeU32BE(outPtr + 28, b0);
+  writeU32BE(outPtr + 32, c3);
+  writeU32BE(outPtr + 36, c2);
+  writeU32BE(outPtr + 40, c1);
+  writeU32BE(outPtr + 44, c0);
+  writeU32BE(outPtr + 48, d3);
+  writeU32BE(outPtr + 52, d2);
+  writeU32BE(outPtr + 56, d1);
+  writeU32BE(outPtr + 60, d0);
+}
+
+/**
+ * 8 块标量交错：把 `cipher4s` 的交错度再翻倍，用更多独立依赖链填满
+ * 流水线。每块每轮的查表次数与标量路径相同（4 次）。
+ */
+function cipher8s(rk: usize, inPtr: usize, outPtr: usize): void {
+  let a0 = readU32BE(inPtr + 0);
+  let a1 = readU32BE(inPtr + 4);
+  let a2 = readU32BE(inPtr + 8);
+  let a3 = readU32BE(inPtr + 12);
+  let b0 = readU32BE(inPtr + 16);
+  let b1 = readU32BE(inPtr + 20);
+  let b2 = readU32BE(inPtr + 24);
+  let b3 = readU32BE(inPtr + 28);
+  let c0 = readU32BE(inPtr + 32);
+  let c1 = readU32BE(inPtr + 36);
+  let c2 = readU32BE(inPtr + 40);
+  let c3 = readU32BE(inPtr + 44);
+  let d0 = readU32BE(inPtr + 48);
+  let d1 = readU32BE(inPtr + 52);
+  let d2 = readU32BE(inPtr + 56);
+  let d3 = readU32BE(inPtr + 60);
+  let e0 = readU32BE(inPtr + 64);
+  let e1 = readU32BE(inPtr + 68);
+  let e2 = readU32BE(inPtr + 72);
+  let e3 = readU32BE(inPtr + 76);
+  let f0 = readU32BE(inPtr + 80);
+  let f1 = readU32BE(inPtr + 84);
+  let f2 = readU32BE(inPtr + 88);
+  let f3 = readU32BE(inPtr + 92);
+  let g0 = readU32BE(inPtr + 96);
+  let g1 = readU32BE(inPtr + 100);
+  let g2 = readU32BE(inPtr + 104);
+  let g3 = readU32BE(inPtr + 108);
+  let h0 = readU32BE(inPtr + 112);
+  let h1 = readU32BE(inPtr + 116);
+  let h2 = readU32BE(inPtr + 120);
+  let h3 = readU32BE(inPtr + 124);
+  for (let i = 0; i < 32; i++) {
+    const rkv = load<u32>(rk + ((<usize>i) << 2));
+    const na = (a0 ^ tableT(a1 ^ a2 ^ a3 ^ rkv)) & 0xffffffff;
+    const nb = (b0 ^ tableT(b1 ^ b2 ^ b3 ^ rkv)) & 0xffffffff;
+    const nc = (c0 ^ tableT(c1 ^ c2 ^ c3 ^ rkv)) & 0xffffffff;
+    const nd = (d0 ^ tableT(d1 ^ d2 ^ d3 ^ rkv)) & 0xffffffff;
+    const ne = (e0 ^ tableT(e1 ^ e2 ^ e3 ^ rkv)) & 0xffffffff;
+    const nf = (f0 ^ tableT(f1 ^ f2 ^ f3 ^ rkv)) & 0xffffffff;
+    const ng = (g0 ^ tableT(g1 ^ g2 ^ g3 ^ rkv)) & 0xffffffff;
+    const nh = (h0 ^ tableT(h1 ^ h2 ^ h3 ^ rkv)) & 0xffffffff;
+    a0 = a1;
+    a1 = a2;
+    a2 = a3;
+    a3 = na;
+    b0 = b1;
+    b1 = b2;
+    b2 = b3;
+    b3 = nb;
+    c0 = c1;
+    c1 = c2;
+    c2 = c3;
+    c3 = nc;
+    d0 = d1;
+    d1 = d2;
+    d2 = d3;
+    d3 = nd;
+    e0 = e1;
+    e1 = e2;
+    e2 = e3;
+    e3 = ne;
+    f0 = f1;
+    f1 = f2;
+    f2 = f3;
+    f3 = nf;
+    g0 = g1;
+    g1 = g2;
+    g2 = g3;
+    g3 = ng;
+    h0 = h1;
+    h1 = h2;
+    h2 = h3;
+    h3 = nh;
+  }
+  writeU32BE(outPtr + 0, a3);
+  writeU32BE(outPtr + 4, a2);
+  writeU32BE(outPtr + 8, a1);
+  writeU32BE(outPtr + 12, a0);
+  writeU32BE(outPtr + 16, b3);
+  writeU32BE(outPtr + 20, b2);
+  writeU32BE(outPtr + 24, b1);
+  writeU32BE(outPtr + 28, b0);
+  writeU32BE(outPtr + 32, c3);
+  writeU32BE(outPtr + 36, c2);
+  writeU32BE(outPtr + 40, c1);
+  writeU32BE(outPtr + 44, c0);
+  writeU32BE(outPtr + 48, d3);
+  writeU32BE(outPtr + 52, d2);
+  writeU32BE(outPtr + 56, d1);
+  writeU32BE(outPtr + 60, d0);
+  writeU32BE(outPtr + 64, e3);
+  writeU32BE(outPtr + 68, e2);
+  writeU32BE(outPtr + 72, e1);
+  writeU32BE(outPtr + 76, e0);
+  writeU32BE(outPtr + 80, f3);
+  writeU32BE(outPtr + 84, f2);
+  writeU32BE(outPtr + 88, f1);
+  writeU32BE(outPtr + 92, f0);
+  writeU32BE(outPtr + 96, g3);
+  writeU32BE(outPtr + 100, g2);
+  writeU32BE(outPtr + 104, g1);
+  writeU32BE(outPtr + 108, g0);
+  writeU32BE(outPtr + 112, h3);
+  writeU32BE(outPtr + 116, h2);
+  writeU32BE(outPtr + 120, h1);
+  writeU32BE(outPtr + 124, h0);
 }
 
 /** 反转轮密钥（用于解密）。 */
@@ -214,7 +399,7 @@ export function sm4EncryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr:
   keyExpansion(keyPtr, rk);
   let off: usize = 0;
   while (off + 64 <= inLen) {
-    cipher4(rk, inPtr + off, outPtr + off);
+    cipher4s(rk, inPtr + off, outPtr + off);
     off += 64;
   }
   while (off < inLen) {
@@ -232,7 +417,7 @@ export function sm4DecryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr:
   reverseRk(rk);
   let off: usize = 0;
   while (off + 64 <= inLen) {
-    cipher4(rk, inPtr + off, outPtr + off);
+    cipher4s(rk, inPtr + off, outPtr + off);
     off += 64;
   }
   while (off < inLen) {
@@ -333,8 +518,15 @@ export function sm4CtrCrypt(
   let off: usize = 0;
   while (off < inLen) {
     const rest = inLen - off;
-    if (rest >= 64) {
-      // 一次 4 块：生成 4 个连续计数器块 → 4-way 加密成密钥流 → 与数据异或。
+    if (rest >= 128) {
+      // 一次 8 块：生成 8 个连续计数器块 → 8-way 加密成密钥流 → 与数据异或。
+      keystream8(rk, CTR_CB);
+      for (let i: usize = 0; i < 128; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK8_KS + i));
+      }
+      off += 128;
+    } else if (rest >= 64) {
+      // 一次 4 块：生成 4 个连续计数器块 → 4 块交错加密成密钥流 → 与数据异或。
       keystream4(rk, CTR_CB);
       for (let i: usize = 0; i < 64; i++) {
         store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK4_KS + i));
@@ -613,8 +805,16 @@ function gctr(rk: usize, icbPtr: usize, inPtr: usize, inLen: usize, outPtr: usiz
   let off: usize = 0;
   while (off < inLen) {
     const rest = inLen - off;
-    if (rest >= 64) {
-      // 一次 4 块：4 个连续计数器块 → 4-way 加密成密钥流 → 与数据异或
+    if (rest >= 128) {
+      // 一次 8 块：8 个连续计数器块 → 8-way 加密成密钥流 → 与数据异或
+      // （密钥流先落 BLK8_KS，故 outPtr 与 inPtr 重叠也安全）。
+      keystream8(rk, cbPtr);
+      for (let i: usize = 0; i < 128; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK8_KS + i));
+      }
+      off += 128;
+    } else if (rest >= 64) {
+      // 一次 4 块：4 个连续计数器块 → 4 块交错加密成密钥流 → 与数据异或
       // （密钥流先落 BLK4_KS，故 outPtr 与 inPtr 重叠也安全）。
       keystream4(rk, cbPtr);
       for (let i: usize = 0; i < 64; i++) {
@@ -734,118 +934,36 @@ export function sm4GcmDecrypt(
   return 0;
 }
 
-// ---------- SIMD 4-way（WASM SIMD；编译需 `--enable simd`） ----------
-//
-// 一次处理 4 个块（64 字节）：用 4x4 transpose 把 4 个块的 x0..x3 分别摊到 v128 的
-// 4 个 lane 上，跑 32 轮向量轮函数，再逆 transpose 写回。`tau` 仍是标量 S 盒
-// （extract_lane → 查表 → replace_lane）——S 盒查表次数不随向量化下降，所以收益来自
-// 异或链与线性层 L 的 4 lane 并行：ECB / CTR / GCM 的 GCTR 走这条路，实测 ~1.3×。
-// 尾部不足 4 块的仍走标量 `cipherBlock`（inLen 恒为 16 的倍数，故只有 1~3 块尾块）。
-
-/** 16 字节 v128 内的 per-lane 字节翻转（4 个 u32 lane 各 bswap）。 */
-@inline function bswapv(x: v128): v128 {
-  return i8x16.shuffle(x, x, 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
-}
-
-/** 4 个 u32 lane 各循环左移 n 位。 */
-@inline function rotlv(x: v128, n: i32): v128 {
-  return v128.or(i32x4.shl(x, n), i32x4.shr_u(x, 32 - n));
-}
-
-/** 线性变换 L 的 4 lane 版本。 */
-@inline function lVec(b: v128): v128 {
-  const r2 = rotlv(b, 2);
-  const r10 = rotlv(b, 10);
-  const r18 = rotlv(b, 18);
-  const r24 = rotlv(b, 24);
-  return v128.xor(v128.xor(v128.xor(v128.xor(b, r2), r10), r18), r24);
-}
-
-/** 非线性变换 tau 的 4 lane 版本：逐 lane 走标量 S 盒后拼回。 */
-@inline function tauVec(t: v128): v128 {
-  const r0 = <i32>tau(<u32>i32x4.extract_lane(t, 0));
-  const r1 = <i32>tau(<u32>i32x4.extract_lane(t, 1));
-  const r2 = <i32>tau(<u32>i32x4.extract_lane(t, 2));
-  const r3 = <i32>tau(<u32>i32x4.extract_lane(t, 3));
-  let r = i32x4.replace_lane(i32x4.splat(0), 0, r0);
-  r = i32x4.replace_lane(r, 1, r1);
-  r = i32x4.replace_lane(r, 2, r2);
-  return i32x4.replace_lane(r, 3, r3);
-}
-
 /**
- * 4 块（64 字节）并行加/解密（rk 决定方向，同一套轮函数）。
- *
- * 注意 4x4 transpose 的两级 shuffle 索引模式**不同**：第一级交错
- * （a.lane0, b.lane0, a.lane1, b.lane1），第二级连续（a.lane0, a.lane1, b.lane0, b.lane1）。
- * 两级写成同一个模式会让 lane 错位、密文全错。
- */
-function cipher4(rk: usize, inPtr: usize, outPtr: usize): void {
-  const b0 = bswapv(v128.load(inPtr));
-  const b1 = bswapv(v128.load(inPtr + 16));
-  const b2 = bswapv(v128.load(inPtr + 32));
-  const b3 = bswapv(v128.load(inPtr + 48));
-
-  const t0 = i8x16.shuffle(b0, b1, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
-  const t1 = i8x16.shuffle(b0, b1, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
-  const t2 = i8x16.shuffle(b2, b3, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
-  const t3 = i8x16.shuffle(b2, b3, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
-  let x0 = i8x16.shuffle(t0, t2, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
-  let x1 = i8x16.shuffle(t0, t2, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31);
-  let x2 = i8x16.shuffle(t1, t3, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
-  let x3 = i8x16.shuffle(t1, t3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31);
-
-  for (let i = 0; i < 32; i++) {
-    // T = x0 ^ L(tau(x1 ^ x2 ^ x3 ^ rk[i]))：x0 在 T 之外异或。
-    const rkv = i32x4.splat(<i32>load<u32>(rk + ((<usize>i) << 2)));
-    const t = v128.xor(v128.xor(x1, x2), v128.xor(x3, rkv));
-    const tt = v128.xor(x0, lVec(tauVec(t)));
-    x0 = x1;
-    x1 = x2;
-    x2 = x3;
-    x3 = tt;
-  }
-
-  const u0 = i8x16.shuffle(x3, x2, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
-  const u1 = i8x16.shuffle(x3, x2, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
-  const u2 = i8x16.shuffle(x1, x0, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
-  const u3 = i8x16.shuffle(x1, x0, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
-  v128.store(
-    outPtr,
-    bswapv(i8x16.shuffle(u0, u2, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23)),
-  );
-  v128.store(
-    outPtr + 16,
-    bswapv(i8x16.shuffle(u0, u2, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31)),
-  );
-  v128.store(
-    outPtr + 32,
-    bswapv(i8x16.shuffle(u1, u3, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23)),
-  );
-  v128.store(
-    outPtr + 48,
-    bswapv(i8x16.shuffle(u1, u3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31)),
-  );
-}
-
-/**
- * 4 个计数器块 / 密钥流的 scratch（非重入：CTR 与 GCTR 各自独占一次调用）。
- * BLK4_CB 收 4 个连续的计数器块，BLK4_KS 收它们 4-way 加密后的密钥流。
+ * 计数器块 / 密钥流的 scratch（非重入：CTR 与 GCTR 各自独占一次调用）。
+ * BLK4_CB 收 4 个连续的计数器块，BLK4_KS 收它们 4 块交错加密后的密钥流；
+ * BLK8_* 是同结构的 8 路版本。
  */
 const BLK4_CB: usize = heap.alloc(64);
 const BLK4_KS: usize = heap.alloc(64);
+const BLK8_CB: usize = heap.alloc(128);
+const BLK8_KS: usize = heap.alloc(128);
 
 /** GCTR 的计数器块工作区（16 字节），替代原先每次 `new StaticArray<u8>(16)`。 */
 const GCTR_CB: usize = heap.alloc(16);
 
 /**
  * 以 base（16 字节计数器块）为起点连续生成 4 个块到 BLK4_CB 并把 base 推进 4 次，
- * 再 4-way 加密到 BLK4_KS。
+ * 再用 cipher4s 加密到 BLK4_KS。
  */
 function keystream4(rk: usize, base: usize): void {
   for (let k = 0; k < 4; k++) {
     memory.copy(BLK4_CB + ((<usize>k) << 4), base, 16);
     inc32(base);
   }
-  cipher4(rk, BLK4_CB, BLK4_KS);
+  cipher4s(rk, BLK4_CB, BLK4_KS);
+}
+
+/** `keystream4` 的 8 路版本：8 个连续计数器块 → `cipher8s` → BLK8_KS。 */
+function keystream8(rk: usize, base: usize): void {
+  for (let k = 0; k < 8; k++) {
+    memory.copy(BLK8_CB + ((<usize>k) << 4), base, 16);
+    inc32(base);
+  }
+  cipher8s(rk, BLK8_CB, BLK8_KS);
 }
