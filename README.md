@@ -41,40 +41,41 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 | 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.09 µs / 4.81 µs / 250 µs | 7.37 µs（1 KB） | 快 1.5× |
-| SM3 | hmac 1 KB | 7.62 µs | 8.80 µs | 快 1.2× |
-| SM4 | ECB 16 B / 1 KB | 742 ns / 20.95 µs | 32.67 µs（1 KB） | 快 1.6× |
-| SM4 | CBC 1 KB | 25.02 µs | 37.57 µs | 快 1.5× |
-| SM4 | CTR 1 KB | 23.27 µs | 31.12 µs | 快 1.3× |
-| SM4 | CFB 1 KB | 47.27 µs | 33.08 µs | **慢 1.4×** |
-| SM4 | OFB 1 KB | 48.45 µs | 31.34 µs | **慢 1.5×** |
-| SM4 | GCM 1 KB | 36.35 µs | 185.89 µs | 快 5.1× |
-| SM2 | 密钥对生成 | 146 µs | — | — |
-| SM2 | 公钥派生 | 112 µs | 154 µs | 快 1.4× |
-| SM2 | 签名 64 B | 278 µs | 381 µs | 快 1.4× |
-| SM2 | 验签 64 B | 395 µs | 2.38 ms | 快 6.0× |
-| SM2 | 加密 64 B | 448 µs | 2.43 ms | 快 5.4× |
-| SM2 | 解密 64 B | 279 µs | 2.12 ms | 快 7.6× |
-| SM2 | 密钥交换（完整 A↔B） | 1.24 ms | 9.92 ms | 快 8.0× |
-| SM9 | 主密钥对生成（签名 / 加密） | 3.16 / 2.81 ms | — | — |
-| SM9 | 主公钥派生（签名 / 加密） | 165 / 82 µs | — | — |
-| SM9 | 用户公钥派生 | 946 µs | — | — |
-| SM9 | 签名 32 B | 6.18 ms | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs（1 KB） | 快 1.4× |
+| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 快 1.2× |
+| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs（1 KB） | 快 1.5× |
+| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | 快 1.5× |
+| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | 快 1.1× |
+| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | 快 1.4× |
+| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | 快 1.3× |
+| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | 快 5.2× |
+| SM2 | 密钥对生成 | 172 µs | — | — |
+| SM2 | 公钥派生 | 115 µs | 154 µs | 快 1.3× |
+| SM2 | 签名 64 B | 300 µs | 347 µs | 快 1.2× |
+| SM2 | 验签 64 B | 396 µs | 2.38 ms | 快 6.0× |
+| SM2 | 加密 64 B | 459 µs | 2.46 ms | 快 5.4× |
+| SM2 | 解密 64 B | 283 µs | 2.83 ms | 快 10.0× |
+| SM2 | 密钥交换（完整 A↔B） | 1.26 ms | 9.57 ms | 快 7.6× |
+| SM9 | 主密钥对生成（签名 / 加密） | 3.35 / 2.77 ms | — | — |
+| SM9 | 主公钥派生（签名 / 加密） | 161 / 101 µs | — | — |
+| SM9 | 用户公钥派生 | 1.12 ms | — | — |
+| SM9 | 签名 32 B | 6.74 ms | — | — |
 | SM9 | 验签 32 B | 11.92 ms | — | — |
-| SM9 | 加密 32 B | 4.96 ms | — | — |
-| SM9 | 解密 32 B | 6.68 ms | — | — |
-| SM9 | KEM 封装 / 解封装 | 4.41 / 6.69 ms | — | — |
-| SM9 | 密钥交换（完整 A↔B） | 29.11 ms | — | — |
-| ZUC | EEA3 加密 1 KB | 5.99 µs | 16.16 µs | 快 2.7× |
-| ZUC | EEA3 密钥流 1 KB | 4.49 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 8.35 µs | — | — |
+| SM9 | 加密 32 B | 5.29 ms | — | — |
+| SM9 | 解密 32 B | 7.96 ms | — | — |
+| SM9 | KEM 封装 / 解封装 | 4.77 / 7.09 ms | — | — |
+| SM9 | 密钥交换（完整 A↔B） | 30.31 ms | — | — |
+| ZUC | EEA3 加密 1 KB | 5.97 µs | 16.00 µs | 快 2.7× |
+| ZUC | EEA3 密钥流 1 KB | 4.01 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
 
 要点：
 
-- **绝大多数操作快于纯 JS 参考**：SM3 / ZUC 快 1.2~2.7×，SM4 分组模式与 GCM 快
-  1.3~5.1×，SM2 快 1.4~8.0×；
-- **两处如实标注的落后**：SM4 的 **CFB / OFB 慢 1.4~1.5×**——这两种模式在本库是
-  逐块实现（未做 CBC/CTR 那样的批量导出），是已知的待优化项；GCM 则快 5.1×；
+- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.2~2.7×，SM4 六种模式
+  1.1~5.2×，SM2 快 1.2~10×；
+- **SM4 的 CFB / OFB 曾比纯 JS 慢 1.4~1.5×**：这两种模式原先在 TS 侧逐块调用
+  wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
+  同款的批量导出后降到 24 µs 一带，反过来快 1.3~1.4×；
 - **SM9 没有可比实现**（纯 JS 生态普遍如此，pairing 在纯 JS 里成本过高），故只给
   本库的绝对耗时；
 - **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
@@ -88,7 +89,7 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
      之外的永久区；
   4. **点运算全程原地**：倍点 / 点加写模块级 scratch，不再逐次 `new U256` + `new JPoint`
      （一次倍点原本 ~11 次堆分配，而标量乘要调用它几百次）。
-  合起来签名从 6.10 ms 降到 278 µs（22×），公钥派生 2.96 ms → 112 µs（26×）；
+  合起来签名从 6.10 ms 降到 300 µs（20×），公钥派生 2.96 ms → 115 µs（26×）；
 - **代价与取舍**：comb 只适用于固定基点，Solinas 只适用于伪 Mersenne 模数——SM2 的
   标量模 n 与 SM9 的 p/n 都不是这个形状（仍走 Barrett），SM9 若要再快需要换 Montgomery，
   而那意味着把该曲线全部常数搬进 Montgomery 域，属重写级改动；
@@ -366,41 +367,42 @@ left as `—`**. Measured on Apple M4 / Node 26.7 / macOS 27, reproducible with
 
 | Algorithm | Operation | sm-crypto-wasm | pure-JS reference (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.09 µs / 4.81 µs / 250 µs | 7.37 µs (1 KB) | 1.5× faster |
-| SM3 | hmac 1 KB | 7.62 µs | 8.80 µs | 1.2× faster |
-| SM4 | ECB 16 B / 1 KB | 742 ns / 20.95 µs | 32.67 µs (1 KB) | 1.6× faster |
-| SM4 | CBC 1 KB | 25.02 µs | 37.57 µs | 1.5× faster |
-| SM4 | CTR 1 KB | 23.27 µs | 31.12 µs | 1.3× faster |
-| SM4 | CFB 1 KB | 47.27 µs | 33.08 µs | **1.4× slower** |
-| SM4 | OFB 1 KB | 48.45 µs | 31.34 µs | **1.5× slower** |
-| SM4 | GCM 1 KB | 36.35 µs | 185.89 µs | 5.1× faster |
-| SM2 | generateKeyPair | 146 µs | — | — |
-| SM2 | public key derive | 112 µs | 154 µs | 1.4× faster |
-| SM2 | sign 64 B | 278 µs | 381 µs | 1.4× faster |
-| SM2 | verify 64 B | 395 µs | 2.38 ms | 6.0× faster |
-| SM2 | encrypt 64 B | 448 µs | 2.43 ms | 5.4× faster |
-| SM2 | decrypt 64 B | 279 µs | 2.12 ms | 7.6× faster |
-| SM2 | key exchange (full A↔B) | 1.24 ms | 9.92 ms | 8.0× faster |
-| SM9 | master key pair (sign / enc) | 3.16 / 2.81 ms | — | — |
-| SM9 | master public key (sign / enc) | 165 / 82 µs | — | — |
-| SM9 | user public key (derive) | 946 µs | — | — |
-| SM9 | sign 32 B | 6.18 ms | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | 1.4× faster |
+| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 1.2× faster |
+| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs (1 KB) | 1.5× faster |
+| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | 1.5× faster |
+| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | 1.1× faster |
+| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | 1.4× faster |
+| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | 1.3× faster |
+| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | 5.2× faster |
+| SM2 | generateKeyPair | 172 µs | — | — |
+| SM2 | public key derive | 115 µs | 154 µs | 1.3× faster |
+| SM2 | sign 64 B | 300 µs | 347 µs | 1.2× faster |
+| SM2 | verify 64 B | 396 µs | 2.38 ms | 6.0× faster |
+| SM2 | encrypt 64 B | 459 µs | 2.46 ms | 5.4× faster |
+| SM2 | decrypt 64 B | 283 µs | 2.83 ms | 10.0× faster |
+| SM2 | key exchange (full A↔B) | 1.26 ms | 9.57 ms | 7.6× faster |
+| SM9 | master key pair (sign / enc) | 3.35 / 2.77 ms | — | — |
+| SM9 | master public key (sign / enc) | 161 / 101 µs | — | — |
+| SM9 | user public key (derive) | 1.12 ms | — | — |
+| SM9 | sign 32 B | 6.74 ms | — | — |
 | SM9 | verify 32 B | 11.92 ms | — | — |
-| SM9 | encrypt 32 B | 4.96 ms | — | — |
-| SM9 | decrypt 32 B | 6.68 ms | — | — |
-| SM9 | KEM encapsulate / decapsulate | 4.41 / 6.69 ms | — | — |
-| SM9 | key exchange (full A↔B) | 29.11 ms | — | — |
-| ZUC | EEA3 encrypt 1 KB | 5.99 µs | 16.16 µs | 2.7× faster |
-| ZUC | EEA3 keystream 1 KB | 4.49 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 8.35 µs | — | — |
+| SM9 | encrypt 32 B | 5.29 ms | — | — |
+| SM9 | decrypt 32 B | 7.96 ms | — | — |
+| SM9 | KEM encapsulate / decapsulate | 4.77 / 7.09 ms | — | — |
+| SM9 | key exchange (full A↔B) | 30.31 ms | — | — |
+| ZUC | EEA3 encrypt 1 KB | 5.97 µs | 16.00 µs | 2.7× faster |
+| ZUC | EEA3 keystream 1 KB | 4.01 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
 
 Notes:
 
-- **Almost every operation beats the pure-JS reference**: SM3 / ZUC by 1.2–2.7×,
-  SM4 block modes and GCM by 1.3–5.1×, SM2 by 1.4–8.0×;
-- **Two honest exceptions**: SM4's **CFB / OFB are 1.4–1.5× slower** — those two
-  modes are implemented block-by-block here (they never got the batched export
-  that CBC/CTR did), a known follow-up; GCM, by contrast, is 5.1× faster;
+- **Every operation with a counterpart beats the pure-JS reference**: SM3 / ZUC by
+  1.2–2.7×, the six SM4 modes by 1.1–5.2×, SM2 by 1.2–10×;
+- **SM4's CFB / OFB used to be 1.4–1.5× *slower* than pure JS**: those two modes
+  were driven block-by-block from the TS side (alloc + call + copy back every 16
+  bytes — 64 wasm crossings per KB). With the same batched export CBC/CTR already
+  had, they now land at ~24 µs, i.e. **1.3–1.4× faster** than the reference;
 - **SM9 has no comparable implementation** (as usual for pure JS, where pairing is
   prohibitively expensive), so only this library's absolute timings are given;
 - **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
@@ -420,7 +422,7 @@ Notes:
      module-level scratch instead of allocating a fresh `U256` per operation plus
      a `JPoint` (a single doubling used to cost ~11 heap allocations, and scalar
      multiplication calls it hundreds of times).
-  Together: signing 6.10 ms → 278 µs (22×), public-key derivation 2.96 ms → 112 µs
+  Together: signing 6.10 ms → 300 µs (20×), public-key derivation 2.96 ms → 115 µs
   (26×);
 - **Trade-offs**: comb applies only to the fixed base point and Solinas only to
   pseudo-Mersenne moduli — SM2's scalar modulus n and SM9's p/n are not of that
@@ -735,41 +737,42 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 
 | Алгоритм | Операция | sm-crypto-wasm | чистая JS (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.09 µs / 4.81 µs / 250 µs | 7.37 µs (1 KB) | в 1.5× быстрее |
-| SM3 | hmac 1 KB | 7.62 µs | 8.80 µs | в 1.2× быстрее |
-| SM4 | ECB 16 B / 1 KB | 742 ns / 20.95 µs | 32.67 µs (1 KB) | в 1.6× быстрее |
-| SM4 | CBC 1 KB | 25.02 µs | 37.57 µs | в 1.5× быстрее |
-| SM4 | CTR 1 KB | 23.27 µs | 31.12 µs | в 1.3× быстрее |
-| SM4 | CFB 1 KB | 47.27 µs | 33.08 µs | **в 1.4× медленнее** |
-| SM4 | OFB 1 KB | 48.45 µs | 31.34 µs | **в 1.5× медленнее** |
-| SM4 | GCM 1 KB | 36.35 µs | 185.89 µs | в 5.1× быстрее |
-| SM2 | generateKeyPair | 146 µs | — | — |
-| SM2 | вывод открытого ключа | 112 µs | 154 µs | в 1.4× быстрее |
-| SM2 | подпись 64 B | 278 µs | 381 µs | в 1.4× быстрее |
-| SM2 | проверка 64 B | 395 µs | 2.38 ms | в 6.0× быстрее |
-| SM2 | шифрование 64 B | 448 µs | 2.43 ms | в 5.4× быстрее |
-| SM2 | расшифрование 64 B | 279 µs | 2.12 ms | в 7.6× быстрее |
-| SM2 | обмен ключами (полный A↔B) | 1.24 ms | 9.92 ms | в 8.0× быстрее |
-| SM9 | главная пара ключей (sign / enc) | 3.16 / 2.81 ms | — | — |
-| SM9 | главный открытый ключ (sign / enc) | 165 / 82 µs | — | — |
-| SM9 | открытый ключ пользователя | 946 µs | — | — |
-| SM9 | подпись 32 B | 6.18 ms | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | в 1.4× быстрее |
+| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | в 1.2× быстрее |
+| SM4 | ECB 16 B / 1 KB | 0.74 µs / 22.0 µs | 33.2 µs (1 KB) | в 1.5× быстрее |
+| SM4 | CBC 1 KB | 25.2 µs | 38.6 µs | в 1.5× быстрее |
+| SM4 | CTR 1 KB | 28.0 µs | 30.8 µs | в 1.1× быстрее |
+| SM4 | CFB 1 KB | 24.0 µs | 32.9 µs | в 1.4× быстрее |
+| SM4 | OFB 1 KB | 24.3 µs | 31.0 µs | в 1.3× быстрее |
+| SM4 | GCM 1 KB | 34.3 µs | 179.9 µs | в 5.2× быстрее |
+| SM2 | generateKeyPair | 172 µs | — | — |
+| SM2 | вывод открытого ключа | 115 µs | 154 µs | в 1.3× быстрее |
+| SM2 | подпись 64 B | 300 µs | 347 µs | в 1.2× быстрее |
+| SM2 | проверка 64 B | 396 µs | 2.38 ms | в 6.0× быстрее |
+| SM2 | шифрование 64 B | 459 µs | 2.46 ms | в 5.4× быстрее |
+| SM2 | расшифрование 64 B | 283 µs | 2.83 ms | в 10.0× быстрее |
+| SM2 | обмен ключами (полный A↔B) | 1.26 ms | 9.57 ms | в 7.6× быстрее |
+| SM9 | главная пара ключей (sign / enc) | 3.35 / 2.77 ms | — | — |
+| SM9 | главный открытый ключ (sign / enc) | 161 / 101 µs | — | — |
+| SM9 | открытый ключ пользователя | 1.12 ms | — | — |
+| SM9 | подпись 32 B | 6.74 ms | — | — |
 | SM9 | проверка 32 B | 11.92 ms | — | — |
-| SM9 | шифрование 32 B | 4.96 ms | — | — |
-| SM9 | расшифрование 32 B | 6.68 ms | — | — |
-| SM9 | KEM инкапсуляция / декапсуляция | 4.41 / 6.69 ms | — | — |
-| SM9 | обмен ключами (полный A↔B) | 29.11 ms | — | — |
-| ZUC | EEA3 шифрование 1 KB | 5.99 µs | 16.16 µs | в 2.7× быстрее |
-| ZUC | EEA3 гамма 1 KB | 4.49 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 8.35 µs | — | — |
+| SM9 | шифрование 32 B | 5.29 ms | — | — |
+| SM9 | расшифрование 32 B | 7.96 ms | — | — |
+| SM9 | KEM инкапсуляция / декапсуляция | 4.77 / 7.09 ms | — | — |
+| SM9 | обмен ключами (полный A↔B) | 30.31 ms | — | — |
+| ZUC | EEA3 шифрование 1 KB | 5.97 µs | 16.00 µs | в 2.7× быстрее |
+| ZUC | EEA3 гамма 1 KB | 4.01 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
 
 Примечания:
 
-- **Почти все операции быстрее чистой JS-реализации**: SM3 / ZUC — в 1.2–2.7×,
-  блочные режимы SM4 и GCM — в 1.3–5.1×, SM2 — в 1.4–8.0×;
-- **Два честно отмеченных исключения**: **CFB / OFB у SM4 медленнее в 1.4–1.5×** —
-  эти два режима реализованы поблочно (им не досталось пакетного экспорта, который
-  есть у CBC/CTR); GCM, наоборот, быстрее в 5.1×;
+- **Каждая операция, у которой есть аналог, быстрее чистой JS-реализации**:
+  SM3 / ZUC — в 1.2–2.7×, шесть режимов SM4 — в 1.1–5.2×, SM2 — в 1.2–10×;
+- **CFB / OFB у SM4 раньше были в 1.4–1.5× _медленнее_ чистой JS**: эти два режима
+  вызывались поблочно со стороны TS (alloc + вызов + копирование на каждые 16 байт —
+  64 пересечения границы на 1 KB). С тем же пакетным экспортом, что уже был у CBC/CTR,
+  они теперь ~24 µs, то есть **в 1.3–1.4× быстрее** аналога;
 - **У SM9 нет сопоставимой реализации** (обычная ситуация для чистого JS, где
   спаривания запредельно дороги), поэтому приведены только абсолютные времена
   этой библиотеки;
@@ -791,7 +794,7 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
      модульные scratch-буферы вместо `new U256` на каждую операцию плюс `JPoint`
      (одно удвоение стоило ~11 выделений в куче, а скалярное умножение вызывает его
      сотни раз).
-  Итого: подпись 6.10 ms → 278 µs (22×), вывод открытого ключа 2.96 ms → 112 µs (26×);
+  Итого: подпись 6.10 ms → 300 µs (20×), вывод открытого ключа 2.96 ms → 115 µs (26×);
 - **Компромиссы**: comb применим только к фиксированной базовой точке, Солинас — только
   к псевдо-мерсенновым модулям: скалярный модуль n у SM2 и p/n у SM9 не такой формы
   (там по-прежнему Барретт), а чтобы ускорить SM9 дальше, нужен Монтгомери — то есть

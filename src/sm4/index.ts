@@ -67,6 +67,29 @@ interface Sm4Exports extends WebAssembly.Exports {
     inLen: number,
     outPtr: number,
   ) => void;
+  /** 批量 CFB128（加密 / 解密；反馈取密文段）。 */
+  readonly sm4CfbEncrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
+  readonly sm4CfbDecrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
+  /** 批量 OFB（自反，长度任意）。 */
+  readonly sm4OfbCrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+  ) => void;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -145,27 +168,9 @@ export function decryptECB(key: string | Uint8Array, ct: string | Uint8Array): s
   return fromBytes(out, 'hex');
 }
 
-/** 单块加密（供模式拼装）：返回 16 字节密文块。 */
-function encryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
-  const out = withBuffers(key, block, 16, (_kp, _ip, op) => {
-    // withBuffers 已把 key/block 铺好；这里调用块函数。
-    const { exports, memory } = getModule();
-    const keyPtr = _kp;
-    const inPtr = _ip;
-    exports.sm4Block(keyPtr, inPtr, op, 0);
-    return new Uint8Array(memory.buffer, op, 16).slice();
-  });
-  return out;
-}
-
-/** 单块解密。 */
-function _decryptBlock(key: Uint8Array, block: Uint8Array): Uint8Array {
-  return withBuffers(key, block, 16, (kp, ip, op) => {
-    const { exports, memory } = getModule();
-    exports.sm4Block(kp, ip, op, 1);
-    return new Uint8Array(memory.buffer, op, 16).slice();
-  });
-}
+// 注：原先 CFB / OFB 是逐块调用 `encryptBlock`（内部再调 wasm 的 `sm4Block`），
+// 1 KB 就要 64 次跨界；改成批量导出后这两个单块包装已无调用者，随删。
+// wasm 侧的 `sm4Block` 导出本身保留 —— 它仍是对外暴露的底层单块能力。
 
 function _xor16(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(16);
@@ -269,21 +274,16 @@ function cfb(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16)
     throw new InvalidKeyError('sm4 CFB: key/iv must be 16 bytes');
-  const out = new Uint8Array(d.length);
-  let feedback: Uint8Array = new Uint8Array(v);
-  for (let off = 0; off < d.length; off += 16) {
-    const ks = encryptBlock(k, feedback);
-    const take = Math.min(16, d.length - off);
-    const cur = new Uint8Array(16);
-    for (let i = 0; i < take; i++) {
-      const p = d[off + i] ?? 0;
-      const c = p ^ (ks[i] ?? 0);
-      out[off + i] = c;
-      cur[i] = encrypt ? c : p;
-    }
-    // CFB128：反馈整个密文块；不足 16 字节时用当前块补齐。
-    feedback = cur;
-  }
+  if (d.length === 0) return fromBytes(new Uint8Array(0), 'hex');
+  // 整段交给 wasm（循环在 wasm 内），避免原先逐块调用 `sm4Block` 的跨界开销。
+  const out = withBuffers(k, d, d.length, (kp, ip, op) => {
+    const { exports, memory } = getModule();
+    const ivPtr = exports.alloc(16);
+    new Uint8Array(memory.buffer).set(v, ivPtr);
+    if (encrypt) exports.sm4CfbEncrypt(kp, ivPtr, ip, d.length, op);
+    else exports.sm4CfbDecrypt(kp, ivPtr, ip, d.length, op);
+    return new Uint8Array(memory.buffer, op, d.length).slice();
+  });
   return fromBytes(out, 'hex');
 }
 
@@ -298,13 +298,15 @@ export function cryptOFB(
   const d = toBytes(data, 'data');
   if (k.length !== 16 || v.length !== 16)
     throw new InvalidKeyError('sm4 OFB: key/iv must be 16 bytes');
-  const out = new Uint8Array(d.length);
-  let state: Uint8Array = new Uint8Array(v);
-  for (let off = 0; off < d.length; off += 16) {
-    state = encryptBlock(k, state);
-    const take = Math.min(16, d.length - off);
-    for (let i = 0; i < take; i++) out[off + i] = (d[off + i] ?? 0) ^ (state[i] ?? 0);
-  }
+  if (d.length === 0) return fromBytes(new Uint8Array(0), 'hex');
+  // 同 CFB：整段一次调用，循环在 wasm 内。
+  const out = withBuffers(k, d, d.length, (kp, ip, op) => {
+    const { exports, memory } = getModule();
+    const ivPtr = exports.alloc(16);
+    new Uint8Array(memory.buffer).set(v, ivPtr);
+    exports.sm4OfbCrypt(kp, ivPtr, ip, d.length, op);
+    return new Uint8Array(memory.buffer, op, d.length).slice();
+  });
   return fromBytes(out, 'hex');
 }
 

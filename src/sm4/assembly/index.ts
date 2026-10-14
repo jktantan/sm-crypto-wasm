@@ -305,6 +305,101 @@ export function sm4CtrCrypt(
   }
 }
 
+// ---------- CFB / OFB 批量导出 ----------
+//
+// 这两个模式原先只在 TS 侧逐块调用 `sm4Block`，每 16 字节一次 wasm 跨界
+// （alloc + 写入 + 调用 + slice），1 KB 要 64 次 —— 实测比纯 JS 参考实现还慢
+// 1.4~1.5×。这里照 CBC/CTR 的做法把整缓冲交给 wasm，跨界降到 1 次。
+
+/** CFB128 的反馈寄存器与密钥流暂存。 */
+const CFB_FB: usize = heap.alloc(16);
+const CFB_KS: usize = heap.alloc(16);
+
+/** OFB 的状态与密钥流暂存。 */
+const OFB_FB: usize = heap.alloc(16);
+const OFB_KS: usize = heap.alloc(16);
+
+/**
+ * SM4-CFB128 加密（inLen 任意长度）。
+ *
+ * 反馈取**密文**段：不足 16 字节的尾块按既有实现语义补 0 再作反馈，
+ * 保证与 TS 侧原逐块实现逐字节一致。
+ */
+export function sm4CfbEncrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  memory.copy(CFB_FB, ivPtr, 16);
+  let off: usize = 0;
+  while (off < inLen) {
+    cipherBlock(rk, CFB_FB, CFB_KS);
+    const rest = inLen - off;
+    const take: usize = rest < 16 ? rest : 16;
+    for (let i: usize = 0; i < take; i++) {
+      const c: u8 = load<u8>(inPtr + off + i) ^ load<u8>(CFB_KS + i);
+      store<u8>(outPtr + off + i, c);
+      store<u8>(CFB_FB + i, c); // 反馈 = 密文段
+    }
+    for (let i: usize = take; i < 16; i++) store<u8>(CFB_FB + i, 0);
+    off += 16;
+  }
+}
+
+/** SM4-CFB128 解密（反馈同样取密文，故先读入再异或）。 */
+export function sm4CfbDecrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  memory.copy(CFB_FB, ivPtr, 16);
+  let off: usize = 0;
+  while (off < inLen) {
+    cipherBlock(rk, CFB_FB, CFB_KS);
+    const rest = inLen - off;
+    const take: usize = rest < 16 ? rest : 16;
+    for (let i: usize = 0; i < take; i++) {
+      const c: u8 = load<u8>(inPtr + off + i);
+      store<u8>(outPtr + off + i, c ^ load<u8>(CFB_KS + i));
+      store<u8>(CFB_FB + i, c); // 反馈 = 密文段
+    }
+    for (let i: usize = take; i < 16; i++) store<u8>(CFB_FB + i, 0);
+    off += 16;
+  }
+}
+
+/** SM4-OFB 加解密（自反）：状态 = E(状态)，密钥流与数据异或。 */
+export function sm4OfbCrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  const rk = RK_PTR;
+  keyExpansion(keyPtr, rk);
+  memory.copy(OFB_FB, ivPtr, 16);
+  let off: usize = 0;
+  while (off < inLen) {
+    cipherBlock(rk, OFB_FB, OFB_KS);
+    memory.copy(OFB_FB, OFB_KS, 16); // 新状态 = E(旧状态)
+    const rest = inLen - off;
+    const take: usize = rest < 16 ? rest : 16;
+    for (let i: usize = 0; i < take; i++) {
+      store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(OFB_KS + i));
+    }
+    off += 16;
+  }
+}
+
 // ---------- GCM（NIST SP 800-38D 的 AEAD，套在 SM4 上） ----------
 //
 // GCM = CTR（计数器只递增最后 32 位）+ GHASH（GF(2^128) 上的多项式哈希）。
