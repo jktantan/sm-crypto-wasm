@@ -245,9 +245,72 @@ export function g1Mul(k: U256, P: G1): G1 {
   return Q;
 }
 
-/** 标量乘基点 P1。 */
+// ---------- 固定基点 comb 预计算 ----------
+//
+// 基点固定时，把标量的位按 i = j + t·d 重排（t = 0..w-1 段，j = 0..d-1 个 comb
+// 位置），于是：
+//   k·P = Σ_{j=0}^{d-1} 2^j · G[c_j]，  c_j = Σ_{t=0}^{w-1} b_{j + t·d} · 2^t
+//   G[c] = Σ_{t: c_t = 1} (2^d)^t · P
+// 表只有 2^w 项，而运行时只需 d-1 次倍点 + d 次点加（w=5 时 51+52），
+// 对比 wNAF 的 255 次倍点 + ~43 次点加。表惰性构造一次后缓存。
+
+const COMB_W = 5;
+const COMB_D = 52; // ceil(256 / COMB_W)
+const COMB_SIZE = 1 << COMB_W; // 32 项
+
+/** v 的最低置位的位索引（要求 v > 0）。 */
+function lowBitIndex(v: i32): i32 {
+  let i = 0;
+  while (((v >>> i) & 1) === 0) i++;
+  return i;
+}
+
+/** 第 j 个 comb 位置的 w 位索引 c_j。 */
+function combIndex(k: U256, j: i32): i32 {
+  let c: i32 = 0;
+  for (let t = COMB_W - 1; t >= 0; t--) {
+    const i = j + t * COMB_D;
+    const bit = i < 256 ? ((k[i >> 5] >>> (i & 31)) & 1) : 0;
+    c = (c << 1) | bit;
+  }
+  return c;
+}
+
+/** 构造基点 P 的 comb 表 G。 */
+function buildG1Comb(): StaticArray<G1> {
+  const S = new StaticArray<G1>(COMB_W);
+  S[0] = g1Generator();
+  for (let t = 1; t < COMB_W; t++) {
+    let s = S[t - 1];
+    for (let k = 0; k < COMB_D; k++) s = g1Double(s);
+    S[t] = s;
+  }
+  const G = new StaticArray<G1>(COMB_SIZE);
+  G[0] = new G1(); // 无穷远
+  for (let c = 1; c < COMB_SIZE; c++) {
+    const low = c & -c;
+    G[c] = g1Add(G[c ^ low], S[lowBitIndex(low)]);
+  }
+  return G;
+}
+
+let g1CombCache: StaticArray<G1> = new StaticArray<G1>(0);
+
+/** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
+function g1CombTable(): StaticArray<G1> {
+  if (g1CombCache.length === 0) g1CombCache = buildG1Comb();
+  return g1CombCache;
+}
+
+/** 标量乘基点 P1（固定基点 comb）。 */
 export function g1MulG(k: U256): G1 {
-  return g1Mul(k, g1Generator());
+  const G = g1CombTable();
+  let Q: G1 = g1Copy(G[combIndex(k, COMB_D - 1)]);
+  for (let j = COMB_D - 2; j >= 0; j--) {
+    Q = g1Double(Q);
+    Q = g1Add(Q, G[combIndex(k, j)]);
+  }
+  return Q;
 }
 
 /** 转仿射。Z==0 时原样返回。 */
@@ -426,9 +489,41 @@ export function g2Mul(k: U256, P: G2): G2 {
   return Q;
 }
 
-/** 标量乘基点 P2。 */
+/** 构造基点 P2 的 comb 表 G。 */
+function buildG2Comb(): StaticArray<G2> {
+  const S = new StaticArray<G2>(COMB_W);
+  S[0] = g2Generator();
+  for (let t = 1; t < COMB_W; t++) {
+    let s = S[t - 1];
+    for (let k = 0; k < COMB_D; k++) s = g2Double(s);
+    S[t] = s;
+  }
+  const G = new StaticArray<G2>(COMB_SIZE);
+  G[0] = new G2(); // 无穷远
+  for (let c = 1; c < COMB_SIZE; c++) {
+    const low = c & -c;
+    G[c] = g2Add(G[c ^ low], S[lowBitIndex(low)]);
+  }
+  return G;
+}
+
+let g2CombCache: StaticArray<G2> = new StaticArray<G2>(0);
+
+/** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
+function g2CombTable(): StaticArray<G2> {
+  if (g2CombCache.length === 0) g2CombCache = buildG2Comb();
+  return g2CombCache;
+}
+
+/** 标量乘基点 P2（固定基点 comb）。 */
 export function g2MulG(k: U256): G2 {
-  return g2Mul(k, g2Generator());
+  const G = g2CombTable();
+  let Q: G2 = g2Copy(G[combIndex(k, COMB_D - 1)]);
+  for (let j = COMB_D - 2; j >= 0; j--) {
+    Q = g2Double(Q);
+    Q = g2Add(Q, G[combIndex(k, j)]);
+  }
+  return Q;
 }
 
 /** 转仿射。 */

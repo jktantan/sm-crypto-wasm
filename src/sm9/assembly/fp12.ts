@@ -98,21 +98,28 @@ export function fp12Mul(a: Fp12, b: Fp12): Fp12 {
 }
 
 /**
- * 平方（对齐 fp12_sqr）：
+ * 平方（对齐 fp12_sqr），w³ = v：
  *   r0 = a0² + 2·v·(a1 a2)
  *   r1 = 2 a0 a1 + v·a2²
  *   r2 = 2 a0 a2 + a1²
+ *
+ * 交叉项 2·a_i·a_j 用 Karatsuba 形式 (a_i+a_j)² − a_i² − a_j² 求出，于是 6 次
+ * 运算全是 fp4Sqr（原来 3 次 fp4Sqr + 3 次 fp4Mul）。fp4Sqr 走复平方，比 fp4Mul
+ * 少一次 Fp2 乘法。这里系数正好是 2a_i a_j，所以不需要再除以 2。
+ * final exponent 里有 200 次这样的平方，是 pairing 里最集中的一处。
  */
 export function fp12Sqr(a: Fp12): Fp12 {
-  let r0 = fp4Sqr(a[0]);
-  r0 = fp4Add(r0, fp4Dbl(fp4MulV(a[1], a[2])));
+  const A = fp4Sqr(a[0]);
+  const B = fp4Sqr(a[1]);
+  const C = fp4Sqr(a[2]);
+  // 2 a_i a_j
+  const D = fp4Sub(fp4Sub(fp4Sqr(fp4Add(a[0], a[1])), A), B); // 2 a0 a1
+  const E = fp4Sub(fp4Sub(fp4Sqr(fp4Add(a[0], a[2])), A), C); // 2 a0 a2
+  const F = fp4Sub(fp4Sub(fp4Sqr(fp4Add(a[1], a[2])), B), C); // 2 a1 a2
 
-  let r1 = fp4Dbl(fp4Mul(a[0], a[1]));
-  r1 = fp4Add(r1, fp4SqrV(a[2]));
-
-  let r2 = fp4Dbl(fp4Mul(a[0], a[2]));
-  r2 = fp4Add(r2, fp4Sqr(a[1]));
-
+  const r0 = fp4Add(A, fp4TimesV(F));
+  const r1 = fp4Add(D, fp4TimesV(C));
+  const r2 = fp4Add(E, B);
   return fp12set(r0, r1, r2);
 }
 
