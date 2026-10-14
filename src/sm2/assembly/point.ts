@@ -12,6 +12,7 @@
 // oracle 验证：plan Task 6；对点加/倍点/标量乘用 gmkitx 或 Node bigint 校验。
 
 import {
+  arenaAlloc,
   fpAdd,
   fpInv,
   fpMul,
@@ -27,7 +28,9 @@ import {
   u256copy,
   u256fromBytes,
   u256fromU32,
+  u256isOdd,
   u256isZero,
+  u256shr1,
   u256subRaw,
   u256zero,
 } from './field';
@@ -220,28 +223,99 @@ function fpSubRaw(a: U256, b: U256): U256 {
   return r;
 }
 
+// ---------- wNAF 标量乘（任意点） ----------
+//
+// 朴素双倍-点加平均要做 ~128 次点加；宽度 5 的 wNAF 把非零密度降到约 1/(w+1)，
+// 点加降到 ~43 次。Jacobian 下点加明显贵于点倍，所以划算。
+// 固定基点走 comb 表（见本文件 scalarMulG），这里服务任意点：verify 的 t·P、
+// decrypt 的 d·C1、以及密钥交换。
+
+const WNAF_W = 5;
+const WNAF_LEN = 257; // 256 位 + 1
+const WNAF_HALF: u32 = (<u32>1) << (WNAF_W - 1); // 16
+const WNAF_MASK: u32 = ((<u32>1) << WNAF_W) - 1; // 31
+const WNAF_TABLE = 8; // 1 << (W - 2)，存 P, 3P, …, 15P
+
+/** a -= v（v < 2^32，原地）。 */
+function subSmallU32(a: U256, v: u32): void {
+  let borrow: i64 = <i64>v;
+  let i = 0;
+  while (borrow !== 0 && i < 8) {
+    const cur: i64 = <i64>load<u32>(a + ((<usize>i) << 2)) - (borrow & 0xffffffff);
+    if (cur < 0) {
+      store<u32>(a + ((<usize>i) << 2), <u32>(cur + 0x100000000));
+      borrow = 1;
+    } else {
+      store<u32>(a + ((<usize>i) << 2), <u32>cur);
+      borrow = 0;
+    }
+    i++;
+  }
+}
+
+/** a += v（v < 2^32，原地）。 */
+function addSmallU32(a: U256, v: u32): void {
+  let carry: u64 = <u64>v;
+  let i = 0;
+  while (carry !== 0 && i < 8) {
+    const cur: u64 = <u64>load<u32>(a + ((<usize>i) << 2)) + carry;
+    store<u32>(a + ((<usize>i) << 2), <u32>(cur & 0xffffffff));
+    carry = cur >>> 32;
+    i++;
+  }
+}
+
 /**
- * 标量乘：R = k · P（k 为 256-bit 标量，P 为 Jacobian 点）。
- * 双倍-点加，MSB-first，左到右。
+ * 计算 k 的宽度 5 的 wNAF（非相邻形式），低位在前，写入 out（i32 数组）。
+ * digit ∈ {0, ±1, ±3, …, ±15}；k 不被修改。
+ *
+ * @returns 有效位数（k == 0 时返回 0）
+ */
+function wnaf(k: U256, out: usize): i32 {
+  const d = u256clone(k);
+  let i = 0;
+  while (!u256isZero(d)) {
+    if (u256isOdd(d)) {
+      const m: u32 = load<u32>(d) & WNAF_MASK;
+      let digit: i32 = <i32>m;
+      if (m > WNAF_HALF) digit -= 32; // m - 2^W
+      store<i32>(out + ((<usize>i) << 2), digit);
+      if (digit > 0) subSmallU32(d, <u32>digit);
+      else addSmallU32(d, <u32>-digit);
+    } else {
+      store<i32>(out + ((<usize>i) << 2), 0);
+    }
+    u256shr1(d);
+    i++;
+  }
+  return i;
+}
+
+/**
+ * 标量乘：R = k · P（任意点，wNAF w = 5）。
  */
 export function scalarMul(k: U256, p: JPoint): JPoint {
-  let r = infinity();
-  let started = false;
-  for (let i = 255; i >= 0; i--) {
-    if (started) {
-      r = doublePoint(r);
-    }
-    const bit = u256bit(k, i);
-    if (bit === 1) {
-      if (!started) {
-        r = clonePoint(p);
-        started = true;
-      } else {
-        r = addPoints(r, p);
-      }
-    }
+  const digits = arenaAlloc(<usize>WNAF_LEN * 4);
+  const n = wnaf(k, digits);
+  if (n === 0) return infinity(); // k == 0
+
+  // 预计算 P, 3P, 5P, …, 15P 及其负（循环内零分配）
+  const table = new StaticArray<JPoint>(WNAF_TABLE);
+  const negTable = new StaticArray<JPoint>(WNAF_TABLE);
+  table[0] = clonePoint(p);
+  const step = doublePoint(p);
+  for (let i = 1; i < WNAF_TABLE; i++) table[i] = addPoints(table[i - 1], step);
+  for (let i = 0; i < WNAF_TABLE; i++) negTable[i] = negate(table[i]);
+
+  const top = load<i32>(digits + ((<usize>(n - 1)) << 2));
+  const Q = top > 0 ? clonePoint(table[(top - 1) >> 1]) : clonePoint(negTable[(-top - 1) >> 1]);
+  for (let i = n - 2; i >= 0; i--) {
+    doubleInto(Q, Q);
+    const d = load<i32>(digits + ((<usize>i) << 2));
+    if (d > 0) addInto(Q, Q, table[(d - 1) >> 1]);
+    else if (d < 0) addInto(Q, Q, negTable[(-d - 1) >> 1]);
   }
-  return r;
+  return Q;
 }
 
 /**

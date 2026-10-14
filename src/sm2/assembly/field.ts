@@ -9,6 +9,7 @@
 //   n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 
 import {
+  arenaAlloc,
   modAdd,
   modInv,
   modMul,
@@ -28,7 +29,9 @@ import {
   u256fromLimbs,
   u256fromMemBE,
   u256fromU32,
+  u256isOdd,
   u256isZero,
+  u256shr1,
   u256subRaw,
   u256toBytes,
   u256zero,
@@ -39,6 +42,7 @@ import {
 export {
   U256,
   U512,
+  arenaAlloc,
   u256bit,
   u256clone,
   u256cmp,
@@ -46,7 +50,9 @@ export {
   u256fromBytes,
   u256fromMemBE,
   u256fromU32,
+  u256isOdd,
   u256isZero,
+  u256shr1,
   u256toBytes,
   u256zero,
   permU256,
