@@ -25,7 +25,7 @@
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem } from '../pem/sm9.js';
-import { DecryptionError, InvalidKeyError } from '../runtime/errors.js';
+import { DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
@@ -134,8 +134,15 @@ function toBytes(input: string | Uint8Array, label: string): Uint8Array {
   return new TextEncoder().encode(input);
 }
 
-function requireLen(b: Uint8Array, n: number, label: string): void {
-  if (b.length !== n) throw new RangeError(`sm9: ${label} 必须是 ${n} 字节，实际 ${b.length}`);
+/**
+ * 校验字节长度。默认按**密钥支**（`InvalidKeyError`）抛错 —— SM9 各入口的参数绝大多数
+ * 是主私钥 / 标量；密文、签名、协议消息的调用点显式传 `'cipher'`。
+ */
+function requireLen(b: Uint8Array, n: number, label: string, kind: 'key' | 'cipher' = 'key'): void {
+  if (b.length === n) return;
+  const msg = `sm9: ${label} 必须是 ${n} 字节，实际 ${b.length}`;
+  if (kind === 'cipher') throw new InvalidCiphertextError(msg);
+  throw new InvalidKeyError(msg);
 }
 
 function mem(): Uint8Array {
@@ -327,7 +334,7 @@ export function verify(
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const sigB = toBytes(sig, 'sig');
-  requireLen(sigB, 96, 'sig');
+  requireLen(sigB, 96, 'sig', 'cipher');
 
   const { exports } = getModule();
   const ksP = exports.alloc(32);
@@ -396,7 +403,7 @@ export function decrypt(
   const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
   const idB = toBytes(id, 'id');
   const ctB = toBytes(ct, 'ct');
-  if (ctB.length < 97) throw new RangeError('sm9: ct 长度必须 >= 97 字节 (C1=65 + C3=32)');
+  if (ctB.length < 97) throw new InvalidCiphertextError('sm9: ct 长度必须 >= 97 字节 (C1=65 + C3=32)');
 
   const { exports } = getModule();
   const keP = exports.alloc(32);
@@ -492,7 +499,7 @@ export function kemDecrypt(
     putBytes(idB, idP);
     putBytes(c1B, c1P);
     const rc = exports.sm9KemDecryptOut(keP, idP, idB.length, c1P, klen, kP);
-    if (rc !== 1) throw new Error('sm9: kemDecrypt 失败（封装非法 / K 全 0）');
+    if (rc !== 1) throw new DecryptionError('sm9: kemDecrypt 失败（封装非法 / K 全 0）');
     return readHex(kP, klen);
   } finally {
     exports.freeAll();
@@ -649,7 +656,7 @@ export async function createExchangeInitiator(
       const selfRA = RA;
       if (selfR === null || selfRA === null) throw new Error('sm9.exch: 需先调用 initiate()');
       const RB = readPoint65(msg.ephemeral, 'RB');
-      const SB = toBytes(msg.confirm, 'SB'); requireLen(SB, 32, 'SB');
+      const SB = toBytes(msg.confirm, 'SB'); requireLen(SB, 32, 'SB', 'cipher');
       const all = exchAll(keB, true, selfIdB, peerIdB, selfR, selfRA, RB, defaultKL);
       if (!ctEq(SB, Buffer.from(all.sb, 'hex'))) throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
       cached = { all, kLen: defaultKL };
@@ -706,7 +713,7 @@ export async function createExchangeResponder(
       const selfRB = RB;
       const selfRA = RA;
       if (selfR === null || selfRB === null || selfRA === null) throw new Error('sm9.exch: 需先调用 respond()');
-      const SA = toBytes(msg.confirm, 'SA'); requireLen(SA, 32, 'SA');
+      const SA = toBytes(msg.confirm, 'SA'); requireLen(SA, 32, 'SA', 'cipher');
       const all = cached !== null && cached.kLen === kLen
         ? cached.all
         : exchAll(keB, false, selfIdB, peerIdB, selfR, selfRB, selfRA, kLen);

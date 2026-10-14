@@ -303,3 +303,33 @@ GREEN；全量套件 112/112。
 - `sm2.encrypt` 现在会拒绝以前"能跑通"的坏公钥 —— 裁决：这正是加强校验的目的，保留。
 - sm9 的 `kemDecrypt` 与 exchange 状态机仍抛裸 `Error` —— 裁决：超出本轮 P2 清单
   （用户只选了空输入、错误类型、公钥校验三条），保留。
+
+---
+
+# 扩展性批次（2026-10-14）
+
+用户裁决：把"对以后扩展有影响"的 ruling 都改成能平滑过渡的形态；SM9 那两项一并做；
+另外补 `safeMode`。
+
+### Task 1 — 错误体系统一
+
+- 用户裁决："现在就统一"。新增 `CiphertextError`（密文支基类），`InvalidCiphertextError`
+  与 `DecryptionError` 都继承它；密钥支仍为 `InvalidKeyError`（`InvalidPublicKeyError` 是其子类）。
+  于是 `errors.ts` 里那句"所有公开 API 抛出的错误都是 `SmCryptoError` 子类"终于自洽。
+- 归位：
+  - 密钥 / IV / 标量长度错 → `InvalidKeyError`（`sm2/keyInput`、`sm4` 各模式、`zuc`、
+    `sm9` 的 `requireLen` 默认支）；
+  - 密文 / 签名 / 协议消息 → `InvalidCiphertextError`（sm2 短密文与签名长度、sm4
+    ECB/CBC 密文长度与 GCM tag 长度、sm9 的 ct 长度与 sig/SA/SB）；
+  - 解密校验失败 → `DecryptionError`（sm4 CBC 的 PKCS#7 填充错也归此类）；
+    `sm9.kemDecrypt` 由裸 `Error` 改过来。
+- facade 导出 `CiphertextError`。
+- 测试：`npx vitest run tests/errors.spec.ts` → 14/14；全量 → 20 文件 133/133 pass。
+- `Ruling:` **明文**长度错（如 `sm4 ECB: 明文长度必须是 16 的非零倍数`）保留 `RangeError`。
+  理由：它是"调用方传参形状不对"，不是"收到的密文有问题"，`InvalidCiphertextError` 的
+  名字与语义都套不上。代价：要判定"数据块有问题"得覆盖两类，但该类错误在加密侧属编程
+  错误、不该被业务逻辑 catch。
+- `Ruling:` `sm9.requireLen` 默认走密钥支，只有 4 个调用点显式传 `'cipher'`。理由：SM9 的
+  长度校验点绝大多数是主私钥 / 标量；改默认值只动 1 处，改调用点要动 10+ 处且文本重复。
+  代价：`r`（随机标量）长度错现在抛 `InvalidKeyError` 而非 `RangeError` —— 已在
+  `errors.ts` 注释里把密钥支定义为"密钥 / 标量输入"以对齐。

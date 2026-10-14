@@ -11,6 +11,7 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { bytesToHex, toBytes } from '../runtime/convert.js';
+import { InvalidKeyError } from '../runtime/errors.js';
 
 interface ZucExports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -51,8 +52,8 @@ function getModule(): ZucModule {
 function keyIv(key: string | Uint8Array, iv: string | Uint8Array): { k: Uint8Array; v: Uint8Array } {
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
-  if (k.length !== 16) throw new RangeError('zuc: key must be 16 bytes');
-  if (v.length !== 16) throw new RangeError('zuc: iv must be 16 bytes');
+  if (k.length !== 16) throw new InvalidKeyError('zuc: key must be 16 bytes');
+  if (v.length !== 16) throw new InvalidKeyError('zuc: iv must be 16 bytes');
   return { k, v };
 }
 

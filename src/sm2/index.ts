@@ -20,7 +20,7 @@ import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
-import { DecryptionError, InvalidPublicKeyError } from '../runtime/errors.js';
+import { DecryptionError, InvalidCiphertextError, InvalidPublicKeyError } from '../runtime/errors.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -245,7 +245,7 @@ export function verify(
   if (!isOnCurve(x, y)) return false;
   const m = toBytes(message, 'message');
   const sig = toBytes(signature, 'signature');
-  if (sig.length !== 64) throw new RangeError('sm2: signature must be 64 bytes');
+  if (sig.length !== 64) throw new InvalidCiphertextError('sm2: signature must be 64 bytes');
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);
   const pxp = exports.alloc(32);
@@ -328,7 +328,7 @@ export function decrypt(
 ): string {
   const d = toPrivateKeyBytes(privateKey);
   const ct = toBytes(ciphertext, 'ciphertext');
-  if (ct.length < 97) throw new RangeError('sm2: ciphertext too short');
+  if (ct.length < 97) throw new InvalidCiphertextError('sm2: ciphertext too short');
 
   const format = opts.inputFormat ?? 'auto';
   if (format === 'C1C3C2') return decryptRaw(d, ct);

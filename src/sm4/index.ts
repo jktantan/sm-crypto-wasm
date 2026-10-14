@@ -8,7 +8,7 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
-import { DecryptionError } from '../runtime/errors.js';
+import { DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 interface Sm4Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -88,7 +88,7 @@ function withBuffers<T>(
 export function encryptECB(key: string | Uint8Array, msg: string | Uint8Array): string {
   const k = toBytes(key, 'key');
   const m = toBytes(msg, 'msg');
-  if (k.length !== 16) throw new RangeError('sm4: key must be 16 bytes');
+  if (k.length !== 16) throw new InvalidKeyError('sm4: key must be 16 bytes');
   if (m.length % 16 !== 0 || m.length === 0) {
     throw new RangeError('sm4 ECB: 明文长度必须是 16 的非零倍数');
   }
@@ -104,9 +104,9 @@ export function encryptECB(key: string | Uint8Array, msg: string | Uint8Array): 
 export function decryptECB(key: string | Uint8Array, ct: string | Uint8Array): string {
   const k = toBytes(key, 'key');
   const c = toBytes(ct, 'ct');
-  if (k.length !== 16) throw new RangeError('sm4: key must be 16 bytes');
+  if (k.length !== 16) throw new InvalidKeyError('sm4: key must be 16 bytes');
   if (c.length % 16 !== 0 || c.length === 0) {
-    throw new RangeError('sm4 ECB: 密文长度必须是 16 的非零倍数');
+    throw new InvalidCiphertextError('sm4 ECB: 密文长度必须是 16 的非零倍数');
   }
   const out = withBuffers(k, c, c.length, (kp, ip, op) => {
     const { exports } = getModule();
@@ -153,7 +153,7 @@ export function encryptCBC(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const m = toBytes(msg, 'msg');
-  if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CBC: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
   const padded = pkcs7Pad(m);
   const out = new Uint8Array(padded.length);
   let prev = v;
@@ -175,8 +175,8 @@ export function decryptCBC(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const c = toBytes(ct, 'ct');
-  if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CBC: key/iv must be 16 bytes');
-  if (c.length % 16 !== 0) throw new RangeError('sm4 CBC: 密文长度必须是 16 的倍数');
+  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
+  if (c.length % 16 !== 0) throw new InvalidCiphertextError('sm4 CBC: 密文长度必须是 16 的倍数');
   const out = new Uint8Array(c.length);
   let prev = v;
   for (let off = 0; off < c.length; off += 16) {
@@ -198,7 +198,7 @@ export function cryptCTR(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CTR: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CTR: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   const counter: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -241,7 +241,7 @@ function cfb(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 CFB: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   let feedback: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -269,7 +269,7 @@ export function cryptOFB(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new RangeError('sm4 OFB: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 OFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   let state: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -303,7 +303,7 @@ function pkcs7Pad(m: Uint8Array): Uint8Array {
 function pkcs7Unpad(m: Uint8Array): Uint8Array {
   if (m.length === 0) throw new RangeError('sm4 CBC: 空输出');
   const padLen = m[m.length - 1] ?? 0;
-  if (padLen < 1 || padLen > 16) throw new RangeError('sm4 CBC: 非法 PKCS#7 填充');
+  if (padLen < 1 || padLen > 16) throw new DecryptionError('sm4 CBC: 非法 PKCS#7 填充');
   return m.subarray(0, m.length - padLen);
 }
 
@@ -331,8 +331,8 @@ function gcmInputs(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const a = optionalBytes(aad, 'aad');
-  if (k.length !== 16) throw new RangeError('sm4 GCM: key must be 16 bytes');
-  if (v.length === 0) throw new RangeError('sm4 GCM: iv 不能为空');
+  if (k.length !== 16) throw new InvalidKeyError('sm4 GCM: key must be 16 bytes');
+  if (v.length === 0) throw new InvalidKeyError('sm4 GCM: iv 不能为空');
   return { k, v, a };
 }
 
@@ -432,7 +432,7 @@ export function decryptGCM(
   const { k, v, a } = gcmInputs(key, iv, aad);
   const c = optionalBytes(ct, 'ct');
   const t = toBytes(tag, 'tag');
-  if (t.length !== 16) throw new RangeError('sm4 GCM: tag must be 16 bytes');
+  if (t.length !== 16) throw new InvalidCiphertextError('sm4 GCM: tag must be 16 bytes');
   return withGcmBuffers(k, v, a, c, (p) => {
     const { exports, memory } = getModule();
     const mem = new Uint8Array(memory.buffer);

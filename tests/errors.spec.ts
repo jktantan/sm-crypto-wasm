@@ -2,7 +2,16 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as sm2 from '@/sm2';
 import * as sm4 from '@/sm4';
 import * as sm9 from '@/sm9';
-import { DecryptionError, SmCryptoError, isSmCryptoError } from '@/runtime';
+import * as zuc from '@/zuc';
+import {
+  CiphertextError,
+  DecryptionError,
+  InvalidCiphertextError,
+  InvalidKeyError,
+  InvalidPublicKeyError,
+  SmCryptoError,
+  isSmCryptoError,
+} from '@/runtime';
 
 /**
  * "校验失败"类错误的类型契约（spec §9 安全姿态、plan Review Focus #4）。
@@ -70,5 +79,82 @@ describe('解密失败抛 DecryptionError', () => {
   it('facade re-exports DecryptionError for catch blocks', async () => {
     const pkg = await import('@/index');
     expect(pkg.DecryptionError).toBe(DecryptionError);
+  });
+});
+
+/**
+ * 错误体系：**所有**库语义错误都是 `SmCryptoError` 的子类，按"用户修复路径"分两支 ——
+ * 密钥支（`InvalidKeyError`）与密文支（`CiphertextError`）。
+ * 只有"参数根本不是密码学对象"（类型不对、数字越界）才用宿主原生 `TypeError` / `RangeError`。
+ */
+describe('错误体系（统一为 SmCryptoError 子类）', () => {
+  beforeAll(async () => {
+    await sm2.ensureLoaded();
+    await sm4.ensureLoaded();
+    await sm9.ensureLoaded();
+    await zuc.ensureLoaded();
+  });
+
+  it('CiphertextError 是密文支的基类，覆盖结构错与校验失败', () => {
+    expect(new InvalidCiphertextError('x')).toBeInstanceOf(CiphertextError);
+    expect(new DecryptionError('x')).toBeInstanceOf(CiphertextError);
+    expect(new InvalidCiphertextError('x')).toBeInstanceOf(SmCryptoError);
+    expect(new DecryptionError('x')).toBeInstanceOf(SmCryptoError);
+    expect(new CiphertextError('x')).toBeInstanceOf(SmCryptoError);
+  });
+
+  it('InvalidPublicKeyError 仍是 InvalidKeyError 的子类', () => {
+    expect(new InvalidPublicKeyError('x')).toBeInstanceOf(InvalidKeyError);
+    expect(new InvalidKeyError('x')).toBeInstanceOf(SmCryptoError);
+  });
+
+  it('sm2: 短密文 / 错长度签名 → InvalidCiphertextError', () => {
+    expect(() => sm2.decrypt(D, new Uint8Array(10))).toThrow(InvalidCiphertextError);
+    const pub = sm2.getPublicKey(D);
+    expect(() => sm2.verify(pub, new Uint8Array([1]), new Uint8Array(10))).toThrow(
+      InvalidCiphertextError,
+    );
+  });
+
+  it('sm2: 私钥 / 公钥长度错 → InvalidKeyError', () => {
+    expect(() => sm2.sign(new Uint8Array(10), new Uint8Array([1]))).toThrow(InvalidKeyError);
+    expect(() => sm2.getPublicKey(new Uint8Array(10))).toThrow(InvalidKeyError);
+    expect(() => sm2.encrypt(new Uint8Array(10), new Uint8Array([1]))).toThrow(InvalidKeyError);
+  });
+
+  it('sm4: key/iv 长度错 → InvalidKeyError；tag 长度错 → InvalidCiphertextError', () => {
+    expect(() => sm4.encryptECB(new Uint8Array(10), new Uint8Array(16))).toThrow(
+      InvalidKeyError,
+    );
+    expect(() =>
+      sm4.decryptGCM(new Uint8Array(16), new Uint8Array(12), new Uint8Array(0), new Uint8Array(8)),
+    ).toThrow(InvalidCiphertextError);
+  });
+
+  it('zuc: key/iv 长度错 → InvalidKeyError', () => {
+    expect(() => zuc.zucKeystream(new Uint8Array(10), new Uint8Array(16), 4)).toThrow(
+      InvalidKeyError,
+    );
+    expect(() => zuc.zucKeystream(new Uint8Array(16), new Uint8Array(9), 4)).toThrow(
+      InvalidKeyError,
+    );
+  });
+
+  it('sm9: 主私钥长度错 → InvalidKeyError；密文过短 → InvalidCiphertextError', () => {
+    expect(() => sm9.sign(new Uint8Array(10), 'alice', new Uint8Array([1]))).toThrow(
+      InvalidKeyError,
+    );
+    expect(() => sm9.decrypt(new Uint8Array(32), 'alice', new Uint8Array(10))).toThrow(
+      InvalidCiphertextError,
+    );
+  });
+
+  it('普通参数仍然用宿主原生类型（TypeError / RangeError）', () => {
+    expect(() => sm2.encrypt(sm2.getPublicKey(D), 'x', { outputFormat: 'nope' as never })).toThrow(
+      RangeError,
+    );
+    expect(() => zuc.zucMac(new Uint8Array(16), new Uint8Array(16), new Uint8Array([1]), 8, 64)).toThrow(
+      RangeError,
+    );
   });
 });

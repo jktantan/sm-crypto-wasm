@@ -25,6 +25,7 @@ export * as zuc from './zuc/index.js';
 // 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。
 export {
   SmCryptoError,
+  CiphertextError,
   InvalidKeyError,
   InvalidPublicKeyError,
   InvalidCiphertextError,

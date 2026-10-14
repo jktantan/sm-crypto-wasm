@@ -11,6 +11,7 @@
  */
 import { toBytes } from '../runtime/convert.js';
 import { parseSm2PrivateKeyPem, parseSm2PublicKeyPem } from '../pem/sm2.js';
+import { InvalidKeyError } from '../runtime/errors.js';
 
 /** 是否为 PEM 文本（而非裸字节 / hex）。 */
 export function isPem(input: string | Uint8Array): input is string {
@@ -21,7 +22,7 @@ export function isPem(input: string | Uint8Array): input is string {
 export function toPrivateKeyBytes(input: string | Uint8Array, label = 'privateKey'): Uint8Array {
   if (isPem(input)) return parseSm2PrivateKeyPem(input);
   const b = toBytes(input, label);
-  if (b.length !== 32) throw new RangeError(`sm2: ${label} must be 32 bytes`);
+  if (b.length !== 32) throw new InvalidKeyError(`sm2: ${label} must be 32 bytes`);
   return b;
 }
 
@@ -30,6 +31,6 @@ export function toPublicKeyBytes(input: string | Uint8Array, label = 'publicKey'
   if (isPem(input)) return parseSm2PublicKeyPem(input).subarray(1);
   let b = toBytes(input, label);
   if (b.length === 65 && b[0] === 0x04) b = b.subarray(1);
-  if (b.length !== 64) throw new RangeError(`sm2: ${label} must be 64 or 65 bytes`);
+  if (b.length !== 64) throw new InvalidKeyError(`sm2: ${label} must be 64 or 65 bytes`);
   return b;
 }
