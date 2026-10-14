@@ -5,7 +5,7 @@
  * 的恒定成本（无大循环压力）。密钥生成放进来方便对比"一次性 vs 持续调用"。
  */
 import { bench, group } from 'mitata';
-import { sign, verify, encrypt, decrypt, getPublicKey, ensureLoaded } from '../src/sm2/index.js';
+import { decrypt, encrypt, ensureLoaded, getPublicKey, sign, verify } from '../src/sm2/index.js';
 
 const D = '3945208f7b2144b13f36e38ac6d39f95889393692860b51a42fb81ef4df7c5b8';
 const MSG = new Uint8Array(64).fill(0x5a);

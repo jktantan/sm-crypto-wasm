@@ -10,7 +10,7 @@
  * `InvalidKeyError: publicKey 应为 64 字节，实际 128`。
  */
 import { bench, group } from 'mitata';
-import { sign, verify, encrypt, decrypt, generateKeyPair, ensureLoaded } from '../src/sm9/index.js';
+import { decrypt, encrypt, ensureLoaded, generateKeyPair, sign, verify } from '../src/sm9/index.js';
 
 export async function benchSm9(): Promise<void> {
   await ensureLoaded();

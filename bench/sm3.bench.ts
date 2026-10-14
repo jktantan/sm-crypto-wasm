@@ -9,7 +9,7 @@
  * 预热一轮让 wasm 副作用落定后再正式计时。
  */
 import { bench, group } from 'mitata';
-import { hash, hmac, ensureLoaded } from '../src/sm3/index.js';
+import { ensureLoaded, hash, hmac } from '../src/sm3/index.js';
 
 const SIZES: Array<[string, Uint8Array]> = [
   ['32B', new Uint8Array(32).fill(0xab)],

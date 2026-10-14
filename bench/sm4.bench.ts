@@ -5,7 +5,7 @@
  * 短/中两档输入（16 字节与 1KB），命中"分块一次"与"多块循环"两套路径。
  */
 import { bench, group } from 'mitata';
-import { encryptECB, encryptCBC, cryptCTR, encryptGCM, ensureLoaded } from '../src/sm4/index.js';
+import { cryptCTR, encryptCBC, encryptECB, encryptGCM, ensureLoaded } from '../src/sm4/index.js';
 
 const KEY = new Uint8Array(16).fill(0x11);
 const IV = new Uint8Array(16).fill(0x22);

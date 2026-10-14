@@ -8,12 +8,12 @@
  */
 import { bench, group } from 'mitata';
 import {
-  zucKeystream,
-  zucEncrypt,
-  zucMac,
-  zucEia3Iv,
-  resetReuseGuard,
   ensureLoaded,
+  resetReuseGuard,
+  zucEia3Iv,
+  zucEncrypt,
+  zucKeystream,
+  zucMac,
 } from '../src/zuc/index.js';
 
 const KEY = new Uint8Array(16).fill(0x33);
