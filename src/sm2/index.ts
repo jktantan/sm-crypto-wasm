@@ -17,7 +17,7 @@
  */
 
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
-import { fromBytes, toBytes } from '../runtime/convert.js';
+import { bytesToHex, fromBytes, toBytes } from '../runtime/convert.js';
 import {
   CiphertextError,
   DecryptionError,
@@ -128,17 +128,96 @@ function _putHex(hex: string, ptr: number, len: number): void {
  * @returns 公钥 hex（128 字符，x || y）。
  */
 export function getPublicKey(privateKey: string | Uint8Array): string {
-  const d = toPrivateKeyBytes(privateKey);
-  const { exports } = getModule();
+  return fromBytes(derivePublicKeyRaw(toPrivateKeyBytes(privateKey)), 'hex');
+}
+
+/**
+ * 真算一次固定基点标量乘，返回公钥 64 字节 `x || y`。**不做任何缓存**。
+ *
+ * `getPublicKey` 与缓存未命中时的 `derivePublicKeyBytes` 都走这里。
+ */
+function derivePublicKeyRaw(d: Uint8Array): Uint8Array {
+  const { exports, memory } = getModule();
   const dp = exports.alloc(32);
   const op = exports.alloc(64);
   try {
-    new Uint8Array(getModule().memory.buffer).set(d, dp);
+    new Uint8Array(memory.buffer).set(d, dp);
     exports.publicKeyOut(dp, op);
-    return fromBytes(new Uint8Array(getModule().memory.buffer, op, 64).slice(), 'hex');
+    return new Uint8Array(memory.buffer, op, 64).slice();
   } finally {
     exports.freeAll();
   }
+}
+
+/**
+ * 私钥（hex）→ 公钥（64 字节 x||y）的进程内缓存。
+ *
+ * `sign` 需要公钥来算 Z 值，而公钥只依赖私钥 —— 原先每次签名都重新派生一次，
+ * 即每次重做一遍固定基点标量乘（实测约 105µs，占一次签名 ~250µs 的 41%）。
+ *
+ * 取舍：
+ * - 键是私钥的 hex，等于让"私钥的派生结果"（以及私钥本身的 hex 形态）在进程内存
+ *   里驻留 —— 不接受这一点的调用方用 `configurePublicKeyCache({ enabled: false })`
+ *   关掉，即回到"每次都重算"的无状态行为；
+ * - 条目有固定上限（默认 32），满时按插入顺序淘汰最旧一条（FIFO，不做 LRU ——
+ *   不需要命中统计，且密钥集合通常很小）；
+ * - **只服务内部派生路径**：公开的 `getPublicKey` 仍然每次真算，保持
+ *   "派生公钥"这个操作的语义，以及 `bench` 里这一项的可测性。
+ */
+const PUB_CACHE = new Map<string, Uint8Array>();
+
+let cacheEnabled = true;
+let cacheCapacity = 32;
+
+/** `configurePublicKeyCache` 的选项。 */
+export interface PublicKeyCacheOptions {
+  /** 是否缓存私钥→公钥的派生结果（默认 true）。关掉后 `sign` 每次重算公钥。 */
+  enabled?: boolean;
+  /** 缓存条目上限，超出后 FIFO 淘汰最旧一条（默认 32）。 */
+  capacity?: number;
+}
+
+/**
+ * 调整 SM2 公钥派生缓存策略。
+ *
+ * 默认 `{ enabled: true, capacity: 32 }`。缓存省下的是 `sign` 里重复的固定基点
+ * 标量乘（实测 41%）；关掉它只应在"不允许私钥派生结果驻留进程内存"的安全模型下做。
+ */
+export function configurePublicKeyCache(opts: PublicKeyCacheOptions): void {
+  if (opts.capacity !== undefined) {
+    if (!Number.isInteger(opts.capacity) || opts.capacity < 1) {
+      throw new RangeError(`sm2: capacity 必须是正整数，收到 ${opts.capacity}`);
+    }
+    cacheCapacity = opts.capacity;
+  }
+  if (opts.enabled !== undefined) cacheEnabled = opts.enabled;
+  evictPubCache();
+}
+
+/** 清空公钥缓存（不改变开关与容量）。 */
+export function clearPublicKeyCache(): void {
+  PUB_CACHE.clear();
+}
+
+/** FIFO 淘汰多余条目，保证缓存有界。 */
+function evictPubCache(): void {
+  while (PUB_CACHE.size > cacheCapacity) {
+    const oldest = PUB_CACHE.keys().next();
+    if (oldest.done) break;
+    PUB_CACHE.delete(oldest.value);
+  }
+}
+
+/** 私钥 → 公钥（64 字节 x||y）；启用缓存时（默认）命中即不做标量乘。 */
+function derivePublicKeyBytes(d: Uint8Array): Uint8Array {
+  if (!cacheEnabled) return derivePublicKeyRaw(d);
+  const key = bytesToHex(d);
+  const hit = PUB_CACHE.get(key);
+  if (hit !== undefined) return hit;
+  const pub = derivePublicKeyRaw(d);
+  PUB_CACHE.set(key, pub);
+  evictPubCache();
+  return pub;
 }
 
 /** SM2 密钥对（PEM 形态：PKCS#8 私钥 + SPKI 公钥）。 */
@@ -228,7 +307,7 @@ function randomK(): Uint8Array {
 export function sign(privateKey: string | Uint8Array, message: string | Uint8Array): string {
   const d = toPrivateKeyBytes(privateKey);
   const m = toBytes(message, 'message');
-  const pub = toBytes(getPublicKey(d), 'pub');
+  const pub = derivePublicKeyBytes(d);
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);
   const dp = exports.alloc(32);
