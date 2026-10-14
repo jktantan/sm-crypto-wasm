@@ -65,11 +65,11 @@
 
 | 算法 | 规格 | 设计 API | 实际导出（2026-10-14 对账） |
 |---|---|---|---|
-| SM2 | GM/T 0003-2014（含密钥交换协议、加密、签名） | `sm2.encrypt / decrypt / sign / verify / keyExchange / generateKeyPair` | `generateKeyPair`（async，PEM 密钥对）、`encrypt`（`{ outputFormat: 'C1C3C2' \| 'C1C2C3' }`，默认 C1C3C2）、`decrypt`（自动识别两种顺序）、`sign / verify / getPublicKey`、`createExchangeInitiator / createExchangeResponder` |
-| SM3 | GM/T 0004-2014 | `sm3.hash / sm3.hmac` | 同设计（另有 `ensureLoaded()` 预热） |
-| SM4 | GM/T 0002-2014 | ECB / CBC / CTR / CFB / OFB / GCM | `encryptECB/decryptECB`、`encryptCBC/decryptCBC`、`encryptCFB/decryptCFB`、`encryptGCM/decryptGCM`、`cryptCTR`（别名 `encryptCTR` / `decryptCTR`）、`cryptOFB`（别名 `encryptOFB` / `decryptOFB`） |
-| SM9 | GM/T 0044-2016（含签名、密钥封装、密钥交换） | `sm9.sign / verify / encrypt / decrypt / generateKeyPair` | `generateKeyPair`（async，PKCS#8/SPKI PEM）、`sign / verify / encrypt / decrypt`（主私钥可传 hex 或 PEM）、`kemEncrypt / kemDecrypt`、`getSignPublicKey / getEncPublicKey`、`createExchangeInitiator / createExchangeResponder` |
-| ZUC | GM/T 0001-2012 + GM/T 0001.1-2012 128 比特 | `zuc.encrypt (EEA3) / zuc.mac (EIA3) / zuc.generateKeystream` | `zucKeystream`（别名 `generateKeystream`）、`zucEncrypt`（别名 `encrypt`，带 (key,iv,counter) 复用保护）、`zucDecrypt`、`zucMac`（别名 `mac` / `eia3`） |
+| SM2 | GM/T 0003-2014（含密钥交换协议、加密、签名） | `sm2.encrypt / decrypt / sign / verify / keyExchange / generateKeyPair` | `generateKeyPair`（async，PEM 密钥对）、`encrypt`（`{ outputFormat: 'C1C3C2' \| 'C1C2C3' }`，默认 C1C3C2）、`decrypt`（自动识别两种顺序，支持 `safeMode`）、`sign / verify / getPublicKey`、`createExchangeInitiator / createExchangeResponder` |
+| SM3 | GM/T 0004-2014 | `sm3.hash / sm3.hmac` | 同设计（另有 `ensureLoaded()` 预热；空输入按零长度消息处理） |
+| SM4 | GM/T 0002-2014 | ECB / CBC / CTR / CFB / OFB / GCM | `encryptECB/decryptECB`、`encryptCBC/decryptCBC`、`encryptCFB/decryptCFB`、`encryptGCM/decryptGCM`（后者支持 `{ aad?, safeMode? }`）、`cryptCTR`（别名 `encryptCTR` / `decryptCTR`）、`cryptOFB`（别名 `encryptOFB` / `decryptOFB`） |
+| SM9 | GM/T 0044-2016（含签名、密钥封装、密钥交换） | `sm9.sign / verify / encrypt / decrypt / generateKeyPair` | `generateKeyPair`（async，PKCS#8/SPKI PEM 四件套含 `userPublicPem`）、`sign`、`verify` / `encrypt`（密钥参数可为**主私钥**或**主公钥**：hex / PEM / 点字节）、`decrypt`（支持 `safeMode`）、`kemEncrypt / kemDecrypt`、`getSignPublicKey / getEncPublicKey / getUserPublicKey`、`createExchangeInitiator / createExchangeResponder` |
+| ZUC | GM/T 0001-2012 + GM/T 0001.1-2012 128 比特 | `zuc.encrypt (EEA3) / zuc.mac (EIA3) / zuc.generateKeystream` | `zucKeystream`（别名 `generateKeystream`）、`zucEncrypt`（别名 `encrypt`，带可配置的 (key,iv,counter) 复用保护）、`zucDecrypt`、`zucMac`（别名 `mac` / `eia3`，第 4 参支持 options 对象）、`zucEia3Iv` |
 
 不重复造"密钥交换"作独立算法：SM2 内置密钥交换协议、SM9 内置密钥封装，合并覆盖。
 
@@ -358,10 +358,25 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 - 配套测试：新增 `tests/errors.spec.ts`（错误类型契约），并在 `tests/sm2.spec.ts`、
   `tests/sm3-oracle.spec.ts` 增加对应用例。
 
-**本轮明确留作后续的缺口（2026-10-14）**
+**原「留作后续的缺口」—— 已于同日晚些时候实现**
 
-- `sm9.verify` / `sm9.encrypt` 尚不接受**主公钥** PEM：wasm 的 `sm9VerifyOut` /
-  `sm9EncryptOut` 内部自行从主私钥派生主公钥，要支持点字节输入需新增 2 个 AS 导出
-  并重编 `sm9.wasm`；
-- `sm9.generateKeyPair` 不产出 `userPublicPem`：SM9 的用户公钥是 `(id, 主公钥)` 的
-  确定函数，不是独立持有物。
+- ~~`sm9.verify` / `sm9.encrypt` 不接受主公钥 PEM~~ → wasm 新增 `sm9VerifyPubOut` /
+  `sm9EncryptPubOut`，TS 层按长度判别主私钥（32B）与主公钥（64 / 128B）；
+- ~~`generateKeyPair` 不产出 `userPublicPem`~~ → 已产出（签名 G2 128B / 加密 G1 64B），
+  并提供 `getUserPublicKey(masterPublicKey, id)` 供第三方复算。
+
+### 扩展性批次（2026-10-14）
+
+P2 之后又做了一轮"消除未来 breaking 的扩展点"改造，逐条 ruling 见 ledger：
+
+- **错误体系统一**：新增 `CiphertextError` 基类 —— 密文 / 签名 / 协议消息类错误归密文支
+  （`InvalidCiphertextError` / `DecryptionError`），密钥 / 标量类归密钥支
+  （`InvalidKeyError` / `InvalidPublicKeyError`）；只有类型与数值参数错保留宿主原生
+  `TypeError` / `RangeError`。（上面「P2 批次」里"长度 / 结构类错误保留 `RangeError`"
+  那条已随之更新。）
+- **ZUC**：`zucMac` 第 4 参支持 options 对象（给 ZUC-256 留位）；复用保护可配
+  （`configureReuseGuard` / `zucEncrypt(..., { reuseGuard })`）；新增 `zucEia3Iv()`。
+- **SM9**：PEM 解析从通用 `toBytes` 移出、只在密钥参数上生效；`verify` / `encrypt`
+  接受主公钥；`generateKeyPair` 产出 `userPublicPem`；新增 `getUserPublicKey()`。
+- **safeMode**：`sm2.decrypt` / `sm9.decrypt` / `sm4.decryptGCM` 支持失败返回 `null`
+  （plan Review Focus #4）；用重载保证既有调用点的返回类型仍是 `string`。

@@ -403,3 +403,46 @@ GREEN；全量套件 112/112。
 - `Ruling:` `sm4.decryptGCM` 用"第 5 参双形态"而不是新增第 6 个位置参数。理由：否则会
   出现 `decryptGCM(k, iv, ct, tag, undefined, { safeMode: true })` 这种写法；对象形态把
   aad 与 safeMode 收拢到一处。代价：第 5 参是联合类型，内部要用 instanceof 判别。
+
+### Task 6 — 文档同步 + 全量回归 + self-review
+
+- spec：§3 表的 SM2 / SM3 / SM4 / SM9 / ZUC 五行按现状更新；§14 的"留作后续的缺口"
+  两条标为已实现，并新增「扩展性批次（2026-10-14）」小节。
+- plan：Review Focus 表后的注记更新（#4 已全部实现，含 `safeMode`）。
+- 测试：全量 21 文件 150/150 pass；`npx tsc --noEmit` 干净。
+
+---
+
+## Final review（扩展性批次）
+
+`Final review: self-review (no subagent tool)` —— 审查范围 `de6647c..HEAD`（6 个实现/文档提交）。
+
+### Strengths
+
+- 每个扩展点都有测试钉住：错误体系 6 条、ZUC 5 条、SM9 主公钥 5 条、safeMode 6 条。
+- wasm 改动是**纯新增导出**，既有导出一行未动 —— 既有 KAT 向量继续通过，说明密码学核心
+  没有被碰。
+- `safeMode` 用重载而非改返回类型：返回值变化只波及显式写 `{ safeMode: true }` 的调用点。
+
+### Issues
+
+- Critical：无。
+- Important：无。
+- Minor（deferred）：
+  - `zucMac` 的 options 判别用 `typeof === 'object'`，若运行时强传 `Uint8Array` 会静默取
+    默认值（类型系统已拦，属防御性缺口）。
+  - `configureReuseGuard` 是进程级状态，同进程多租户需自行协调。
+  - `keyArg` 的 PEM 判定仍是字符串 `includes`，不是结构化 ASN.1 判定。
+
+### Fix pass
+
+`Final: fixed PEM 判定收紧` —— `keyArg` 判"是不是公钥 PEM"由 `'PUBLIC KEY'` 收紧为
+`'BEGIN PUBLIC KEY'`（避免 PEM body 偶然命中）。验证：`npx tsc --noEmit` + 全量 150/150
+（纯判定收紧，无新增测试）。
+
+### Declined to judge
+
+- `zucEncrypt` 的有状态性 —— 裁决：已提供调用级与全局级开关，保留。
+- 签名场景的 `userPublicPem` 并非标准定义的对象 —— 裁决：返回值形状一致性优先，
+  已在 Task 4 的 ruling 里说明。
+- 明文长度错保留 `RangeError` —— 裁决：加密侧的明文形状错属编程错误，保留。

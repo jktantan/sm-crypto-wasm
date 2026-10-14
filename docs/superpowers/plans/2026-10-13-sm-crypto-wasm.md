@@ -69,10 +69,10 @@
 > "空输入抛错"只适用于密钥 / IV / 密文这类有固定长度契约的参数。详见 spec §14「P2 批次」。
 >
 > **2026-10-14 现状（#3 / #4 / #5）**：#3 已实现（新增 `InvalidPublicKeyError`，
-> `encrypt` 抛 / `verify` 返回 false）；#4 的"校验失败"已统一为 `DecryptionError`，
-> 但长度 / 结构类错误按 `src/runtime/errors.ts` 的既有设计保留 `RangeError`，
-> 且本条里的 `safeMode` 选项未实现；#5 已实现（`zucEncrypt` 抛错，解密走新增的
-> `zucDecrypt`）。
+> `encrypt` 抛 / `verify` 返回 false）；#4 已全部实现 —— 校验失败统一为
+> `DecryptionError`，密文结构错统一为 `InvalidCiphertextError`（两者同属
+> `CiphertextError` 支），且 `safeMode: true` 已支持；#5 已实现（`zucEncrypt` 抛错，
+> 解密走新增的 `zucDecrypt`）。
 
 ---
 

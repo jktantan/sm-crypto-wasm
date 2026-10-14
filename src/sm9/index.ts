@@ -189,7 +189,7 @@ type KeyArg = { kind: 'secret'; bytes: Uint8Array } | { kind: 'public'; bytes: U
  */
 function keyArg(input: string | Uint8Array, publicLen: 64 | 128, label: string): KeyArg {
   if (typeof input === 'string' && input.includes('-----BEGIN')) {
-    if (input.includes('PUBLIC KEY')) {
+    if (input.includes('BEGIN PUBLIC KEY')) {
       const pub = parseSm9PublicKeyPem(input);
       if (pub.length !== publicLen) {
         throw new InvalidKeyError(
