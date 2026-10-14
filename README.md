@@ -82,11 +82,14 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
   wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
   同款的批量导出后降到 24 µs 一带，反过来快 1.3~1.4×；
 - **SM4 的瓶颈是每轮 4 次 S 盒查表**：把 S 盒与 L 变换合成 T-table 只换来 8~10%
-  （查表次数不变），因为成本不在 ALU 而在内存访问。本库进一步把 ECB / CTR / GCM 的
-  GCTR 改成 **WASM SIMD 的 4 路并行**——4 个块摊到一个 `v128` 的 4 个 lane，异或链与
-  线性层 L 一次算 4 块（S 盒仍逐 lane 走标量查表，故收益停在约 1.3× 而非 4×），
-  尾块回退标量。这也解释了为什么仍追不上 C：它靠 ARMv8 的 `SM4E` 指令用电路做
-  S 盒、**根本不查表**，而 WebAssembly 不暴露该指令集（通用 SIMD 也只给通用算子）；
+  （查表次数不变），因为成本不在 ALU 而在内存访问。查表次数既然降不下来，就改用
+  指令级并行把它藏起来：ECB 的多块循环做成 **8 块标量交错**（每块 4 条独立依赖链，
+  由乱序执行盖住 L1 延迟），CTR / GCM 的密钥流生成同路数，不足 8 块时退到 4 块交错、
+  再退到单块。之所以不走 WASM SIMD：`v128` 既没有 AVX2 的 gather（无法并行查
+  8→32 位表），也没有 AES-NI，而 `i8x16.swizzle` 只够 4-bit S 盒、够不着 SM4 的
+  8-bit S 盒——查表次数不降，收益只剩异或链的 lane 并行，实测反而不如标量交错。
+  这也解释了为什么仍追不上 C：它靠 ARMv8 的 `SM4E` 指令用电路做 S 盒、**根本不查表**，
+  而 WebAssembly 不暴露该指令集（通用 SIMD 也只给通用算子）；
 - **SM9 没有可比实现**（纯 JS 生态普遍如此，pairing 在纯 JS 里成本过高），故只给
   本库的绝对耗时；
 - **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
@@ -341,10 +344,9 @@ pnpm lint           # biome（lint + format）
 pnpm typecheck      # tsc --noEmit
 ```
 
-**SM4 的 wasm 用 `--enable simd` 编译**（`build:wasm:sm4` 已带该 flag），因为它的
-ECB / CTR / GCM-GCTR 走 WASM SIMD 的 4 路并行。因此 `sm4.wasm` 要求运行时支持
-**WASM SIMD**——Node 18+ 与现代浏览器都满足；若某运行时禁用了 SIMD，SM4 会在实例化
-时报错，其它算法（不带 SIMD）不受影响。
+**所有 wasm 模块都只带 `--optimize`，不含 `--enable simd`**：SM4 的加速走的是标量
+多块交错，不依赖任何 SIMD 指令集。因此五个算法模块对运行时的要求一致，`sm4.wasm`
+不再要求 **WASM SIMD**。
 
 `src/**/assembly/**` 是 AssemblyScript 源，由 `asc` 编译；这些文件**不要**用 `import { type X}`
 或让格式化器重排 import —— `asc` 0.28 不认类型修饰符（biome 配置里已对该目录关闭相关规则）。
@@ -439,14 +441,19 @@ Notes:
   had, they now land at ~24 µs, i.e. **1.3–1.4× faster** than the reference;
 - **SM4's bottleneck is the four S-box lookups per round**: merging the S-box and L
   transform into T-tables bought only 8–10% (the lookup count is unchanged), because
-  the cost is memory access, not ALU work. This library goes further and runs
-  ECB / CTR / GCM's GCTR as **4-way WASM SIMD** — four blocks spread across the four
-  lanes of a `v128`, so the XOR chain and the L transform are computed four blocks at
-  a time (the S-box still walks the scalar lookup table lane by lane, which is why the
-  gain stops at ~1.3× rather than 4×), with the tail falling back to scalar. This also
-  explains the remaining gap to C: OpenSSL uses ARMv8's `SM4E` instruction to
-  implement the S-box in circuitry with **no table lookup at all**, and WebAssembly
-  does not expose that instruction set (generic SIMD only offers generic operators);
+  the cost is memory access, not ALU work. Since the lookup count cannot be reduced,
+  the library hides it behind instruction-level parallelism instead: ECB's multi-block
+  loop is **8 blocks interleaved in scalar code** (each block keeps four independent
+  dependency chains, and out-of-order execution covers the L1 latency), CTR / GCM
+  keystream generation uses the same width, and shorter remainders fall back to 4-way
+  then single-block. Why not WASM SIMD: `v128` has neither AVX2's gather (so 8→32-bit
+  tables cannot be looked up in parallel) nor AES-NI, and `i8x16.swizzle` only reaches
+  4-bit S-boxes, not SM4's 8-bit one — the lookup count stays the same, leaving only
+  lane parallelism for the XOR chain, which in practice measured slower than the
+  scalar interleave. This also explains the remaining gap to C: OpenSSL uses ARMv8's
+  `SM4E` instruction to implement the S-box in circuitry with **no table lookup at
+  all**, and WebAssembly does not expose that instruction set (generic SIMD only
+  offers generic operators);
 - **SM9 has no comparable implementation** (as usual for pure JS, where pairing is
   prohibitively expensive), so only this library's absolute timings are given;
 - **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
@@ -715,11 +722,10 @@ pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
 
-**SM4's wasm is compiled with `--enable simd`** (`build:wasm:sm4` already carries the
-flag), because its ECB / CTR / GCM-GCTR run as 4-way WASM SIMD. `sm4.wasm` therefore
-requires a runtime with **WASM SIMD** — Node 18+ and modern browsers qualify; on a
-runtime with SIMD disabled, SM4 fails at instantiation, while the other algorithms
-(which carry no SIMD) are unaffected.
+**Every wasm module is built with `--optimize` only, no `--enable simd`**: SM4's speed
+comes from scalar multi-block interleaving and depends on no SIMD instruction set. All
+five algorithm modules therefore share the same runtime requirements, and `sm4.wasm`
+no longer requires **WASM SIMD**.
 
 Files under `src/**/assembly/**` are AssemblyScript sources compiled by
 `asc`. **Do not** use `import { type X }` in those files or let the
@@ -825,11 +831,15 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   они теперь ~24 µs, то есть **в 1.3–1.4× быстрее** аналога;
 - **Узкое место SM4 — четыре обращения к S-блоку за раунд**: объединение S-блока и
   L-преобразования в T-таблицы дало лишь 8–10% (число обращений не меняется), потому что
-  стоимость — это доступ к памяти, а не работа ALU. Эта библиотека идёт дальше и выполняет
-  ECB / CTR / GCTR у GCM как **4-полосный WASM SIMD** — четыре блока раскладываются по
-  четырём полосам одного `v128`, так что цепочка XOR и L-преобразование считаются сразу для
-  четырёх блоков (S-блок по-прежнему идёт по скалярной таблице полоса за полосой — поэтому
-  выигрыш останавливается на ~1.3×, а не 4×), хвост обрабатывается скалярно. Это же
+  стоимость — это доступ к памяти, а не работа ALU. Раз число обращений снизить нельзя,
+  библиотека прячет их за параллелизмом на уровне инструкций: цикл по блокам в ECB сделан
+  как **8 блоков с чередованием в скалярном коде** (у каждого блока четыре независимые
+  цепочки зависимостей, а внеочередное исполнение скрывает задержку L1), генерация гаммы в
+  CTR / GCM использует ту же ширину, а короткие остатки переходят на 4 блока, затем на один.
+  Почему не WASM SIMD: у `v128` нет ни gather из AVX2 (нельзя параллельно индексировать
+  таблицы 8→32 бита), ни AES-NI, а `i8x16.swizzle` дотягивается лишь до 4-битных S-блоков,
+  но не до 8-битного S-блока SM4 — число обращений не меняется, остаётся только параллелизм
+  полос для цепочки XOR, и на практике это оказалось медленнее скалярного чередования. Это же
   объясняет оставшийся разрыв с C: OpenSSL использует инструкцию ARMv8 `SM4E`, реализующую
   S-блок схемой **вообще без обращений к таблицам**, а WebAssembly этого набора инструкций
   не предоставляет (общий SIMD даёт только общие операторы);
@@ -1107,11 +1117,10 @@ pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
 
-**wasm-часть SM4 компилируется с `--enable simd`** (флаг уже в `build:wasm:sm4`),
-потому что её ECB / CTR / GCTR у GCM работают как 4-полосный WASM SIMD. Поэтому
-`sm4.wasm` требует среды с поддержкой **WASM SIMD** — Node 18+ и современные браузеры
-подходят; если в среде SIMD отключён, SM4 падает при инстанцировании, а остальные
-алгоритмы (без SIMD) не затронуты.
+**Все wasm-модули собираются только с `--optimize`, без `--enable simd`**: скорость SM4
+даёт скалярное чередование блоков, которое не зависит ни от какого набора SIMD-инструкций.
+Поэтому все пять модулей предъявляют одинаковые требования к среде, и `sm4.wasm` больше
+не требует **WASM SIMD**.
 
 Файлы в `src/**/assembly/**` — это исходники AssemblyScript, компилируемые
 `asc`. **Не используйте** в них `import { type X }` и не позволяйте
