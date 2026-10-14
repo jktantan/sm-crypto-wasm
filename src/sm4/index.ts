@@ -8,6 +8,7 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
+import { DecryptionError } from '../runtime/errors.js';
 
 interface Sm4Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -447,7 +448,7 @@ export function decryptGCM(
       p.outPtr,
       p.tagPtr,
     );
-    if (ok !== 0) throw new Error('sm4 GCM: 认证标签校验失败');
+    if (ok !== 0) throw new DecryptionError('sm4 GCM: 认证标签校验失败');
     const out = new Uint8Array(memory.buffer);
     const pt = new Uint8Array(out.buffer, p.outPtr, c.length).slice();
     return fromBytes(pt, 'hex');

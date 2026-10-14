@@ -26,6 +26,7 @@ import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem } from '../pem/sm9.js';
 import { InvalidKeyError } from '../runtime/errors.js';
+import { DecryptionError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
@@ -408,7 +409,7 @@ export function decrypt(
     putBytes(idB, idP);
     putBytes(ctB, ctP);
     const ptLen = exports.sm9DecryptOut(keP, idP, idB.length, ctP, ctB.length, ptP);
-    if (ptLen < 0) throw new Error('sm9: decrypt 失败（C3 HMAC 校验未通过 / 格式错误）');
+    if (ptLen < 0) throw new DecryptionError('sm9: decrypt 失败（C3 HMAC 校验未通过 / 格式错误）');
     return readHex(ptP, ptLen);
   } finally {
     exports.freeAll();

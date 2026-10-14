@@ -20,6 +20,7 @@ import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
+import { DecryptionError } from '../runtime/errors.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -326,7 +327,7 @@ function decryptRaw(d: Uint8Array, ct: Uint8Array): string {
     mem.set(d, dp);
     mem.set(ct, ctp);
     const rc = exports.decryptOut(dp, ctp, ct.length, ptp);
-    if (rc !== 1) throw new Error('sm2.decrypt: C3 verification failed');
+    if (rc !== 1) throw new DecryptionError('sm2.decrypt: C3 verification failed');
     return fromBytes(new Uint8Array(mem.buffer, ptp, outLen).slice(), 'hex');
   } finally {
     exports.freeAll();

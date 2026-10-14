@@ -217,3 +217,20 @@ GREEN；全量套件 112/112。
   原文写用例的调用方会看到不同行为；plan 正文本轮不改，只在 §14 记录。
 - 过程备注：首次写 hmac 用例时踩了字符串嗅探的坑（`'abc'` 奇数长度非 hex → 被当
   base64），改用字节输入后通过；该坑在同文件顶部注释里本来就有警告。
+
+### Task 2 — 校验失败统一抛 DecryptionError
+
+- 三处"校验未通过"由裸 `Error` 改为 `errors.ts` 已定义的 `DecryptionError`：
+  `sm2.decrypt`（C3 校验）、`sm4.decryptGCM`（认证标签）、`sm9.decrypt`（C3 HMAC）。
+- 错误消息文本保持原样，只换类型 —— 调用方从 `instanceof Error` 升级到
+  `instanceof DecryptionError` 是纯增量（后者继承前者）。
+- 新增 `tests/errors.spec.ts` 作为契约测试：3 条失败路径 + 错误层级 + facade 再导出。
+- 测试：`npx vitest run --config vitest.config.ts tests/errors.spec.ts` → 6/6 pass。
+- `Ruling:` 长度/结构类错误（密文太短、签名长度不对）**保持** `RangeError`，不改
+  `InvalidCiphertextError`。理由：`src/runtime/errors.ts` 的文档明确写了"TypeError /
+  RangeError 保留宿主原生类型，不包装为 SmCryptoError"，那是既有且刻意的设计；plan
+  Review Focus #4 要求密文长度错也抛 DecryptionError，照做会让 errors.ts 自相矛盾。
+  代价：调用方要同时 catch `RangeError` 与 `DecryptionError` 才覆盖"密文有问题"的全部路径。
+- `Ruling:` `sm9.kemDecrypt` 的失败（封装非法 / K 全 0）本轮不纳入。理由：其失败原因
+  包含"K 全 0"这种非校验性退化，不纯是"解密校验未通过"。代价：SM9 KEM 调用方暂时拿不到
+  统一类型（记为 deferred minor）。
