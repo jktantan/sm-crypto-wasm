@@ -51,7 +51,7 @@
 - X.509 / PKCS#7 / CMS / SMIME 协议封装；
 - Cloudflare Workers / Vercel Edge 这类"严格流式 WASM"环境；
 - 硬件加速（Intel ADX、ARMv8 CE）；
-- WebAssembly SIMD 优化（AssemblyScript 当前 SIMD 支持有限）。
+- WebAssembly SIMD 优化（AssemblyScript 当前 SIMD 支持有限）—— **SM4 已部分落地**：ECB / CTR / GCM 的 GCTR 走 `v128` 4 路并行（约 1.3×，见 README 性能小节）；SM2 / SM3 / SM9 / ZUC 与 SM4 其余模式仍按 Non-Goal。
 
 ### Anti-Goals（一旦发现正在做，立刻停）
 

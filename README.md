@@ -36,51 +36,52 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 热点（大整数模运算、hash 压缩函数、分组密码轮函数）在 WASM 内执行。下表覆盖本库
 每个算法的**全部公开操作**；`gmkitx` 一列是对应的纯 JS 参考实现（同机、同参数、
-同消息），**它没有的操作留 `—`**。实测环境 Apple M4 / Node 26.7 / macOS 27，
+同消息），**它没有的操作留 `—`**。实测环境 AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11，
 `pnpm bench` 可复现：
 
 | 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs（1 KB） | 快 1.4× |
-| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 快 1.2× |
-| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs（1 KB） | 快 1.7× |
-| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | 快 1.6× |
-| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | 快 1.4× |
-| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | 快 1.4× |
-| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | 快 1.6× |
-| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | 快 5.0× |
-| SM2 | 密钥对生成 | 172 µs | — | — |
-| SM2 | 公钥派生 | 115 µs | 154 µs | 快 1.3× |
-| SM2 | 签名 64 B | 300 µs | 347 µs | 快 1.2× |
-| SM2 | 验签 64 B | 396 µs | 2.38 ms | 快 6.0× |
-| SM2 | 加密 64 B | 459 µs | 2.46 ms | 快 5.4× |
-| SM2 | 解密 64 B | 283 µs | 2.83 ms | 快 10.0× |
-| SM2 | 密钥交换（完整 A↔B） | 1.26 ms | 9.57 ms | 快 7.6× |
-| SM9 | 主密钥对生成（签名 / 加密） | 3.35 / 2.77 ms | — | — |
-| SM9 | 主公钥派生（签名 / 加密） | 161 / 101 µs | — | — |
-| SM9 | 用户公钥派生 | 1.12 ms | — | — |
-| SM9 | 签名 32 B | 6.74 ms | — | — |
-| SM9 | 验签 32 B | 11.92 ms | — | — |
-| SM9 | 加密 32 B | 5.29 ms | — | — |
-| SM9 | 解密 32 B | 7.96 ms | — | — |
-| SM9 | KEM 封装 / 解封装 | 4.77 / 7.09 ms | — | — |
-| SM9 | 密钥交换（完整 A↔B） | 30.31 ms | — | — |
-| ZUC | EEA3 加密 1 KB | 5.97 µs | 16.00 µs | 快 2.7× |
-| ZUC | EEA3 密钥流 1 KB | 4.01 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 1.03 µs / 6.35 µs / 332 µs | 13.6 µs（1 KB） | 快 2.1× |
+| SM3 | hmac 1 KB | 10.4 µs | 17.9 µs | 快 1.7× |
+| SM4 | ECB 16 B / 1 KB | 0.78 µs / 19.6 µs | 37.7 µs（1 KB） | 快 1.9× |
+| SM4 | CBC 1 KB | 22.8 µs | 41.9 µs | 快 1.8× |
+| SM4 | CTR 1 KB | 20.3 µs | 36.8 µs | 快 1.8× |
+| SM4 | CFB 1 KB | 22.3 µs | 38.2 µs | 快 1.7× |
+| SM4 | OFB 1 KB | 21.9 µs | 36.7 µs | 快 1.7× |
+| SM4 | GCM 1 KB | 33.0 µs | 226 µs | 快 6.8× |
+| SM2 | 密钥对生成 | 183 µs | — | — |
+| SM2 | 公钥派生 | 139 µs | 191 µs | 快 1.4× |
+| SM2 | 签名 64 B | 336 µs | 443 µs | 快 1.3× |
+| SM2 | 验签 64 B | 487 µs | 2.79 ms | 快 5.7× |
+| SM2 | 加密 64 B | 547 µs | 2.94 ms | 快 5.4× |
+| SM2 | 解密 64 B | 350 µs | 2.53 ms | 快 7.5× |
+| SM2 | 密钥交换（完整 A↔B） | 1.65 ms | 11.4 ms | 快 7.0× |
+| SM9 | 主密钥对生成（签名 / 加密） | 3.57 / 3.03 ms | — | — |
+| SM9 | 主公钥派生（签名 / 加密） | 167 / 88.7 µs | — | — |
+| SM9 | 用户公钥派生 | 1.07 ms | — | — |
+| SM9 | 签名 32 B | 6.78 ms | — | — |
+| SM9 | 验签 32 B | 12.8 ms | — | — |
+| SM9 | 加密 32 B | 5.54 ms | — | — |
+| SM9 | 解密 32 B | 7.73 ms | — | — |
+| SM9 | KEM 封装 / 解封装 | 4.99 / 7.63 ms | — | — |
+| SM9 | 密钥交换（完整 A↔B） | 28.0 ms | — | — |
+| ZUC | EEA3 加密 1 KB | 9.58 µs | 20.4 µs | 快 2.1× |
+| ZUC | EEA3 密钥流 1 KB | 6.43 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
 
 要点：
 
-- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.2~2.7×，SM4 六种模式
-  1.1~5.2×，SM2 快 1.2~10×；
+- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.7~2.1×，SM4 六种模式
+  1.7~6.8×，SM2 快 1.3~7.5×；
 - **SM4 的 CFB / OFB 曾比纯 JS 慢 1.4~1.5×**：这两种模式原先在 TS 侧逐块调用
   wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
   同款的批量导出后降到 24 µs 一带，反过来快 1.3~1.4×；
-- **SM4 轮函数用 T-table**（把 S 盒与 L 变换合成 4 张 256×32-bit 表，从 SBOX 在
-  模块初始化时生成）：只拿到 8~10% 的提升，因为瓶颈不在 ALU 而在**每轮 4 次查表的
-  内存访问**——原实现与 T-table 的查表次数一样。这也解释了为什么追不上 C：同机
-  SM4-ECB 64 KB，OpenSSL 372 µs 而本库 1.25 ms，它靠 ARMv8 的 `SM4E` 指令用电路
-  做 S 盒、**根本不查表**，而 WebAssembly 不暴露该指令集（只给通用 SIMD）；
+- **SM4 的瓶颈是每轮 4 次 S 盒查表**：把 S 盒与 L 变换合成 T-table 只换来 8~10%
+  （查表次数不变），因为成本不在 ALU 而在内存访问。本库进一步把 ECB / CTR / GCM 的
+  GCTR 改成 **WASM SIMD 的 4 路并行**——4 个块摊到一个 `v128` 的 4 个 lane，异或链与
+  线性层 L 一次算 4 块（S 盒仍逐 lane 走标量查表，故收益停在约 1.3× 而非 4×），
+  尾块回退标量。这也解释了为什么仍追不上 C：它靠 ARMv8 的 `SM4E` 指令用电路做
+  S 盒、**根本不查表**，而 WebAssembly 不暴露该指令集（通用 SIMD 也只给通用算子）；
 - **SM9 没有可比实现**（纯 JS 生态普遍如此，pairing 在纯 JS 里成本过高），故只给
   本库的绝对耗时；
 - **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
@@ -317,6 +318,11 @@ pnpm lint           # biome（lint + format）
 pnpm typecheck      # tsc --noEmit
 ```
 
+**SM4 的 wasm 用 `--enable simd` 编译**（`build:wasm:sm4` 已带该 flag），因为它的
+ECB / CTR / GCM-GCTR 走 WASM SIMD 的 4 路并行。因此 `sm4.wasm` 要求运行时支持
+**WASM SIMD**——Node 18+ 与现代浏览器都满足；若某运行时禁用了 SIMD，SM4 会在实例化
+时报错，其它算法（不带 SIMD）不受影响。
+
 `src/**/assembly/**` 是 AssemblyScript 源，由 `asc` 编译；这些文件**不要**用 `import { type X}`
 或让格式化器重排 import —— `asc` 0.28 不认类型修饰符（biome 配置里已对该目录关闭相关规则）。
 
@@ -367,55 +373,57 @@ Hot paths (bignum modular arithmetic, hash compression, block-cipher rounds) run
 inside WASM. The table below covers **every public operation of every algorithm**
 in this library; the `gmkitx` column is the corresponding pure-JS reference (same
 machine, same parameters, same messages), and **operations it does not offer are
-left as `—`**. Measured on Apple M4 / Node 26.7 / macOS 27, reproducible with
-`pnpm bench`:
+left as `—`**. Measured on AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11, reproducible
+with `pnpm bench`:
 
 | Algorithm | Operation | sm-crypto-wasm | pure-JS reference (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | 1.4× faster |
-| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | 1.2× faster |
-| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs (1 KB) | 1.7× faster |
-| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | 1.6× faster |
-| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | 1.4× faster |
-| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | 1.4× faster |
-| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | 1.6× faster |
-| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | 5.0× faster |
-| SM2 | generateKeyPair | 172 µs | — | — |
-| SM2 | public key derive | 115 µs | 154 µs | 1.3× faster |
-| SM2 | sign 64 B | 300 µs | 347 µs | 1.2× faster |
-| SM2 | verify 64 B | 396 µs | 2.38 ms | 6.0× faster |
-| SM2 | encrypt 64 B | 459 µs | 2.46 ms | 5.4× faster |
-| SM2 | decrypt 64 B | 283 µs | 2.83 ms | 10.0× faster |
-| SM2 | key exchange (full A↔B) | 1.26 ms | 9.57 ms | 7.6× faster |
-| SM9 | master key pair (sign / enc) | 3.35 / 2.77 ms | — | — |
-| SM9 | master public key (sign / enc) | 161 / 101 µs | — | — |
-| SM9 | user public key (derive) | 1.12 ms | — | — |
-| SM9 | sign 32 B | 6.74 ms | — | — |
-| SM9 | verify 32 B | 11.92 ms | — | — |
-| SM9 | encrypt 32 B | 5.29 ms | — | — |
-| SM9 | decrypt 32 B | 7.96 ms | — | — |
-| SM9 | KEM encapsulate / decapsulate | 4.77 / 7.09 ms | — | — |
-| SM9 | key exchange (full A↔B) | 30.31 ms | — | — |
-| ZUC | EEA3 encrypt 1 KB | 5.97 µs | 16.00 µs | 2.7× faster |
-| ZUC | EEA3 keystream 1 KB | 4.01 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 1.03 µs / 6.35 µs / 332 µs | 13.6 µs (1 KB) | 2.1× faster |
+| SM3 | hmac 1 KB | 10.4 µs | 17.9 µs | 1.7× faster |
+| SM4 | ECB 16 B / 1 KB | 0.78 µs / 19.6 µs | 37.7 µs (1 KB) | 1.9× faster |
+| SM4 | CBC 1 KB | 22.8 µs | 41.9 µs | 1.8× faster |
+| SM4 | CTR 1 KB | 20.3 µs | 36.8 µs | 1.8× faster |
+| SM4 | CFB 1 KB | 22.3 µs | 38.2 µs | 1.7× faster |
+| SM4 | OFB 1 KB | 21.9 µs | 36.7 µs | 1.7× faster |
+| SM4 | GCM 1 KB | 33.0 µs | 226 µs | 6.8× faster |
+| SM2 | generateKeyPair | 183 µs | — | — |
+| SM2 | public key derive | 139 µs | 191 µs | 1.4× faster |
+| SM2 | sign 64 B | 336 µs | 443 µs | 1.3× faster |
+| SM2 | verify 64 B | 487 µs | 2.79 ms | 5.7× faster |
+| SM2 | encrypt 64 B | 547 µs | 2.94 ms | 5.4× faster |
+| SM2 | decrypt 64 B | 350 µs | 2.53 ms | 7.5× faster |
+| SM2 | key exchange (full A↔B) | 1.65 ms | 11.4 ms | 7.0× faster |
+| SM9 | master key pair (sign / enc) | 3.57 / 3.03 ms | — | — |
+| SM9 | master public key (sign / enc) | 167 / 88.7 µs | — | — |
+| SM9 | user public key (derive) | 1.07 ms | — | — |
+| SM9 | sign 32 B | 6.78 ms | — | — |
+| SM9 | verify 32 B | 12.8 ms | — | — |
+| SM9 | encrypt 32 B | 5.54 ms | — | — |
+| SM9 | decrypt 32 B | 7.73 ms | — | — |
+| SM9 | KEM encapsulate / decapsulate | 4.99 / 7.63 ms | — | — |
+| SM9 | key exchange (full A↔B) | 28.0 ms | — | — |
+| ZUC | EEA3 encrypt 1 KB | 9.58 µs | 20.4 µs | 2.1× faster |
+| ZUC | EEA3 keystream 1 KB | 6.43 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
 
 Notes:
 
 - **Every operation with a counterpart beats the pure-JS reference**: SM3 / ZUC by
-  1.2–2.7×, the six SM4 modes by 1.1–5.2×, SM2 by 1.2–10×;
+  1.7–2.1×, the six SM4 modes by 1.7–6.8×, SM2 by 1.3–7.5×;
 - **SM4's CFB / OFB used to be 1.4–1.5× *slower* than pure JS**: those two modes
   were driven block-by-block from the TS side (alloc + call + copy back every 16
   bytes — 64 wasm crossings per KB). With the same batched export CBC/CTR already
   had, they now land at ~24 µs, i.e. **1.3–1.4× faster** than the reference;
-- **SM4's round function now uses T-tables** (S-box and L transform merged into four
-  256×32-bit tables, generated from SBOX at module init): this bought only 8–10%,
-  because the bottleneck is not ALU work but the **four table lookups per round** —
-  the old code and the T-table version perform the same number of lookups. It also
-  explains the remaining gap to C: on the same machine, SM4-ECB over 64 KB takes
-  372 µs in OpenSSL versus 1.25 ms here. OpenSSL uses ARMv8's `SM4E` instruction to
+- **SM4's bottleneck is the four S-box lookups per round**: merging the S-box and L
+  transform into T-tables bought only 8–10% (the lookup count is unchanged), because
+  the cost is memory access, not ALU work. This library goes further and runs
+  ECB / CTR / GCM's GCTR as **4-way WASM SIMD** — four blocks spread across the four
+  lanes of a `v128`, so the XOR chain and the L transform are computed four blocks at
+  a time (the S-box still walks the scalar lookup table lane by lane, which is why the
+  gain stops at ~1.3× rather than 4×), with the tail falling back to scalar. This also
+  explains the remaining gap to C: OpenSSL uses ARMv8's `SM4E` instruction to
   implement the S-box in circuitry with **no table lookup at all**, and WebAssembly
-  does not expose that instruction set (only generic SIMD);
+  does not expose that instruction set (generic SIMD only offers generic operators);
 - **SM9 has no comparable implementation** (as usual for pure JS, where pairing is
   prohibitively expensive), so only this library's absolute timings are given;
 - **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
@@ -684,6 +692,12 @@ pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
 
+**SM4's wasm is compiled with `--enable simd`** (`build:wasm:sm4` already carries the
+flag), because its ECB / CTR / GCM-GCTR run as 4-way WASM SIMD. `sm4.wasm` therefore
+requires a runtime with **WASM SIMD** — Node 18+ and modern browsers qualify; on a
+runtime with SIMD disabled, SM4 fails at instantiation, while the other algorithms
+(which carry no SIMD) are unaffected.
+
 Files under `src/**/assembly/**` are AssemblyScript sources compiled by
 `asc`. **Do not** use `import { type X }` in those files or let the
 formatter reorder imports — `asc` 0.28 doesn't recognize the type modifier
@@ -745,55 +759,57 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 шифра) выполняются внутри WASM. Таблица ниже покрывает **все публичные операции
 каждого алгоритма**; столбец `gmkitx` — соответствующая чистая JS-реализация
 (та же машина, те же параметры, те же сообщения), а **операции, которых у неё
-нет, оставлены как `—`**. Измерено на Apple M4 / Node 26.7 / macOS 27,
+нет, оставлены как `—`**. Измерено на AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11,
 воспроизводится через `pnpm bench`:
 
 | Алгоритм | Операция | sm-crypto-wasm | чистая JS (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 0.92 µs / 4.92 µs / 300 µs | 6.86 µs (1 KB) | в 1.4× быстрее |
-| SM3 | hmac 1 KB | 7.67 µs | 8.98 µs | в 1.2× быстрее |
-| SM4 | ECB 16 B / 1 KB | 0.77 µs / 20.2 µs | 34.2 µs (1 KB) | в 1.7× быстрее |
-| SM4 | CBC 1 KB | 24.8 µs | 40.2 µs | в 1.6× быстрее |
-| SM4 | CTR 1 KB | 23.0 µs | 32.4 µs | в 1.4× быстрее |
-| SM4 | CFB 1 KB | 23.7 µs | 34.0 µs | в 1.4× быстрее |
-| SM4 | OFB 1 KB | 24.2 µs | 38.0 µs | в 1.6× быстрее |
-| SM4 | GCM 1 KB | 36.4 µs | 181.9 µs | в 5.0× быстрее |
-| SM2 | generateKeyPair | 172 µs | — | — |
-| SM2 | вывод открытого ключа | 115 µs | 154 µs | в 1.3× быстрее |
-| SM2 | подпись 64 B | 300 µs | 347 µs | в 1.2× быстрее |
-| SM2 | проверка 64 B | 396 µs | 2.38 ms | в 6.0× быстрее |
-| SM2 | шифрование 64 B | 459 µs | 2.46 ms | в 5.4× быстрее |
-| SM2 | расшифрование 64 B | 283 µs | 2.83 ms | в 10.0× быстрее |
-| SM2 | обмен ключами (полный A↔B) | 1.26 ms | 9.57 ms | в 7.6× быстрее |
-| SM9 | главная пара ключей (sign / enc) | 3.35 / 2.77 ms | — | — |
-| SM9 | главный открытый ключ (sign / enc) | 161 / 101 µs | — | — |
-| SM9 | открытый ключ пользователя | 1.12 ms | — | — |
-| SM9 | подпись 32 B | 6.74 ms | — | — |
-| SM9 | проверка 32 B | 11.92 ms | — | — |
-| SM9 | шифрование 32 B | 5.29 ms | — | — |
-| SM9 | расшифрование 32 B | 7.96 ms | — | — |
-| SM9 | KEM инкапсуляция / декапсуляция | 4.77 / 7.09 ms | — | — |
-| SM9 | обмен ключами (полный A↔B) | 30.31 ms | — | — |
-| ZUC | EEA3 шифрование 1 KB | 5.97 µs | 16.00 µs | в 2.7× быстрее |
-| ZUC | EEA3 гамма 1 KB | 4.01 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 7.12 µs | — | — |
+| SM3 | hash 32 B / 1 KB / 64 KB | 1.03 µs / 6.35 µs / 332 µs | 13.6 µs (1 KB) | в 2.1× быстрее |
+| SM3 | hmac 1 KB | 10.4 µs | 17.9 µs | в 1.7× быстрее |
+| SM4 | ECB 16 B / 1 KB | 0.78 µs / 19.6 µs | 37.7 µs (1 KB) | в 1.9× быстрее |
+| SM4 | CBC 1 KB | 22.8 µs | 41.9 µs | в 1.8× быстрее |
+| SM4 | CTR 1 KB | 20.3 µs | 36.8 µs | в 1.8× быстрее |
+| SM4 | CFB 1 KB | 22.3 µs | 38.2 µs | в 1.7× быстрее |
+| SM4 | OFB 1 KB | 21.9 µs | 36.7 µs | в 1.7× быстрее |
+| SM4 | GCM 1 KB | 33.0 µs | 226 µs | в 6.8× быстрее |
+| SM2 | generateKeyPair | 183 µs | — | — |
+| SM2 | вывод открытого ключа | 139 µs | 191 µs | в 1.4× быстрее |
+| SM2 | подпись 64 B | 336 µs | 443 µs | в 1.3× быстрее |
+| SM2 | проверка 64 B | 487 µs | 2.79 ms | в 5.7× быстрее |
+| SM2 | шифрование 64 B | 547 µs | 2.94 ms | в 5.4× быстрее |
+| SM2 | расшифрование 64 B | 350 µs | 2.53 ms | в 7.5× быстрее |
+| SM2 | обмен ключами (полный A↔B) | 1.65 ms | 11.4 ms | в 7.0× быстрее |
+| SM9 | главная пара ключей (sign / enc) | 3.57 / 3.03 ms | — | — |
+| SM9 | главный открытый ключ (sign / enc) | 167 / 88.7 µs | — | — |
+| SM9 | открытый ключ пользователя | 1.07 ms | — | — |
+| SM9 | подпись 32 B | 6.78 ms | — | — |
+| SM9 | проверка 32 B | 12.8 ms | — | — |
+| SM9 | шифрование 32 B | 5.54 ms | — | — |
+| SM9 | расшифрование 32 B | 7.73 ms | — | — |
+| SM9 | KEM инкапсуляция / декапсуляция | 4.99 / 7.63 ms | — | — |
+| SM9 | обмен ключами (полный A↔B) | 28.0 ms | — | — |
+| ZUC | EEA3 шифрование 1 KB | 9.58 µs | 20.4 µs | в 2.1× быстрее |
+| ZUC | EEA3 гамма 1 KB | 6.43 µs | — | — |
+| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
 
 Примечания:
 
 - **Каждая операция, у которой есть аналог, быстрее чистой JS-реализации**:
-  SM3 / ZUC — в 1.2–2.7×, шесть режимов SM4 — в 1.1–5.2×, SM2 — в 1.2–10×;
+  SM3 / ZUC — в 1.7–2.1×, шесть режимов SM4 — в 1.7–6.8×, SM2 — в 1.3–7.5×;
 - **CFB / OFB у SM4 раньше были в 1.4–1.5× _медленнее_ чистой JS**: эти два режима
   вызывались поблочно со стороны TS (alloc + вызов + копирование на каждые 16 байт —
   64 пересечения границы на 1 KB). С тем же пакетным экспортом, что уже был у CBC/CTR,
   они теперь ~24 µs, то есть **в 1.3–1.4× быстрее** аналога;
-- **Раундовая функция SM4 теперь использует T-таблицы** (S-блок и L-преобразование
-  слиты в четыре таблицы 256×32 бита, генерируемые из SBOX при инициализации модуля):
-  это дало лишь 8–10%, потому что узкое место — не ALU, а **четыре обращения к таблицам
-  за раунд** (старый код и вариант с T-таблицами делают одинаковое число обращений).
-  Это же объясняет оставшийся разрыв с C: на той же машине SM4-ECB 64 KB занимает 372 µs
-  в OpenSSL против 1.25 ms здесь. OpenSSL использует инструкцию ARMv8 `SM4E`, реализующую
+- **Узкое место SM4 — четыре обращения к S-блоку за раунд**: объединение S-блока и
+  L-преобразования в T-таблицы дало лишь 8–10% (число обращений не меняется), потому что
+  стоимость — это доступ к памяти, а не работа ALU. Эта библиотека идёт дальше и выполняет
+  ECB / CTR / GCTR у GCM как **4-полосный WASM SIMD** — четыре блока раскладываются по
+  четырём полосам одного `v128`, так что цепочка XOR и L-преобразование считаются сразу для
+  четырёх блоков (S-блок по-прежнему идёт по скалярной таблице полоса за полосой — поэтому
+  выигрыш останавливается на ~1.3×, а не 4×), хвост обрабатывается скалярно. Это же
+  объясняет оставшийся разрыв с C: OpenSSL использует инструкцию ARMv8 `SM4E`, реализующую
   S-блок схемой **вообще без обращений к таблицам**, а WebAssembly этого набора инструкций
-  не предоставляет (только общий SIMD);
+  не предоставляет (общий SIMD даёт только общие операторы);
 - **У SM9 нет сопоставимой реализации** (обычная ситуация для чистого JS, где
   спаривания запредельно дороги), поэтому приведены только абсолютные времена
   этой библиотеки;
@@ -1067,6 +1083,12 @@ pnpm bench          # микро-бенчмарки mitata (5 блоков ал�
 pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
+
+**wasm-часть SM4 компилируется с `--enable simd`** (флаг уже в `build:wasm:sm4`),
+потому что её ECB / CTR / GCTR у GCM работают как 4-полосный WASM SIMD. Поэтому
+`sm4.wasm` требует среды с поддержкой **WASM SIMD** — Node 18+ и современные браузеры
+подходят; если в среде SIMD отключён, SM4 падает при инстанцировании, а остальные
+алгоритмы (без SIMD) не затронуты.
 
 Файлы в `src/**/assembly/**` — это исходники AssemblyScript, компилируемые
 `asc`. **Не используйте** в них `import { type X }` и не позволяйте

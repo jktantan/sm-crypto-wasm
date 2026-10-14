@@ -212,8 +212,14 @@ function reverseRk(rk: usize): void {
 export function sm4EncryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr: usize): void {
   const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
-  for (let off: usize = 0; off < inLen; off += 16) {
+  let off: usize = 0;
+  while (off + 64 <= inLen) {
+    cipher4(rk, inPtr + off, outPtr + off);
+    off += 64;
+  }
+  while (off < inLen) {
     cipherBlock(rk, inPtr + off, outPtr + off);
+    off += 16;
   }
 }
 
@@ -224,8 +230,14 @@ export function sm4DecryptECB(keyPtr: usize, inPtr: usize, inLen: usize, outPtr:
   const rk = RK_PTR;
   keyExpansion(keyPtr, rk);
   reverseRk(rk);
-  for (let off: usize = 0; off < inLen; off += 16) {
+  let off: usize = 0;
+  while (off + 64 <= inLen) {
+    cipher4(rk, inPtr + off, outPtr + off);
+    off += 64;
+  }
+  while (off < inLen) {
     cipherBlock(rk, inPtr + off, outPtr + off);
+    off += 16;
   }
 }
 
@@ -320,14 +332,23 @@ export function sm4CtrCrypt(
   memory.copy(CTR_CB, ivPtr, 16);
   let off: usize = 0;
   while (off < inLen) {
-    cipherBlock(rk, CTR_CB, CTR_KS);
     const rest = inLen - off;
-    const take: usize = rest < 16 ? rest : 16;
-    for (let i: usize = 0; i < take; i++) {
-      store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(CTR_KS + i));
+    if (rest >= 64) {
+      // 一次 4 块：生成 4 个连续计数器块 → 4-way 加密成密钥流 → 与数据异或。
+      keystream4(rk, CTR_CB);
+      for (let i: usize = 0; i < 64; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK4_KS + i));
+      }
+      off += 64;
+    } else {
+      cipherBlock(rk, CTR_CB, CTR_KS);
+      const take: usize = rest < 16 ? rest : 16;
+      for (let i: usize = 0; i < take; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(CTR_KS + i));
+      }
+      inc32(CTR_CB);
+      off += 16;
     }
-    inc32(CTR_CB);
-    off += 16;
   }
 }
 
@@ -587,21 +608,28 @@ function inc32Copy(srcPtr: usize, dstPtr: usize): void {
  */
 function gctr(rk: usize, icbPtr: usize, inPtr: usize, inLen: usize, outPtr: usize): void {
   if (inLen === 0) return;
-  const cb = new StaticArray<u8>(16);
-  const cbPtr = changetype<usize>(cb);
-  for (let i = 0; i < 16; i++) store<u8>(cbPtr + i, load<u8>(icbPtr + i));
-  const ks = new StaticArray<u8>(16);
-  const ksPtr = changetype<usize>(ks);
+  const cbPtr = GCTR_CB;
+  memory.copy(cbPtr, icbPtr, 16);
   let off: usize = 0;
   while (off < inLen) {
-    cipherBlock(rk, cbPtr, ksPtr);
     const rest = inLen - off;
-    const take: usize = rest < 16 ? rest : 16;
-    for (let i: usize = 0; i < take; i++) {
-      store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(ksPtr + i));
+    if (rest >= 64) {
+      // 一次 4 块：4 个连续计数器块 → 4-way 加密成密钥流 → 与数据异或
+      // （密钥流先落 BLK4_KS，故 outPtr 与 inPtr 重叠也安全）。
+      keystream4(rk, cbPtr);
+      for (let i: usize = 0; i < 64; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK4_KS + i));
+      }
+      off += 64;
+    } else {
+      cipherBlock(rk, cbPtr, BLK4_KS);
+      const take: usize = rest < 16 ? rest : 16;
+      for (let i: usize = 0; i < take; i++) {
+        store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(BLK4_KS + i));
+      }
+      inc32(cbPtr);
+      off += 16;
     }
-    inc32(cbPtr);
-    off += 16;
   }
 }
 
@@ -704,4 +732,120 @@ export function sm4GcmDecrypt(
   inc32Copy(j0Ptr, icbPtr);
   gctr(rk, icbPtr, inPtr, inLen, outPtr);
   return 0;
+}
+
+// ---------- SIMD 4-way（WASM SIMD；编译需 `--enable simd`） ----------
+//
+// 一次处理 4 个块（64 字节）：用 4x4 transpose 把 4 个块的 x0..x3 分别摊到 v128 的
+// 4 个 lane 上，跑 32 轮向量轮函数，再逆 transpose 写回。`tau` 仍是标量 S 盒
+// （extract_lane → 查表 → replace_lane）——S 盒查表次数不随向量化下降，所以收益来自
+// 异或链与线性层 L 的 4 lane 并行：ECB / CTR / GCM 的 GCTR 走这条路，实测 ~1.3×。
+// 尾部不足 4 块的仍走标量 `cipherBlock`（inLen 恒为 16 的倍数，故只有 1~3 块尾块）。
+
+/** 16 字节 v128 内的 per-lane 字节翻转（4 个 u32 lane 各 bswap）。 */
+@inline function bswapv(x: v128): v128 {
+  return i8x16.shuffle(x, x, 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+}
+
+/** 4 个 u32 lane 各循环左移 n 位。 */
+@inline function rotlv(x: v128, n: i32): v128 {
+  return v128.or(i32x4.shl(x, n), i32x4.shr_u(x, 32 - n));
+}
+
+/** 线性变换 L 的 4 lane 版本。 */
+@inline function lVec(b: v128): v128 {
+  const r2 = rotlv(b, 2);
+  const r10 = rotlv(b, 10);
+  const r18 = rotlv(b, 18);
+  const r24 = rotlv(b, 24);
+  return v128.xor(v128.xor(v128.xor(v128.xor(b, r2), r10), r18), r24);
+}
+
+/** 非线性变换 tau 的 4 lane 版本：逐 lane 走标量 S 盒后拼回。 */
+@inline function tauVec(t: v128): v128 {
+  const r0 = <i32>tau(<u32>i32x4.extract_lane(t, 0));
+  const r1 = <i32>tau(<u32>i32x4.extract_lane(t, 1));
+  const r2 = <i32>tau(<u32>i32x4.extract_lane(t, 2));
+  const r3 = <i32>tau(<u32>i32x4.extract_lane(t, 3));
+  let r = i32x4.replace_lane(i32x4.splat(0), 0, r0);
+  r = i32x4.replace_lane(r, 1, r1);
+  r = i32x4.replace_lane(r, 2, r2);
+  return i32x4.replace_lane(r, 3, r3);
+}
+
+/**
+ * 4 块（64 字节）并行加/解密（rk 决定方向，同一套轮函数）。
+ *
+ * 注意 4x4 transpose 的两级 shuffle 索引模式**不同**：第一级交错
+ * （a.lane0, b.lane0, a.lane1, b.lane1），第二级连续（a.lane0, a.lane1, b.lane0, b.lane1）。
+ * 两级写成同一个模式会让 lane 错位、密文全错。
+ */
+function cipher4(rk: usize, inPtr: usize, outPtr: usize): void {
+  const b0 = bswapv(v128.load(inPtr));
+  const b1 = bswapv(v128.load(inPtr + 16));
+  const b2 = bswapv(v128.load(inPtr + 32));
+  const b3 = bswapv(v128.load(inPtr + 48));
+
+  const t0 = i8x16.shuffle(b0, b1, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
+  const t1 = i8x16.shuffle(b0, b1, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
+  const t2 = i8x16.shuffle(b2, b3, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
+  const t3 = i8x16.shuffle(b2, b3, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
+  let x0 = i8x16.shuffle(t0, t2, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+  let x1 = i8x16.shuffle(t0, t2, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31);
+  let x2 = i8x16.shuffle(t1, t3, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+  let x3 = i8x16.shuffle(t1, t3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31);
+
+  for (let i = 0; i < 32; i++) {
+    // T = x0 ^ L(tau(x1 ^ x2 ^ x3 ^ rk[i]))：x0 在 T 之外异或。
+    const rkv = i32x4.splat(<i32>load<u32>(rk + ((<usize>i) << 2)));
+    const t = v128.xor(v128.xor(x1, x2), v128.xor(x3, rkv));
+    const tt = v128.xor(x0, lVec(tauVec(t)));
+    x0 = x1;
+    x1 = x2;
+    x2 = x3;
+    x3 = tt;
+  }
+
+  const u0 = i8x16.shuffle(x3, x2, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
+  const u1 = i8x16.shuffle(x3, x2, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
+  const u2 = i8x16.shuffle(x1, x0, 0, 1, 2, 3, 16, 17, 18, 19, 4, 5, 6, 7, 20, 21, 22, 23);
+  const u3 = i8x16.shuffle(x1, x0, 8, 9, 10, 11, 24, 25, 26, 27, 12, 13, 14, 15, 28, 29, 30, 31);
+  v128.store(
+    outPtr,
+    bswapv(i8x16.shuffle(u0, u2, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23)),
+  );
+  v128.store(
+    outPtr + 16,
+    bswapv(i8x16.shuffle(u0, u2, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31)),
+  );
+  v128.store(
+    outPtr + 32,
+    bswapv(i8x16.shuffle(u1, u3, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23)),
+  );
+  v128.store(
+    outPtr + 48,
+    bswapv(i8x16.shuffle(u1, u3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31)),
+  );
+}
+
+/**
+ * 4 个计数器块 / 密钥流的 scratch（非重入：CTR 与 GCTR 各自独占一次调用）。
+ * BLK4_CB 收 4 个连续的计数器块，BLK4_KS 收它们 4-way 加密后的密钥流。
+ */
+const BLK4_CB: usize = heap.alloc(64);
+const BLK4_KS: usize = heap.alloc(64);
+
+/** GCTR 的计数器块工作区（16 字节），替代原先每次 `new StaticArray<u8>(16)`。 */
+const GCTR_CB: usize = heap.alloc(16);
+
+/**
+ * 以 base（16 字节计数器块）为起点连续生成 4 个块到 BLK4_CB 并把 base 推进 4 次，
+ * 再 4-way 加密到 BLK4_KS。
+ */
+function keystream4(rk: usize, base: usize): void {
+  for (let k = 0; k < 4; k++) {
+    memory.copy(BLK4_CB + ((<usize>k) << 4), base, 16);
+    inc32(base);
+  }
+  cipher4(rk, BLK4_CB, BLK4_KS);
 }
