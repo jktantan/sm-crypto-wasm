@@ -279,6 +279,16 @@ export function cryptOFB(
   return fromBytes(out, 'hex');
 }
 
+// ---------- 命名别名 ----------
+// 现名 `cryptCTR` / `cryptOFB` 来自实现历史，保留为主名；下面给出 spec §6 与
+// plan Task 9 写的方法名，两者指向同一实现（CTR/OFB 加解密同构）。
+export {
+  cryptCTR as encryptCTR,
+  cryptCTR as decryptCTR,
+  cryptOFB as encryptOFB,
+  cryptOFB as decryptOFB,
+};
+
 // ---------- PKCS#7 ----------
 
 function pkcs7Pad(m: Uint8Array): Uint8Array {

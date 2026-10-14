@@ -224,3 +224,14 @@ export function zucDecrypt(
   const { k, v } = keyIv(key, iv);
   return xorKeystream(k, v, data);
 }
+
+// ---------------- 命名别名 ----------------
+// 现名 `zucEncrypt` / `zucDecrypt` / `zucKeystream` / `zucMac` 保留为主名；
+// 下面给出 spec §3/§6 与 plan Task 11 写的方法名，指向同一实现。
+export {
+  zucEncrypt as encrypt,
+  zucDecrypt as decrypt,
+  zucKeystream as generateKeystream,
+  zucMac as mac,
+  zucMac as eia3,
+};

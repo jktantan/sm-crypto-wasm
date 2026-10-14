@@ -128,3 +128,15 @@ dispatch. See spec §12.1 Q3.
   补它要新增 2 个 AS 导出并重编 sm9.wasm，属新功能而非 P0 缺口。
   代价：spec §6 示例里的 `verify(masterPublicPem, ...)` 形态目前仍需传主私钥 PEM，
   已记入后续缺口清单。
+
+### Task 4 — 命名别名（SM4 / ZUC）
+
+- 用户裁决："两边都留" —— 现名保留为主名，另加 spec/plan 里写的方法名。
+- `src/sm4/index.ts`：`encryptCTR` / `decryptCTR` / `encryptOFB` / `decryptOFB` 指向
+  `cryptCTR` / `cryptOFB`（CTR/OFB 加解密同构）。
+- `src/zuc/index.ts`：`encrypt` / `decrypt` / `generateKeystream` / `mac` / `eia3`
+  分别指向 `zucEncrypt` / `zucDecrypt` / `zucKeystream` / `zucMac`。
+- 测试：`npx vitest run --config vitest.config.ts tests/aliases.spec.ts` → 4/4 pass，
+  用 `toBe` 钉住"同一函数引用"，避免别名日后悄悄漂移。
+- `Ruling:` 用 `export { x as y }` 而不是 `const y = x; export { y }`。理由：前者不产生
+  新绑定，`toBe` 断言与 tree-shaking 行为都更直白。代价：无。
