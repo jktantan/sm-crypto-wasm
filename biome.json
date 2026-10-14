@@ -2,14 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": [
-      "src/**/*.ts",
-      "tests/**/*.ts",
-      "bench/**/*.ts",
-      "*.ts",
-      ".github/**/*.yml",
-      ".github/**/*.yaml"
-    ],
+    "includes": ["src/**/*.ts", "tests/**/*.ts", "bench/**/*.ts", "*.ts"],
     "ignoreUnknown": false
   },
   "formatter": {
@@ -51,6 +44,11 @@
   "overrides": [
     {
       "includes": ["src/**/assembly/**/*.ts"],
+      "assist": {
+        "actions": {
+          "source": { "organizeImports": "off" }
+        }
+      },
       "linter": {
         "rules": {
           "correctness": { "useImportExtensions": "off" },

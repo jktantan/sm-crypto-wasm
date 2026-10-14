@@ -1,0 +1,60 @@
+name: CI
+
+# 触发：所有分支的 push + 所有 PR。
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# 同一 ref 的新推送取消上一次未完成的运行。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # lint + 类型检查：不需要 wasm 产物，最快失败最快反馈。
+  lint:
+    name: lint & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  # 构建 + 双 runner 测试 + 打包演练：需要先编译 5 个 wasm（测试依赖 dist/*.wasm）。
+  test:
+    name: build & test (node + browser) & pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # build = clean + asc（5 个 wasm）+ tsc
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm test:browser
+      - name: wasm 体积检查
+        run: |
+          set -e
+          for a in sm2 sm3 sm4 zuc; do
+            size=$(wc -c < "dist/$a/$a.wasm")
+            echo "$a.wasm = $size bytes"
+            test "$size" -lt 307200
+          done
+          echo "sm9.wasm = $(wc -c < dist/sm9/sm9.wasm) bytes（含 pairing 表，仅记录）"
+      # 打包演练：确认 files 白名单与 exports 字段正确（会触发 prepack = build + test）
+      - run: pnpm pack --dry-run

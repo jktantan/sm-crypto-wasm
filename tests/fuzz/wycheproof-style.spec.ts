@@ -1,10 +1,10 @@
-import { describe, expect, it, beforeAll } from 'vitest';
+import { hash as nodeSm3 } from 'node:crypto';
 import fc from 'fast-check';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { DecryptionError, InvalidPublicKeyError } from '@/runtime';
 import * as sm2 from '@/sm2';
 import * as sm3 from '@/sm3';
 import * as sm4 from '@/sm4';
-import { hash as nodeSm3 } from 'node:crypto';
-import { DecryptionError, InvalidPublicKeyError } from '@/runtime';
 
 /**
  * Wycheproof 风格的 fast-check 模糊用例。

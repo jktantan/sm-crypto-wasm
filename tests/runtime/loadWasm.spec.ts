@@ -1,10 +1,5 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-import {
-  loadWasm,
-  loadWasmSync,
-  getCachedWasm,
-  _resetCacheForTests,
-} from '@/runtime/loadWasm';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { _resetCacheForTests, getCachedWasm, loadWasm, loadWasmSync } from '@/runtime/loadWasm';
 import { ensureLoaded as sm3Loaded } from '@/sm3';
 
 /**

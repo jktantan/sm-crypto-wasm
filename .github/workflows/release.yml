@@ -1,0 +1,37 @@
+name: Release
+
+# 触发：推送 v* 标签（由 `pnpm release` / release-it 生成）。
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    name: verify & publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 创建 GitHub Release
+      id-token: write # npm provenance（--provenance）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+
+      # 发布前完整门禁，与 ci.yml 同源，避免"CI 绿但 tag 处红"。
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm test:browser
+
+      - name: publish
+        run: pnpm publish --provenance --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
