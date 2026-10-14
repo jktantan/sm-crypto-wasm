@@ -223,26 +223,27 @@ export function finalExponent(f: Fp12): Fp12 {
 const ABITS = '00100000000000000000000000000000000000010000101011101100100111110';
 
 /**
- * Miller loop 累积结果（final exponent 之前）：fNum / fDen 相除后的值。
+ * Miller loop 累积结果（final exponent 之前）。
+ *
+ * 只累乘分子：line function 的分母恒为 `b1v · v`（b1v ∈ Fp2，v 是 Fp4 生成元），
+ * 而 v^((p⁶−1)(p²+1)) = (v^(p²−1))^(p²+1) = (−1)^(p²+1) = 1，b1v 同理 ——
+ * 分母被 final exponent 的 easy part 整个消掉（6 次 twist 曲线的分母消除）。
+ * GmSSL 的实现保留了分子分母两路，每次迭代要多一次 fp12Sqr 和 fp12Mul。
  */
 export function millerLoop(Q: G2, P: G1): Fp12 {
   let T = g2Copy(Q);
-  let fNum = fp12one();
-  let fDen = fp12one();
+  let f = fp12one();
 
   for (let i = 0; i < ABITS.length; i++) {
-    fNum = fp12Sqr(fNum);
-    fDen = fp12Sqr(fDen);
+    f = fp12Sqr(f);
     const g1 = evalGTangent(T, P);
-    fNum = fp12Mul(fNum, g1[0]);
-    fDen = fp12Mul(fDen, g1[1]);
+    f = fp12Mul(f, g1[0]);
 
     T = g2Double(T);
 
     if (ABITS.charCodeAt(i) === 0x31) {
       const g2 = evalGLine(T, Q, P);
-      fNum = fp12Mul(fNum, g2[0]);
-      fDen = fp12Mul(fDen, g2[1]);
+      f = fp12Mul(f, g2[0]);
       T = g2Add(T, Q);
     }
   }
@@ -251,16 +252,14 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
   const Q2 = twistNegPi2(Q);
 
   const g3 = evalGLine(T, Q1, P);
-  fNum = fp12Mul(fNum, g3[0]);
-  fDen = fp12Mul(fDen, g3[1]);
+  f = fp12Mul(f, g3[0]);
   T = g2AddFull(T, Q1);
 
   const g4 = evalGLine(T, Q2, P);
-  fNum = fp12Mul(fNum, g4[0]);
-  fDen = fp12Mul(fDen, g4[1]);
+  f = fp12Mul(f, g4[0]);
   T = g2AddFull(T, Q2);
 
-  return fp12Mul(fNum, fp12Inv(fDen));
+  return f;
 }
 
 // ---------- 诊断：逐步 Miller loop ----------
