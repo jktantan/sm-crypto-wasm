@@ -8,7 +8,7 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
-import { DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
+import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 interface Sm4Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -422,7 +422,51 @@ export function encryptGCM(
  * @returns 明文 hex。
  * @throws Error 标签校验失败（密文/标签/AAD 任一被篡改）。
  */
+/** `decryptGCM` 的选项对象形态（替代位置参数 `aad`）。 */
+export interface Sm4GcmDecryptOptions {
+  /** 附加认证数据。 */
+  aad?: string | Uint8Array;
+  /** 认证失败时返回 `null` 而不抛错。 */
+  safeMode?: boolean;
+}
+
 export function decryptGCM(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  ct: string | Uint8Array,
+  tag: string | Uint8Array,
+  opts: Sm4GcmDecryptOptions & { safeMode: true },
+): string | null;
+export function decryptGCM(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  ct: string | Uint8Array,
+  tag: string | Uint8Array,
+  aad?: string | Uint8Array | Sm4GcmDecryptOptions,
+): string;
+export function decryptGCM(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  ct: string | Uint8Array,
+  tag: string | Uint8Array,
+  aadOrOptions?: string | Uint8Array | Sm4GcmDecryptOptions,
+): string | null {
+  const opts: Sm4GcmDecryptOptions =
+    typeof aadOrOptions === 'object' &&
+    aadOrOptions !== null &&
+    !(aadOrOptions instanceof Uint8Array)
+      ? aadOrOptions
+      : { aad: aadOrOptions };
+  try {
+    return decryptGcmUnsafe(key, iv, ct, tag, opts.aad);
+  } catch (err) {
+    if (opts.safeMode && err instanceof CiphertextError) return null;
+    throw err;
+  }
+}
+
+/** `decryptGCM` 的实作：认证失败抛 `DecryptionError`。 */
+function decryptGcmUnsafe(
   key: string | Uint8Array,
   iv: string | Uint8Array,
   ct: string | Uint8Array,

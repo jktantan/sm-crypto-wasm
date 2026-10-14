@@ -25,7 +25,7 @@
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem, parseSm9PublicKeyPem } from '../pem/sm9.js';
-import { DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
+import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
@@ -530,7 +530,43 @@ export function getUserPublicKey(
  * SM9 解密。校验失败（C3 HMAC 不通过、长度错、首字节非 0x04 等）抛错。
  * @returns 明文 hex
  */
+/** `sm9.decrypt` 选项。 */
+export interface Sm9DecryptOptions {
+  /**
+   * 解密失败时返回 `null` 而不抛错（plan Review Focus #4）。
+   * 只覆盖密文支错误（`CiphertextError`）。
+   */
+  safeMode?: boolean;
+}
+
 export function decrypt(
+  ke: string | Uint8Array,
+  id: string | Uint8Array,
+  ct: string | Uint8Array,
+  opts: Sm9DecryptOptions & { safeMode: true },
+): string | null;
+export function decrypt(
+  ke: string | Uint8Array,
+  id: string | Uint8Array,
+  ct: string | Uint8Array,
+  opts?: Sm9DecryptOptions,
+): string;
+export function decrypt(
+  ke: string | Uint8Array,
+  id: string | Uint8Array,
+  ct: string | Uint8Array,
+  opts: Sm9DecryptOptions = {},
+): string | null {
+  try {
+    return decryptUnsafe(ke, id, ct);
+  } catch (err) {
+    if (opts.safeMode && err instanceof CiphertextError) return null;
+    throw err;
+  }
+}
+
+/** `decrypt` 的实作：校验失败抛 `DecryptionError`。 */
+function decryptUnsafe(
   ke: string | Uint8Array,
   id: string | Uint8Array,
   ct: string | Uint8Array,

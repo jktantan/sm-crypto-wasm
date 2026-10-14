@@ -20,7 +20,7 @@ import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
-import { DecryptionError, InvalidCiphertextError, InvalidPublicKeyError } from '../runtime/errors.js';
+import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidPublicKeyError } from '../runtime/errors.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -140,6 +140,13 @@ export interface Sm2EncryptOptions {
 export interface Sm2DecryptOptions {
   /** 输入顺序，默认 `auto`（先按 C1C3C2 解，失败再按 C1C2C3 重排重试）。 */
   inputFormat?: Sm2CipherFormat | 'auto';
+  /**
+   * 解密失败时返回 `null` 而不抛错（plan Review Focus #4）。
+   *
+   * 覆盖密文支错误（`CiphertextError`：密文结构错 + C3 校验失败）；
+   * 参数类型错误（`TypeError` / `RangeError`）仍会抛出。
+   */
+  safeMode?: boolean;
 }
 
 /**
@@ -324,7 +331,32 @@ export function encrypt(
 export function decrypt(
   privateKey: string | Uint8Array,
   ciphertext: string | Uint8Array,
+  opts: Sm2DecryptOptions & { safeMode: true },
+): string | null;
+export function decrypt(
+  privateKey: string | Uint8Array,
+  ciphertext: string | Uint8Array,
+  opts?: Sm2DecryptOptions,
+): string;
+export function decrypt(
+  privateKey: string | Uint8Array,
+  ciphertext: string | Uint8Array,
   opts: Sm2DecryptOptions = {},
+): string | null {
+  try {
+    return decryptUnsafe(privateKey, ciphertext, opts);
+  } catch (err) {
+    // safeMode 只吞"密文支"失败（结构错 + 校验失败）；参数类型错等仍然抛。
+    if (opts.safeMode && err instanceof CiphertextError) return null;
+    throw err;
+  }
+}
+
+/** `decrypt` 的实作：失败时按错误类型抛出。 */
+function decryptUnsafe(
+  privateKey: string | Uint8Array,
+  ciphertext: string | Uint8Array,
+  opts: Sm2DecryptOptions,
 ): string {
   const d = toPrivateKeyBytes(privateKey);
   const ct = toBytes(ciphertext, 'ciphertext');

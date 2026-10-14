@@ -389,3 +389,17 @@ GREEN；全量套件 112/112。
   32 字节的主公钥（SM9 里不存在），需换判别方式。
 - `Ruling:` wasm 只加薄封装、不动既有函数。理由：既有导出的行为已被 KAT 向量钉住，
   改它们的风险大于收益。代价：wasm 多 4 个仅供 TS 层调用的入口。
+
+### Task 5 — safeMode
+
+- `sm2.decrypt(priv, ct, { inputFormat?, safeMode? })`、`sm9.decrypt(ke, id, ct, { safeMode? })`、
+  `sm4.decryptGCM(key, iv, ct, tag, aad | { aad?, safeMode? })` 三处支持 `safeMode`：
+  失败时返回 `null` 而不是抛错（plan Review Focus #4）。
+- 返回类型用**重载**保持兼容：只有显式写 `{ safeMode: true }` 的调用点拿到 `string | null`，
+  既有调用点的类型仍是 `string`。实现拆为 `decrypt*Unsafe()` 实作 + 外层 try/catch。
+- 判定用 `err instanceof CiphertextError` —— 正是 Task 1 统一错误体系的直接收益：
+  "密文结构错"与"校验失败"一个守卫即可覆盖，而参数类型错（TypeError / RangeError）仍抛。
+- 测试：`tests/safe-mode.spec.ts` 新增 6 条；与 `sm4` / `errors` 合计 34/34 pass。
+- `Ruling:` `sm4.decryptGCM` 用"第 5 参双形态"而不是新增第 6 个位置参数。理由：否则会
+  出现 `decryptGCM(k, iv, ct, tag, undefined, { safeMode: true })` 这种写法；对象形态把
+  aad 与 safeMode 收拢到一处。代价：第 5 参是联合类型，内部要用 instanceof 判别。
