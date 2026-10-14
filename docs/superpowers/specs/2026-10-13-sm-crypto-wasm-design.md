@@ -331,13 +331,32 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 
 **P2 — 已实现但与本文档不符**
 
-- `sm2.decrypt` 与 SM4-GCM 校验失败抛 `Error`，而不是 `errors.ts` 已定义的
-  `DecryptionError` / `InvalidCiphertextError`；
-- `InvalidPublicKeyError` 不存在（plan Review Focus #3 要求 encrypt 对不在曲线上的公钥抛它）；
-- 空输入策略不一致：`sm3.hash('')` 会算出合法摘要，而 plan Review Focus #1 要求空输入抛 `TypeError`；
+其中三条已在 2026-10-14 修复（见下面的「P2 批次」）：
+
+- ~~`sm2.decrypt` 与 SM4-GCM 校验失败抛 `Error`~~ → 现在抛 `DecryptionError`；
+- ~~`InvalidPublicKeyError` 不存在~~ → 已新增：`encrypt` 对坏公钥抛它、`verify` 返回 false；
+- ~~空输入策略不一致~~ → 更准确的描述是：`toBytes('')` 本来就抛 `TypeError`，而
+  `hash(new Uint8Array(0))` 能算出摘要；现在统一为**摘要类接受空输入**（SM3 的定义域
+  含空比特串），密钥 / IV / 密文类仍抛错。
+
+仍与 plan 有出入（保留为记录，不影响功能）：
+
 - 文件结构与 plan 有出入（plan 的 `pem/spki.ts`、`sm2/pem.ts`、`sm4/modes.ts`、
   `sm9/pairing.ts` 等不存在，功能合并到别处）；
-- 向量文件清单与 plan Task 5 不一致（实际以 oracle 交叉验证为主）。
+- 向量文件清单与 plan Task 5 不一致（实际以 oracle 交叉验证为主 + 按需落盘）。
+
+### P2 批次（2026-10-14 修复）
+
+- **`DecryptionError`**：`sm2.decrypt`（C3 校验）、`sm4.decryptGCM`（认证标签）、
+  `sm9.decrypt`（C3 HMAC）统一抛出；长度 / 结构类错误按 `errors.ts` 的既有约定
+  保留 `RangeError`（不包装为 `SmCryptoError`）。
+- **`InvalidPublicKeyError`**（继承 `InvalidKeyError`，facade 已导出）：`sm2.encrypt`
+  对不在曲线上的公钥（含坐标 ≥ p）抛错，`sm2.verify` 返回 `false` 而不抛。
+- **SM3 空输入**：`hash('')` == `hash(new Uint8Array(0))` ==
+  `1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b`；
+  `hmac` 同时接受空 key 与空消息。
+- 配套测试：新增 `tests/errors.spec.ts`（错误类型契约），并在 `tests/sm2.spec.ts`、
+  `tests/sm3-oracle.spec.ts` 增加对应用例。
 
 **本轮明确留作后续的缺口（2026-10-14）**
 

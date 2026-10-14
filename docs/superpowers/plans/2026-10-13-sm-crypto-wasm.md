@@ -63,6 +63,17 @@
 | 7 | Concurrent `loadWasm` calls for the same algorithm | Memoized; second caller waits on first; no duplicate `instantiate` | Task 1 (runtime) |
 | 8 | WASM memory growth while a `Uint8Array` view is held by JS | Loader returns copies (`slice()`), not views, when the buffer may be grown | Task 1, Task 6 |
 
+> **2026-10-14 更正（#1）**：**摘要类算法不拒绝空输入**。SM3 的输入是任意比特串
+> （GM/T 0004-2012），空串 `l = 0` 填充后恰好是一个完整 512 比特块，结果唯一
+> （`SM3("") = 1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b`）。
+> "空输入抛错"只适用于密钥 / IV / 密文这类有固定长度契约的参数。详见 spec §14「P2 批次」。
+>
+> **2026-10-14 现状（#3 / #4 / #5）**：#3 已实现（新增 `InvalidPublicKeyError`，
+> `encrypt` 抛 / `verify` 返回 false）；#4 的"校验失败"已统一为 `DecryptionError`，
+> 但长度 / 结构类错误按 `src/runtime/errors.ts` 的既有设计保留 `RangeError`，
+> 且本条里的 `safeMode` 选项未实现；#5 已实现（`zucEncrypt` 抛错，解密走新增的
+> `zucDecrypt`）。
+
 ---
 
 ## File Structure (created/modified across all tasks)
