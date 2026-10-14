@@ -78,4 +78,12 @@ describe('SM9 generateKeyPair', () => {
     const sig = sm9.sign(kp.masterPrivatePem, 'carol@x.io', msg);
     expect(sm9.verify(kp.masterPrivatePem, 'carol@x.io', msg, sig)).toBe(true);
   });
+
+  it('id 里出现 "-----BEGIN" 不会被误当成 PEM 私钥（PEM 解析只服务于密钥参数）', async () => {
+    const kp = await sm9.generateKeyPair({ id: 'dave@x.io' });
+    const weirdId = 'dave-----BEGIN-not-a-key';
+    const msg = new Uint8Array([1, 2, 3]);
+    const sig = sm9.sign(kp.masterPrivatePem, weirdId, msg);
+    expect(sm9.verify(kp.masterPrivatePem, weirdId, msg, sig)).toBe(true);
+  });
 });

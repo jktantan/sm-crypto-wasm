@@ -352,3 +352,16 @@ GREEN；全量套件 112/112。
 - `Ruling:` 复用保护同时提供"调用级"与"全局级"开关。理由：有的调用方按协议保证不重复
   使用密钥流（外部计数器严格管理），不该被库拦死；而默认仍站在安全一侧。
   代价：`configureReuseGuard` 是进程级状态，同进程多租户场景需谨慎。
+
+### Task 3 — SM9 PEM 嗅探收紧
+
+- 把 PEM 解析从通用 `toBytes` 里移出，改为显式的 `masterPrivateBytes(input, label)`：
+  只在**密钥参数**上嗅探 PEM，`toBytes` 回归纯 hex / base64 / UTF-8。
+- 10 个入口（getSignPublicKey / getEncPublicKey / sign / verify / encrypt / decrypt /
+  kemEncrypt / kemDecrypt / createExchangeInitiator / createExchangeResponder）改用它；
+  该 helper 内部已含长度校验，调用点上原有的 `requireLen(..., 32, 'ks')` 一并去掉。
+- 测试：`tests/sm9-keys.spec.ts` 新增「id 里出现 `-----BEGIN` 不会被误当 PEM 私钥」；
+  `sm9-keys` + `sm9/sm9` + `errors` 三文件 27/27 pass。
+- `Ruling:` helper 按"参数角色"命名而非"看起来像不像 PEM"。理由：Task 4 要加主公钥
+  PEM 支持，届时新增 `masterPublicBytes` 即可，`toBytes` 不必再改第二次。
+  代价：多一层 helper 间接。

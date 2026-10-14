@@ -112,12 +112,29 @@ function getModule(): Sm9Module {
  *  - string 且看起来是 hex（偶数长度 + 全部 0-9a-fA-F）：按 hex 解
  *  - 其他 string：按 UTF-8 编码（用于 id、msg 等人类可读输入）
  * 失败抛 TypeError。 */
+/**
+ * 通用输入归一化：Uint8Array 拷贝、hex 解码、其它按 UTF-8。
+ *
+ * **刻意不做 PEM 嗅探** —— PEM 只可能出现在密钥参数上，由 `masterPrivateBytes`
+ * 显式处理；这样 id / msg 里出现 `-----BEGIN` 也不会被误吞。
+ */
 function toBytes(input: string | Uint8Array, label: string): Uint8Array {
   if (input instanceof Uint8Array) return new Uint8Array(input);
   if (typeof input !== 'string') throw new TypeError(`sm9: ${label} 必须是字符串或 Uint8Array`);
-  if (input.includes('-----BEGIN')) {
-    // PKCS#8 主私钥 PEM（spec §12.1 Q3）。SM9 各入口的第一参数一律是主私钥，
-    // 所以在这里统一嗅探 PEM，免得每个调用点各写一遍分支。
+  if (input.startsWith('0x') || /^[0-9a-fA-F]+$/.test(input)) {
+    const s = input.startsWith('0x') ? input.slice(2) : input;
+    if (s.length % 2 !== 0) throw new TypeError(`sm9: ${label} hex 长度必须为偶数`);
+    return new Uint8Array(Buffer.from(s, 'hex'));
+  }
+  return new TextEncoder().encode(input);
+}
+
+/**
+ * 主私钥参数归一化：接受 32 字节（hex / Uint8Array）或 PKCS#8 私钥 PEM
+ * （spec §12.1 Q3，算法 OID `1.2.156.10197.1.100`）。
+ */
+function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Array {
+  if (typeof input === 'string' && input.includes('-----BEGIN')) {
     const parsed = parseSm9PrivateKeyPem(input);
     if (parsed.length !== 32) {
       throw new InvalidKeyError(
@@ -126,12 +143,11 @@ function toBytes(input: string | Uint8Array, label: string): Uint8Array {
     }
     return parsed;
   }
-  if (input.startsWith('0x') || /^[0-9a-fA-F]+$/.test(input)) {
-    const s = input.startsWith('0x') ? input.slice(2) : input;
-    if (s.length % 2 !== 0) throw new TypeError(`sm9: ${label} hex 长度必须为偶数`);
-    return new Uint8Array(Buffer.from(s, 'hex'));
+  const b = toBytes(input, label);
+  if (b.length !== 32) {
+    throw new InvalidKeyError(`sm9: ${label} 必须是 32 字节主私钥，实际 ${b.length}`);
   }
-  return new TextEncoder().encode(input);
+  return b;
 }
 
 /**
@@ -252,8 +268,7 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
 
 /** 32 字节签名主私钥 ks → 256 字节 G2 仿射（X[1]||X[0]||Y[1]||Y[0]）= 128 字节 hex。 */
 export function getSignPublicKey(ks: string | Uint8Array): string {
-  const k = toBytes(ks, 'ks');
-  requireLen(k, 32, 'ks');
+  const k = masterPrivateBytes(ks, 'ks');
   const { exports } = getModule();
   const kp = exports.alloc(32);
   const op = exports.alloc(128);
@@ -268,8 +283,7 @@ export function getSignPublicKey(ks: string | Uint8Array): string {
 
 /** 32 字节加密主私钥 ke → 64 字节 G1 仿射（x||y）= 128 字符 hex。 */
 export function getEncPublicKey(ke: string | Uint8Array): string {
-  const k = toBytes(ke, 'ke');
-  requireLen(k, 32, 'ke');
+  const k = masterPrivateBytes(ke, 'ke');
   const { exports } = getModule();
   const kp = exports.alloc(32);
   const op = exports.alloc(64);
@@ -296,7 +310,7 @@ export function sign(
   msg: string | Uint8Array,
   r?: string | Uint8Array,
 ): string {
-  const ksB = toBytes(ks, 'ks'); requireLen(ksB, 32, 'ks');
+  const ksB = masterPrivateBytes(ks, 'ks');
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
@@ -330,7 +344,7 @@ export function verify(
   msg: string | Uint8Array,
   sig: string | Uint8Array,
 ): boolean {
-  const ksB = toBytes(ks, 'ks'); requireLen(ksB, 32, 'ks');
+  const ksB = masterPrivateBytes(ks, 'ks');
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const sigB = toBytes(sig, 'sig');
@@ -366,7 +380,7 @@ export function encrypt(
   msg: string | Uint8Array,
   r?: string | Uint8Array,
 ): string {
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const msgB = toBytes(msg, 'msg');
   const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
@@ -400,7 +414,7 @@ export function decrypt(
   id: string | Uint8Array,
   ct: string | Uint8Array,
 ): string {
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const ctB = toBytes(ct, 'ct');
   if (ctB.length < 97) throw new InvalidCiphertextError('sm9: ct 长度必须 >= 97 字节 (C1=65 + C3=32)');
@@ -447,7 +461,7 @@ export function kemEncrypt(
   klen = 32,
   r?: string | Uint8Array,
 ): KemResult {
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
   requireLen(rB, 32, 'r');
@@ -483,7 +497,7 @@ export function kemDecrypt(
   encapsulation: string | Uint8Array,
   klen = 32,
 ): string {
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const c1B = toBytes(encapsulation, 'encapsulation');
   if (c1B.length !== 65) throw new RangeError(`sm9: encapsulation 必须是 65 字节，实际 ${c1B.length}`);
@@ -635,7 +649,7 @@ export async function createExchangeInitiator(
   options: Sm9ExchangeOptions = {},
 ): Promise<Sm9KeyExchangeInitiator> {
   await ensureLoaded();
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const selfIdB = toBytes(selfId, 'idSelf');
   const peerIdB = toBytes(peerId, 'idPeer');
 
@@ -687,7 +701,7 @@ export async function createExchangeResponder(
   options: Sm9ExchangeOptions = {},
 ): Promise<Sm9KeyExchangeResponder> {
   await ensureLoaded();
-  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const keB = masterPrivateBytes(ke, 'ke');
   const selfIdB = toBytes(selfId, 'idSelf');
   const peerIdB = toBytes(peerId, 'idPeer');
 
