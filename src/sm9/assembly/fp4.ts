@@ -67,6 +67,12 @@ export function fp4copy(a: Fp4): Fp4 {
   return fp4set(a[0], a[1]);
 }
 
+/** 就地拷贝：dst := src（保持 dst 引用不变）。 */
+export function fp4CopyInto(dst: Fp4, src: Fp4): void {
+  fp2Put(dst[0], src[0]);
+  fp2Put(dst[1], src[1]);
+}
+
 export function fp4isZero(a: Fp4): bool {
   return fp2isZero(a[0]) && fp2isZero(a[1]);
 }

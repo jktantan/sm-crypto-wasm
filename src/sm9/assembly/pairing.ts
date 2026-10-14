@@ -33,6 +33,7 @@ import {
 } from './fp2';
 import {
   Fp12,
+  fp12eq,
   fp12Frobenius,
   fp12Frobenius2,
   fp12Frobenius3,
@@ -45,6 +46,7 @@ import {
   fp12Pow,
   fp12PowSmall,
   fp12Sqr,
+  fp12SqrCyc,
   fp12SqrTo,
   fp12zero,
 } from './fp12';
@@ -399,6 +401,50 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
   g2AddFullInto(T, T, Q2);
 
   return f;
+}
+
+// ---------- 诊断：cyclotomic 平方自测 ----------
+
+/**
+ * 诊断：用 seed 派生伪随机 Fp12，送入 cyclotomic 子群后比较
+ * 通用平方 `fp12Sqr` 与子群专用平方 `fp12SqrCyc` 是否逐字节一致。返回 1=一致，0=不一致。
+ *
+ * KAT 只能覆盖具体的消息/密钥组合；这个自测用任意子群元素对拍 cyc 平方的
+ * 正确性，是 fp12SqrCycTo 的随机输入验证手段。
+ */
+export function sqrCycSelfTest(seed: u32): i32 {
+  let s: u32 = seed | 1;
+  const a = fp12zero();
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 2; j++) {
+      for (let k = 0; k < 2; k++) {
+        const limb = a[i][j][k];
+        // 只填低 7 个 limb，保证每个分量 < 2^224 < p：
+        // fpAdd/fpSub（modAdd/modSub）只做一次条件减，要求输入已约化；
+        // fpMul/fpInv 则不需要（Barrett/EE 对任意 256 位输入都成立）。
+        limb[7] = 0;
+        for (let l = 0; l < 7; l++) {
+          s = s * 1664525 + 1013904223; // LCG 溢出即截断（u32）
+          limb[l] = s;
+        }
+      }
+    }
+  }
+  // easy part：把任意 Fp12 送入 G_{Φ6(p²)} 子群
+  const aInv = fp12Inv(a);
+  // 诊断码 10：a·a^{-1} != 1（逆元对当前输入不成立）
+  if (!fp12eq(fp12Mul(a, aInv), fp12one())) return 10;
+
+  const t = fp12Mul(fp12Frobenius6(a), aInv);
+  const g = fp12Mul(t, fp12Frobenius2(t, ALPHA2_U, ALPHA4_U));
+
+  // 1 = cyc 平方与通用平方一致；0 = 不一致；-1 = g 不在子群（easy part 前提被破坏）
+  const gInSub = fp12eq(
+    fp12Frobenius2(fp12Frobenius2(g, ALPHA2_U, ALPHA4_U), ALPHA2_U, ALPHA4_U),
+    fp12Mul(fp12Frobenius2(g, ALPHA2_U, ALPHA4_U), fp12Inv(g)),
+  );
+  if (!gInSub) return -1;
+  return fp12eq(fp12Sqr(g), fp12SqrCyc(g)) ? 1 : 0;
 }
 
 // ---------- 诊断：逐步 Miller loop ----------

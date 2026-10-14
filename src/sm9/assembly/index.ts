@@ -29,6 +29,7 @@ import {
   millerStepF,
   millerStepT,
   sm9Pairing,
+  sqrCycSelfTest,
   twistNegPi2,
   twistPi1,
   twistPi2,
@@ -657,6 +658,11 @@ function kdfImpl(z: StaticArray<u8>, klen: i32): StaticArray<u8> {
   }
   return out;
 }
+/** 诊断：cyclotomic 平方自测（见 pairing.ts 的 sqrCycSelfTest）。返回 1=一致。 */
+export function sqrCycSelfTestOut(seed: i32): i32 {
+  return sqrCycSelfTest(<u32>seed);
+}
+
 export function kdfOut(zPtr: usize, zLen: i32, kPtr: usize, kLen: i32): void {
   const z = new StaticArray<u8>(zLen);
   for (let i = 0; i < zLen; i++) z[i] = load<u8>(zPtr + i);

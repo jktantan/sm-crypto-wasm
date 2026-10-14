@@ -172,6 +172,8 @@ interface Sm9Exports extends WebAssembly.Exports {
     sbPtr: number,
     kPtr: number,
   ) => number;
+  /** 诊断：cyclotomic 平方自测（随机子群元素上 cyc 平方 vs 通用平方）。1=一致。 */
+  readonly sqrCycSelfTestOut: (seed: number) => number;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -181,8 +183,7 @@ interface Sm9Module {
 }
 
 /** 预热 WASM 模块。 */
-export async function ensureLoaded(): Promise<void> {
-  if ((globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm) return;
+export async function ensureLoaded(): Promise<void> {  if ((globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm) return;
   const mod = await loadWasm('sm9');
   (globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm = {
     exports: mod.exports as unknown as Sm9Exports,
@@ -448,6 +449,18 @@ export function getEncPublicKey(ke: string | Uint8Array): string {
   } finally {
     exports.freeAll();
   }
+}
+
+/**
+ * 诊断（非公开 API，仅供测试/内部校验）：cyclotomic 平方自测。
+ *
+ * 对 `seed` 派生的伪随机 Fp12 送入 cyclotomic 子群后，用子群专用平方
+ * （fp12SqrCycTo）与通用平方（fp12SqrTo）各算一次并逐字节比较，返回是否一致。
+ * 用于覆盖 KAT 覆盖不到的随机子群元素。
+ */
+export function sqrCycSelfTest(seed: number): number {
+  const { exports } = getModule();
+  return exports.sqrCycSelfTestOut(seed | 0);
 }
 
 /**

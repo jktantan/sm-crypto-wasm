@@ -41,6 +41,7 @@ import {
   fp4Conjugate,
   fp4ConjugateTo,
   fp4copy,
+  fp4CopyInto,
   fp4eq,
   fp4Inv,
   fp4InvTo,
@@ -228,6 +229,66 @@ export function fp12Mul(a: Fp12, b: Fp12): Fp12 {
  * 少一次 Fp2 乘法。这里系数正好是 2a_i a_j，所以不需要再除以 2。
  * final exponent 里有 200 次这样的平方，是 pairing 里最集中的一处。
  */
+/**
+ * out = a²（**cyclotomic 子群专用**，Granger–Scott 风格）。
+ *
+ * 前提：a ∈ G_{Φ6(p²)}，即 a^{p⁴} = a^{p²−1}。满足该前提的元素包括：easy part
+ * 之后的值、配对值 e(...)、以及它们的乘积 / 平方 / Frobenius 像（子群封闭）。
+ * **不满足前提的输入结果错误** —— 通用平方请用 fp12SqrTo。
+ *
+ * 推导（本实现特有）：由 a^{p⁴}·a = a^{p²} 逐分量展开得到
+ *   g1·g2 = (g0² − conj(g0))/v
+ *   2v·g2² = conj(g1)·A2 + γ²·g0g1
+ *   γ·g0g2 = γ·g1² − conj(g2)·A4
+ * 其中 γ = v^((p⁴−1)/3) ∈ Fp 是三阶单位根，且 γ = A4、A2 = γ+1 = −γ²（因 1+γ+γ²=0）。
+ * 代入通用平方公式 g² = (g0²+2v·g1g2, 2g0g1+v·g2², g1²+2g0g2) 化简后：
+ *   r0 = 3g0² − 2·conj(g0)
+ *   r1 = 3g0g1 − conj(g1)
+ *   r2 = 3g1² − 2·conj(g2)
+ * 代价：2 次 fp4Sqr + 1 次 fp4Mul（≈9 个 fp2 乘），通用平方是 6 次 fp4Sqr（≈18 个），
+ * 且 g2 只以共轭形式出现（免费）。公式已用 Python 对随机子群元素与通用平方
+ * 逐字节对拍 4/4 通过。
+ */
+export function fp12SqrCycTo(out: Fp12, a: Fp12): void {
+  const g0 = a[0],
+    g1 = a[1],
+    g2 = a[2];
+  // r0 = 3g0² − 2 conj(g0)  → U0
+  fp4SqrTo(U0, g0);
+  fp4AddTo(U1, U0, U0);
+  fp4AddTo(U0, U1, U0); // 3 g0²
+  fp4ConjugateTo(U1, g0);
+  fp4AddTo(U1, U1, U1); // 2 conj(g0)
+  fp4SubTo(U0, U0, U1);
+
+  // r1 = 3g0g1 − conj(g1)  → U1
+  fp4MulTo(U1, g0, g1);
+  fp4AddTo(U2, U1, U1);
+  fp4AddTo(U1, U2, U1); // 3 g0g1
+  fp4ConjugateTo(U2, g1);
+  fp4SubTo(U1, U1, U2);
+
+  // r2 = 3g1² − 2 conj(g2)  → U2
+  fp4SqrTo(U2, g1);
+  fp4AddTo(U3, U2, U2);
+  fp4AddTo(U2, U3, U2); // 3 g1²
+  fp4ConjugateTo(U3, g2);
+  fp4AddTo(U3, U3, U3); // 2 conj(g2)
+  fp4SubTo(U2, U2, U3);
+
+  // 写 out（所有对 a 的读取已完成，允许 out 与 a 别名）
+  fp4CopyInto(out[0], U0);
+  fp4CopyInto(out[1], U1);
+  fp4CopyInto(out[2], U2);
+}
+
+/** out = a²（cyclotomic 子群专用，包装版）。 */
+export function fp12SqrCyc(a: Fp12): Fp12 {
+  const r = fp12zero();
+  fp12SqrCycTo(r, a);
+  return r;
+}
+
 /**
  * out = a²（对齐 fp12_sqr），w³ = v：
  *   r0 = a0² + 2·v·(a1 a2)
@@ -458,13 +519,17 @@ export function fp12Pow(a: Fp12, k: U256): Fp12 {
   }
 
   // 逐位：从最高非零 NAF 位起步。逆元算一次存 INV_HOLD，循环全程原地（零分配）。
+  //
+  // 平方用 cyclotomic 专用版（fp12SqrCycTo）：**前提是 a 已在 G_{Φ6(p²)} 子群内**。
+  // 本函数的所有调用点都满足：hard part 的中间值（easy part 之后）、配对值 e(...)。
+  // 子群对乘法/平方/Frobenius 封闭，故循环中 result 始终留在子群内。
   fp12InvTo(INV_HOLD, a);
   let top = msb + 1;
   while (top >= 0 && naf[top] === 0) top--;
   const result = fp12zero();
   fp12CopyInto(result, naf[top] === 1 ? a : INV_HOLD);
   for (let i = top - 1; i >= 0; i--) {
-    fp12SqrTo(result, result);
+    fp12SqrCycTo(result, result);
     if (naf[i] === 1) fp12MulTo(result, result, a);
     else if (naf[i] === -1) fp12MulTo(result, result, INV_HOLD);
   }
