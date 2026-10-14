@@ -1,7 +1,7 @@
 /**
  * SM4 业务 API（TS 胶水层，调 WASM）。
  *
- * 支持模式：ECB / CBC / CTR / CFB / OFB（GCM 见 modes.ts，暂缓）。
+ * 支持模式：ECB / CBC / CTR / CFB / OFB / GCM。
  * 所有对称模式在 TS 层用块级 `sm4Block` 调用拼装，核心轮函数在 WASM。
  *
  * spec/plan 对应：plan Task 9；spec §6 API。
@@ -15,6 +15,28 @@ interface Sm4Exports extends WebAssembly.Exports {
   readonly sm4EncryptECB: (keyPtr: number, inPtr: number, inLen: number, outPtr: number) => void;
   readonly sm4DecryptECB: (keyPtr: number, inPtr: number, inLen: number, outPtr: number) => void;
   readonly sm4Block: (keyPtr: number, inPtr: number, outPtr: number, decrypt: number) => void;
+  readonly sm4GcmEncrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    ivLen: number,
+    aadPtr: number,
+    aadLen: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+    tagPtr: number,
+  ) => void;
+  readonly sm4GcmDecrypt: (
+    keyPtr: number,
+    ivPtr: number,
+    ivLen: number,
+    aadPtr: number,
+    aadLen: number,
+    inPtr: number,
+    inLen: number,
+    outPtr: number,
+    tagPtr: number,
+  ) => number;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -272,4 +294,152 @@ function pkcs7Unpad(m: Uint8Array): Uint8Array {
   const padLen = m[m.length - 1] ?? 0;
   if (padLen < 1 || padLen > 16) throw new RangeError('sm4 CBC: 非法 PKCS#7 填充');
   return m.subarray(0, m.length - padLen);
+}
+
+// ---------- GCM ----------
+
+/**
+ * GCM 允许空明文 / 空 AAD，而 `toBytes` 对空输入抛错；这里做一层归一化。
+ */
+function optionalBytes(
+  v: string | Uint8Array | undefined,
+  label: string,
+): Uint8Array {
+  if (v === undefined) return new Uint8Array(0);
+  if (v instanceof Uint8Array) return new Uint8Array(v);
+  if (v.length === 0) return new Uint8Array(0);
+  return toBytes(v, label);
+}
+
+/** GCM 输入校验与归一化。 */
+function gcmInputs(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  aad: string | Uint8Array | undefined,
+) {
+  const k = toBytes(key, 'key');
+  const v = toBytes(iv, 'iv');
+  const a = optionalBytes(aad, 'aad');
+  if (k.length !== 16) throw new RangeError('sm4 GCM: key must be 16 bytes');
+  if (v.length === 0) throw new RangeError('sm4 GCM: iv 不能为空');
+  return { k, v, a };
+}
+
+/** 在 WASM 内存里铺 GCM 的 6 个缓冲，用完自动 freeAll。 */
+function withGcmBuffers<T>(
+  k: Uint8Array,
+  v: Uint8Array,
+  a: Uint8Array,
+  data: Uint8Array,
+  fn: (
+    ptrs: {
+      keyPtr: number;
+      ivPtr: number;
+      aadPtr: number;
+      inPtr: number;
+      outPtr: number;
+      tagPtr: number;
+    },
+    mem: Uint8Array,
+  ) => T,
+): T {
+  const { exports, memory } = getModule();
+  const keyPtr = exports.alloc(16);
+  const ivPtr = exports.alloc(v.length === 0 ? 1 : v.length);
+  const aadPtr = exports.alloc(a.length === 0 ? 1 : a.length);
+  const inPtr = exports.alloc(data.length === 0 ? 1 : data.length);
+  const outPtr = exports.alloc(data.length === 0 ? 1 : data.length);
+  const tagPtr = exports.alloc(16);
+  try {
+    let mem = new Uint8Array(memory.buffer);
+    mem.set(k, keyPtr);
+    mem.set(v, ivPtr);
+    if (a.length !== 0) mem.set(a, aadPtr);
+    if (data.length !== 0) mem.set(data, inPtr);
+    return fn({ keyPtr, ivPtr, aadPtr, inPtr, outPtr, tagPtr }, mem);
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/**
+ * SM4-GCM 加密（AEAD）。
+ *
+ * @param key 16 字节密钥。
+ * @param iv 初始向量，常用 12（96 bit）；其它长度按 GCM 规范走 GHASH 派生。
+ * @param msg 明文，可为空。
+ * @param aad 附加认证数据，可为空 / 省略。
+ * @returns `{ ct, tag }`，均为 hex；`tag` 16 字节。
+ */
+export function encryptGCM(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  msg: string | Uint8Array,
+  aad?: string | Uint8Array,
+): { ct: string; tag: string } {
+  const { k, v, a } = gcmInputs(key, iv, aad);
+  const m = optionalBytes(msg, 'msg');
+  return withGcmBuffers(k, v, a, m, (p) => {
+    const { exports, memory } = getModule();
+    exports.sm4GcmEncrypt(
+      p.keyPtr,
+      p.ivPtr,
+      v.length,
+      p.aadPtr,
+      a.length,
+      p.inPtr,
+      m.length,
+      p.outPtr,
+      p.tagPtr,
+    );
+    // 调用可能触发 WASM 内存增长，必须重新取 buffer 视图。
+    const mem = new Uint8Array(memory.buffer);
+    const ct = new Uint8Array(mem.buffer, p.outPtr, m.length).slice();
+    const tag = new Uint8Array(mem.buffer, p.tagPtr, 16).slice();
+    return { ct: fromBytes(ct, 'hex'), tag: fromBytes(tag, 'hex') };
+  });
+}
+
+/**
+ * SM4-GCM 解密 + 认证。
+ *
+ * @param key 16 字节密钥。
+ * @param iv 初始向量（与加密一致）。
+ * @param ct 密文，可为空（空明文时）。
+ * @param tag 16 字节认证标签（hex / base64 / Uint8Array）。
+ * @param aad 附加认证数据，可为空 / 省略。
+ * @returns 明文 hex。
+ * @throws Error 标签校验失败（密文/标签/AAD 任一被篡改）。
+ */
+export function decryptGCM(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+  ct: string | Uint8Array,
+  tag: string | Uint8Array,
+  aad?: string | Uint8Array,
+): string {
+  const { k, v, a } = gcmInputs(key, iv, aad);
+  const c = optionalBytes(ct, 'ct');
+  const t = toBytes(tag, 'tag');
+  if (t.length !== 16) throw new RangeError('sm4 GCM: tag must be 16 bytes');
+  return withGcmBuffers(k, v, a, c, (p) => {
+    const { exports, memory } = getModule();
+    const mem = new Uint8Array(memory.buffer);
+    mem.set(t, p.tagPtr);
+    const ok = exports.sm4GcmDecrypt(
+      p.keyPtr,
+      p.ivPtr,
+      v.length,
+      p.aadPtr,
+      a.length,
+      p.inPtr,
+      c.length,
+      p.outPtr,
+      p.tagPtr,
+    );
+    if (ok !== 0) throw new Error('sm4 GCM: 认证标签校验失败');
+    const out = new Uint8Array(memory.buffer);
+    const pt = new Uint8Array(out.buffer, p.outPtr, c.length).slice();
+    return fromBytes(pt, 'hex');
+  });
 }

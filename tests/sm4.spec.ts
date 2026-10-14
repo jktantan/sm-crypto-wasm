@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createCipheriv } from 'node:crypto';
 import * as sm4 from '@/sm4';
+import gcmVectors from './vectors/sm4/gcm.json';
 
 /**
  * SM4 与 Node crypto oracle 对比。
@@ -48,5 +49,55 @@ describe('SM4 vs Node crypto oracle', () => {
   it('OFB matches oracle', () => {
     const want = nodeEnc('sm4-ofb', KEY, IV, MSG).toString('hex');
     expect(sm4.cryptOFB(KEY, IV, MSG)).toBe(want);
+  });
+});
+
+/**
+ * GCM 用 OpenSSL 3.6.3 生成的离线向量。
+ * Node 的 `node:crypto` 不提供 `sm4-gcm`，所以这里不能沿用上面的 oracle 对比。
+ */
+describe('SM4 GCM vs OpenSSL vectors', () => {
+  for (const c of gcmVectors.cases) {
+    it(`${c.name}: encrypt matches ct/tag and decrypt round-trips`, () => {
+      const r = sm4.encryptGCM(gcmVectors.key, c.iv, c.pt, c.aad);
+      expect(r.ct).toBe(c.ct);
+      expect(r.tag).toBe(c.tag);
+      expect(sm4.decryptGCM(gcmVectors.key, c.iv, c.ct, c.tag, c.aad)).toBe(c.pt);
+    });
+  }
+});
+
+describe('SM4 GCM round-trip / tamper', () => {
+  const K = Buffer.from('0123456789abcdeffedcba9876543210', 'hex');
+  const N = Buffer.from('000102030405060708090a0b', 'hex');
+  const PT = Buffer.from('68656c6c6f20776f726c64', 'hex');
+  const AAD = Buffer.from('aad0000000000000', 'hex');
+  const PT_HEX = PT.toString('hex');
+
+  it('round-trips with AAD', () => {
+    const r = sm4.encryptGCM(K, N, PT, AAD);
+    expect(sm4.decryptGCM(K, N, r.ct, r.tag, AAD)).toBe(PT_HEX);
+  });
+
+  it('round-trips without AAD', () => {
+    const r = sm4.encryptGCM(K, N, PT);
+    expect(sm4.decryptGCM(K, N, r.ct, r.tag)).toBe(PT_HEX);
+  });
+
+  it('rejects a tampered tag', () => {
+    const r = sm4.encryptGCM(K, N, PT, AAD);
+    const bad = r.tag.slice(0, -2) + (r.tag.endsWith('ff') ? '00' : 'ff');
+    expect(() => sm4.decryptGCM(K, N, r.ct, bad, AAD)).toThrow();
+  });
+
+  it('rejects tampered ciphertext', () => {
+    const r = sm4.encryptGCM(K, N, PT, AAD);
+    const bad = (r.ct[0] === '0' ? '1' : '0') + r.ct.slice(1);
+    expect(() => sm4.decryptGCM(K, N, bad, r.tag, AAD)).toThrow();
+  });
+
+  it('rejects mismatched AAD', () => {
+    const r = sm4.encryptGCM(K, N, PT, AAD);
+    expect(() => sm4.decryptGCM(K, N, r.ct, r.tag, 'ffeeddccbbaa9988')).toThrow();
   });
 });

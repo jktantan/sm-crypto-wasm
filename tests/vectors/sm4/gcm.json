@@ -1,0 +1,12 @@
+{
+  "_source": "OpenSSL 3.6.3 EVP_sm4_gcm()，由 tests/vectors/sm4/generate-openssl-vector.c 生成",
+  "_note": "GCM per NIST SP 800-38D + SM4 per GB/T 32907-2016；tag 固定 16 字节。按 OID 1.2.156.10197.1.104.8，与 GmSSL 的 SM4-GCM 等价。",
+  "key": "0123456789abcdeffedcba9876543210",
+  "cases": [
+    { "name": "iv12-aad16-pt16", "iv": "000000000000000000000000", "aad": "a3b1bac656aa3350677d9197b27022dc", "pt": "00112233445566778899aabbccddeeff", "ct": "b3024e370ac02e5ac7fc84d283faaf32", "tag": "b3ceb96dfcee9f1a4c9666ff638f8ce2" },
+    { "name": "iv12-aad0-pt16", "iv": "000000000000000000000000", "aad": "", "pt": "00112233445566778899aabbccddeeff", "ct": "b3024e370ac02e5ac7fc84d283faaf32", "tag": "7d434dd92bb60c34394df4d6cbccc857" },
+    { "name": "iv12-aad20-pt20", "iv": "000000000000000000000000", "aad": "deadbeefcafebabefeedface1234567890abcd", "pt": "00112233445566778899aabbccddeeff00112233", "ct": "b3024e370ac02e5ac7fc84d283faaf32a1343066", "tag": "be3232dbfaa2ff364d422c0330712b79" },
+    { "name": "iv12-aad0-pt0", "iv": "000000000000000000000000", "aad": "", "pt": "", "ct": "", "tag": "4e595bf03f23bd10329baf5698e898ec" },
+    { "name": "iv16-aad16-pt32", "iv": "00000000000000000000000000000000", "aad": "a3b1bac656aa3350677d9197b27022dc", "pt": "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f", "ct": "5441241001ae68f36a2768c75288b90d2a968f75b9380df9d2d84e7bb7c28704", "tag": "a05fa463f1072315ef6bac309c7e4474" }
+  ]
+}

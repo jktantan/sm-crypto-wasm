@@ -7,6 +7,9 @@
 //     freeAll(): void           —— 释放全部缓冲
 //     sm4EncryptECB(keyPtr, inPtr, inLen, outPtr): void
 //     sm4DecryptECB(keyPtr, inPtr, inLen, outPtr): void
+//     sm4Block(keyPtr, inPtr, outPtr, decrypt): void
+//     sm4GcmEncrypt(keyPtr, ivPtr, ivLen, aadPtr, aadLen, inPtr, inLen, outPtr, tagPtr): void
+//     sm4GcmDecrypt(同上): i32  —— 返回 0 表示认证标签校验通过
 //   其中 inLen 必须是 16 的倍数（块长 16 字节）。
 // - 加密/解密用同一套轮函数，解密使用逆序轮密钥（SM4 本身自反结构，
 //   解密只需把 rk 逆序）。
@@ -205,4 +208,290 @@ export function sm4Block(keyPtr: usize, inPtr: usize, outPtr: usize, decrypt: i3
   keyExpansion(keyPtr, rk);
   if (decrypt !== 0) reverseRk(rk);
   cipherBlock(rk, inPtr, outPtr);
+}
+
+// ---------- GCM（NIST SP 800-38D 的 AEAD，套在 SM4 上） ----------
+//
+// GCM = CTR（计数器只递增最后 32 位）+ GHASH（GF(2^128) 上的多项式哈希）。
+// 参考 NIST SP 800-38D §6.3（GF 乘法 Algorithm 1）、§6.4（GHASH）、§6.5（GCTR）、
+// §7.1（GCM 加解密）。GmSSL/OpenSSL 的 SM4-GCM 遵循同一规范，产物可互操作。
+
+/** GF(2^128) 乘法结果暂存（hi=高 64 位，lo=低 64 位）。 */
+const gmulOut = new StaticArray<u64>(2);
+
+/** GHASH 累积状态（128-bit，hi/lo）。 */
+let ghashHi: u64 = 0;
+let ghashLo: u64 = 0;
+
+/** big-endian 读 8 字节到 u64（不用 load<u64> 以规避对齐要求）。 */
+function readU64BE(p: usize): u64 {
+  let v: u64 = 0;
+  for (let i = 0; i < 8; i++) {
+    v = (v << 8) | <u64>load<u8>(p + i);
+  }
+  return v;
+}
+
+/** big-endian 写 u64 到 8 字节。 */
+function writeU64BE(p: usize, v: u64): void {
+  for (let i = 0; i < 8; i++) {
+    store<u8>(p + i, <u8>(v >>> ((7 - i) * 8)));
+  }
+}
+
+/**
+ * GF(2^128) 乘法，GCM 的 bit-reversed 约定（NIST SP 800-38D Algorithm 1）。
+ *
+ * 结果写入 `gmulOut`。
+ */
+function gfMul(xhi: u64, xlo: u64, yhi: u64, ylo: u64): void {
+  // R = 11100001 || 0^120。
+  const R: u64 = (<u64>0xe1) << 56;
+  let zhi: u64 = 0;
+  let zlo: u64 = 0;
+  let vhi: u64 = yhi;
+  let vlo: u64 = ylo;
+  for (let i = 0; i < 128; i++) {
+    // x_i：X 的第 i 位（x_0 是最高位）。
+    const bit: u64 = i < 64 ? (xhi >>> (63 - i)) & 1 : (xlo >>> (127 - i)) & 1;
+    if (bit !== 0) {
+      zhi ^= vhi;
+      zlo ^= vlo;
+    }
+    const lsb: u64 = vlo & 1;
+    vlo = (vlo >>> 1) | (vhi << 63);
+    vhi = vhi >>> 1;
+    if (lsb !== 0) vhi ^= R;
+  }
+  gmulOut[0] = zhi;
+  gmulOut[1] = zlo;
+}
+
+/** 把一段数据（不足 16 字节在尾部补零）异或进 GHASH 状态，再乘 H。 */
+function ghashBlock(hhi: u64, hlo: u64, p: usize, len: usize): void {
+  let bhi: u64 = 0;
+  let blo: u64 = 0;
+  for (let i: usize = 0; i < len; i++) {
+    const b = <u64>load<u8>(p + i);
+    // 块是大端：数据在**高位**，逐字节左移到对应位置（不足 16 字节时尾部留零）。
+    if (i < 8) {
+      bhi |= b << ((7 - i) * 8);
+    } else {
+      blo |= b << ((15 - i) * 8);
+    }
+  }
+  ghashHi ^= bhi;
+  ghashLo ^= blo;
+  gfMul(ghashHi, ghashLo, hhi, hlo);
+  ghashHi = gmulOut[0];
+  ghashLo = gmulOut[1];
+}
+
+/** 吸收任意长度数据到 GHASH 状态，逐 16 字节补零分块。 */
+function ghashData(hhi: u64, hlo: u64, p: usize, len: usize): void {
+  let off: usize = 0;
+  while (off < len) {
+    const rest = len - off;
+    ghashBlock(hhi, hlo, p + off, rest < 16 ? rest : 16);
+    off += 16;
+  }
+}
+
+/**
+ * 计算 S = GHASH_H(A || 0^v || C || 0^u || [len(A)]_64 || [len(C)]_64)，
+ * 128-bit 结果写到 outPtr（NIST SP 800-38D §6.4）。
+ */
+function ghashAadCt(
+  hhi: u64,
+  hlo: u64,
+  aadPtr: usize,
+  aadLen: usize,
+  ctPtr: usize,
+  ctLen: usize,
+  outPtr: usize,
+): void {
+  ghashHi = 0;
+  ghashLo = 0;
+  ghashData(hhi, hlo, aadPtr, aadLen);
+  ghashData(hhi, hlo, ctPtr, ctLen);
+  ghashHi ^= (<u64>aadLen) << 3;
+  ghashLo ^= (<u64>ctLen) << 3;
+  gfMul(ghashHi, ghashLo, hhi, hlo);
+  writeU64BE(outPtr, gmulOut[0]);
+  writeU64BE(outPtr + 8, gmulOut[1]);
+}
+
+/**
+ * 计算初始计数器块 J0（NIST SP 800-38D §7.1 Step 2），写到 outPtr 的 16 字节。
+ *
+ * - IV 为 96 位：J0 = IV || 0^31 || 1；
+ * - 其它长度：J0 = GHASH_H(IV || 0^(s+64) || [len(IV)]_64)。
+ */
+function computeJ0(hhi: u64, hlo: u64, ivPtr: usize, ivLen: usize, outPtr: usize): void {
+  if (ivLen === 12) {
+    for (let i = 0; i < 12; i++) store<u8>(outPtr + i, load<u8>(ivPtr + i));
+    store<u8>(outPtr + 12, 0);
+    store<u8>(outPtr + 13, 0);
+    store<u8>(outPtr + 14, 0);
+    store<u8>(outPtr + 15, 1);
+    return;
+  }
+  ghashHi = 0;
+  ghashLo = 0;
+  ghashData(hhi, hlo, ivPtr, ivLen);
+  // 追加长度块：高 64 位为零，低 64 位是 len(IV) 的比特数。
+  ghashLo ^= (<u64>ivLen) << 3;
+  gfMul(ghashHi, ghashLo, hhi, hlo);
+  writeU64BE(outPtr, gmulOut[0]);
+  writeU64BE(outPtr + 8, gmulOut[1]);
+}
+
+/** inc32：只把 16 字节块的最后 4 字节按大端加一（GCM 计数器规则）。 */
+function inc32(p: usize): void {
+  let c: u32 = 0;
+  for (let i = 12; i < 16; i++) {
+    c = (c << 8) | <u32>load<u8>(p + i);
+  }
+  c = (c + 1) & 0xffffffff;
+  store<u8>(p + 12, <u8>(c >>> 24));
+  store<u8>(p + 13, <u8>(c >>> 16));
+  store<u8>(p + 14, <u8>(c >>> 8));
+  store<u8>(p + 15, <u8>c);
+}
+
+/** 复制 16 字节并 inc32，用于得到 GCTR 的初始计数器块 inc32(J0)。 */
+function inc32Copy(srcPtr: usize, dstPtr: usize): void {
+  for (let i = 0; i < 16; i++) store<u8>(dstPtr + i, load<u8>(srcPtr + i));
+  inc32(dstPtr);
+}
+
+/**
+ * GCTR：以 icb 为初始计数器块对数据做流式加/解密（NIST SP 800-38D §6.5）。
+ * 输入输出可重叠。
+ */
+function gctr(
+  rk: StaticArray<u32>,
+  icbPtr: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+): void {
+  if (inLen === 0) return;
+  const cb = new StaticArray<u8>(16);
+  const cbPtr = changetype<usize>(cb);
+  for (let i = 0; i < 16; i++) store<u8>(cbPtr + i, load<u8>(icbPtr + i));
+  const ks = new StaticArray<u8>(16);
+  const ksPtr = changetype<usize>(ks);
+  let off: usize = 0;
+  while (off < inLen) {
+    cipherBlock(rk, cbPtr, ksPtr);
+    const rest = inLen - off;
+    const take: usize = rest < 16 ? rest : 16;
+    for (let i: usize = 0; i < take; i++) {
+      store<u8>(outPtr + off + i, load<u8>(inPtr + off + i) ^ load<u8>(ksPtr + i));
+    }
+    inc32(cbPtr);
+    off += 16;
+  }
+}
+
+/**
+ * SM4-GCM 加密（NIST SP 800-38D §7.1）。
+ *
+ * @param keyPtr 16 字节密钥。
+ * @param ivPtr / ivLen 任意长度 IV（常用 12 字节）。
+ * @param aadPtr / aadLen 附加认证数据（可为 0 长度）。
+ * @param inPtr / inLen 明文（可为 0 长度）。
+ * @param outPtr 密文输出（inLen 字节）。
+ * @param tagPtr 认证标签输出（16 字节）。
+ */
+export function sm4GcmEncrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  ivLen: usize,
+  aadPtr: usize,
+  aadLen: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+  tagPtr: usize,
+): void {
+  const rk = new StaticArray<u32>(32);
+  keyExpansion(keyPtr, rk);
+
+  const h = new StaticArray<u8>(16);
+  const hPtr = changetype<usize>(h);
+  const zero = new StaticArray<u8>(16);
+  cipherBlock(rk, changetype<usize>(zero), hPtr);
+  const hhi = readU64BE(hPtr);
+  const hlo = readU64BE(hPtr + 8);
+
+  const j0 = new StaticArray<u8>(16);
+  const j0Ptr = changetype<usize>(j0);
+  computeJ0(hhi, hlo, ivPtr, ivLen, j0Ptr);
+
+  // C = GCTR_K(inc32(J0), P)
+  const icb = new StaticArray<u8>(16);
+  const icbPtr = changetype<usize>(icb);
+  inc32Copy(j0Ptr, icbPtr);
+  gctr(rk, icbPtr, inPtr, inLen, outPtr);
+
+  // S = GHASH_H(A, C)，再 T = GCTR_K(J0, S)
+  const s = new StaticArray<u8>(16);
+  const sPtr = changetype<usize>(s);
+  ghashAadCt(hhi, hlo, aadPtr, aadLen, outPtr, inLen, sPtr);
+  gctr(rk, j0Ptr, sPtr, 16, tagPtr);
+}
+
+/**
+ * SM4-GCM 解密 + 认证（NIST SP 800-38D §7.2）。
+ *
+ * @returns 0 表示标签校验通过；非 0 表示校验失败（调用方不得使用 outPtr 内容）。
+ */
+export function sm4GcmDecrypt(
+  keyPtr: usize,
+  ivPtr: usize,
+  ivLen: usize,
+  aadPtr: usize,
+  aadLen: usize,
+  inPtr: usize,
+  inLen: usize,
+  outPtr: usize,
+  tagPtr: usize,
+): i32 {
+  const rk = new StaticArray<u32>(32);
+  keyExpansion(keyPtr, rk);
+
+  const h = new StaticArray<u8>(16);
+  const hPtr = changetype<usize>(h);
+  const zero = new StaticArray<u8>(16);
+  cipherBlock(rk, changetype<usize>(zero), hPtr);
+  const hhi = readU64BE(hPtr);
+  const hlo = readU64BE(hPtr + 8);
+
+  const j0 = new StaticArray<u8>(16);
+  const j0Ptr = changetype<usize>(j0);
+  computeJ0(hhi, hlo, ivPtr, ivLen, j0Ptr);
+
+  // S 用密文算（inPtr 在 gctr 里未被改写），T' = GCTR_K(J0, S)。
+  const s = new StaticArray<u8>(16);
+  const sPtr = changetype<usize>(s);
+  ghashAadCt(hhi, hlo, aadPtr, aadLen, inPtr, inLen, sPtr);
+  const t = new StaticArray<u8>(16);
+  const tPtr = changetype<usize>(t);
+  gctr(rk, j0Ptr, sPtr, 16, tPtr);
+
+  // 常量时间比较 16 字节标签。
+  let bad: i32 = 0;
+  for (let i = 0; i < 16; i++) {
+    bad |= <i32>(load<u8>(tPtr + i) ^ load<u8>(tagPtr + i));
+  }
+  if (bad !== 0) return 1;
+
+  // 校验通过后才把明文写出：P = GCTR_K(inc32(J0), C)。
+  const icb = new StaticArray<u8>(16);
+  const icbPtr = changetype<usize>(icb);
+  inc32Copy(j0Ptr, icbPtr);
+  gctr(rk, icbPtr, inPtr, inLen, outPtr);
+  return 0;
 }
