@@ -13,11 +13,14 @@
 
 import {
   arenaAlloc,
-  fpAdd,
+  fpAddTo,
   fpInv,
   fpMul,
+  fpMulTo,
   fpSqr,
+  fpSqrTo,
   fpSub,
+  fpSubTo,
   nArr,
   pArr,
   permU256,
@@ -109,30 +112,47 @@ export function negate(p: JPoint): JPoint {
  *   Y3 = alpha·(4·beta - X3) - 8·gamma²
  *   Z3 = 2·Y1·Z1
  */
-export function doublePoint(p: JPoint): JPoint {
+/**
+ * out = 2·P（Jacobian 倍点，dbl-2007-bl，a = −3）。允许 out 与 P 别名。
+ *
+ * 全程原地写模块级 scratch，零堆分配：原实现一次倍点要 ~10 次 `new U256`
+ * （arena 分配）加一个 JPoint，而标量乘会调用它几百次。
+ *
+ * 别名安全的关键：**所有对 P 的读取都排在最前面**（含 Z3 = 2·Y1·Z1），这些算完之后
+ * 才写 out —— 否则 out === P 时写 out.x/out.y 会把后面还要用的 P 字段弄脏。
+ */
+export function doubleInto(out: JPoint, p: JPoint): void {
   if (isInfinity(p) || u256isZero(p.y)) {
-    return infinity();
+    setZero(out);
+    return;
   }
-  const delta = fpSqr(p.z);
-  const gamma = fpSqr(p.y);
-  const beta = fpMul(p.x, gamma);
-  // alpha = 3*(X1 - delta)*(X1 + delta)
-  const xmd = fpSub(p.x, delta);
-  const xpd = fpAdd(p.x, delta);
-  let alpha = fpMul(xmd, xpd);
-  alpha = fpAdd(fpAdd(alpha, alpha), alpha);
+  fpSqrTo(DE0, p.z); // delta = Z1²
+  fpSqrTo(DE1, p.y); // gamma = Y1²
+  fpMulTo(DE2, p.x, DE1); // beta = X1·gamma
+  fpSubTo(DE3, p.x, DE0); // X1 − delta
+  fpAddTo(DE4, p.x, DE0); // X1 + delta
+  fpMulTo(DE3, DE3, DE4); // alpha = (X1−delta)(X1+delta)
+  fpAddTo(DE5, DE3, DE3); // 2·alpha
+  fpAddTo(DE3, DE5, DE3); // 3·alpha = 2·alpha + alpha
+  fpMulTo(DE4, p.y, p.z); // —— 最后一次读 P
+  mulSmallTo(DE4, DE4, 2); // z3 = 2·Y1·Z1
 
-  const x3 = fpSub(fpSqr(alpha), mulSmall(beta, 8));
-  // Y3 = alpha*(4*beta - X3) - 8*gamma²
-  const fourBeta = mulSmall(beta, 4);
-  const y3 = fpSub(fpMul(alpha, fpSub(fourBeta, x3)), mulSmall(fpSqr(gamma), 8));
-  // Z3 = 2*Y1*Z1
-  const z3 = mulSmall(fpMul(p.y, p.z), 2);
+  fpSqrTo(DE5, DE3); // alpha²
+  mulSmallTo(DE6, DE2, 8); // 8·beta
+  fpSubTo(out.x, DE5, DE6); // X3 = alpha² − 8·beta
+  mulSmallTo(DE6, DE2, 4); // 4·beta
+  fpSubTo(DE6, DE6, out.x); // 4·beta − X3
+  fpMulTo(DE6, DE3, DE6); // alpha·(4·beta − X3)
+  fpSqrTo(DE0, DE1); // gamma²
+  mulSmallTo(DE5, DE0, 8); // 8·gamma²
+  fpSubTo(out.y, DE6, DE5); // Y3 = alpha·(4·beta − X3) − 8·gamma²
+  u256copy(DE4, out.z);
+}
 
+/** Jacobian 倍点：R = 2·P（分配版包装）。 */
+export function doublePoint(p: JPoint): JPoint {
   const r = new JPoint();
-  r.x = x3;
-  r.y = y3;
-  r.z = z3;
+  doubleInto(r, p);
   return r;
 }
 
@@ -140,40 +160,67 @@ export function doublePoint(p: JPoint): JPoint {
  * Jacobian 点加：R = P + Q（P、Q 均非无穷远）。
  * 公式（add-2007-bl）。
  */
-export function addPoints(p: JPoint, q: JPoint): JPoint {
-  if (isInfinity(p)) return clonePoint(q);
-  if (isInfinity(q)) return clonePoint(p);
+/**
+ * out = P + Q（完整 Jacobian，add-2007-bl）。允许 out 与 P / Q 别名。
+ *
+ * 与 doubleInto 同样的别名纪律：Z3 = Z1·Z2·H 依赖 P、Q 的字段，所以在写 out 之前
+ * 就要算完。
+ */
+export function addInto(out: JPoint, p: JPoint, q: JPoint): void {
+  if (isInfinity(p)) {
+    u256copy(q.x, out.x);
+    u256copy(q.y, out.y);
+    u256copy(q.z, out.z);
+    return;
+  }
+  if (isInfinity(q)) {
+    u256copy(p.x, out.x);
+    u256copy(p.y, out.y);
+    u256copy(p.z, out.z);
+    return;
+  }
+  fpSqrTo(AE0, p.z); // z1z1
+  fpSqrTo(AE1, q.z); // z2z2
+  fpMulTo(AE2, p.x, AE1); // U1
+  fpMulTo(AE3, q.x, AE0); // U2
+  fpMulTo(AE4, q.z, AE1);
+  fpMulTo(AE4, p.y, AE4); // S1
+  fpMulTo(AE5, p.z, AE0);
+  fpMulTo(AE5, q.y, AE5); // S2
+  fpSubTo(AE6, AE3, AE2); // H = U2 − U1
+  fpSubTo(AE7, AE5, AE4); // R = S2 − S1
 
-  const z1z1 = fpSqr(p.z);
-  const z2z2 = fpSqr(q.z);
-  const u1 = fpMul(p.x, z2z2);
-  const u2 = fpMul(q.x, z1z1);
-  const s1 = fpMul(p.y, fpMul(q.z, z2z2));
-  const s2 = fpMul(q.y, fpMul(p.z, z1z1));
-
-  const h = fpSub(u2, u1);
-  const r = fpSub(s2, s1);
-
-  if (u256isZero(h)) {
-    if (u256isZero(r)) {
-      return doublePoint(p);
+  if (u256isZero(AE6)) {
+    if (u256isZero(AE7)) {
+      doubleInto(out, p);
+      return;
     }
-    return infinity();
+    setZero(out); // 互为逆元 → 无穷远
+    return;
   }
 
-  const hh = fpSqr(h);
-  const hhh = fpMul(h, hh);
-  const v = fpMul(u1, hh);
+  fpMulTo(AE15, p.z, q.z);
+  fpMulTo(AE15, AE15, AE6); // Z3 = Z1·Z2·H —— 最后一次读 P / Q
 
-  const x3 = fpSub(fpSub(fpSqr(r), hhh), mulSmall(v, 2));
-  const y3 = fpSub(fpMul(r, fpSub(v, x3)), fpMul(s1, hhh));
-  const z3 = fpMul(p.z, fpMul(q.z, h));
+  fpSqrTo(AE8, AE6); // HH = H²
+  fpMulTo(AE9, AE6, AE8); // HHH = H·HH
+  fpMulTo(AE10, AE2, AE8); // V = U1·HH
+  fpSqrTo(AE11, AE7); // R²
+  fpSubTo(AE11, AE11, AE9); // R² − HHH
+  mulSmallTo(AE12, AE10, 2); // 2V
+  fpSubTo(out.x, AE11, AE12); // X3 = R² − HHH − 2V
+  fpSubTo(AE13, AE10, out.x); // V − X3
+  fpMulTo(AE13, AE7, AE13); // R·(V − X3)
+  fpMulTo(AE14, AE4, AE9); // S1·HHH
+  fpSubTo(out.y, AE13, AE14); // Y3 = R·(V − X3) − S1·HHH
+  u256copy(AE15, out.z);
+}
 
-  const out = new JPoint();
-  out.x = x3;
-  out.y = y3;
-  out.z = z3;
-  return out;
+/** 点加：R = P + Q（分配版包装）。 */
+export function addPoints(p: JPoint, q: JPoint): JPoint {
+  const r = new JPoint();
+  addInto(r, p, q);
+  return r;
 }
 
 /** 无穷远点。 */
@@ -189,20 +236,69 @@ export function clonePoint(p: JPoint): JPoint {
   return r;
 }
 
+// ---------- 点运算的模块级工作区 ----------
+//
+// 倍点/点加各占一套（addInto 在 h == 0 && r == 0 时会调 doubleInto，所以不能共用）。
+// 非重入约束：这两个 Into 算子是叶子，内部只调 fp 层的 To 算子（它们各自用
+// field256 的 scratch），不再回调点层的 Into 算子。
+const DE0 = u256zero();
+const DE1 = u256zero();
+const DE2 = u256zero();
+const DE3 = u256zero();
+const DE4 = u256zero();
+const DE5 = u256zero();
+const DE6 = u256zero();
+
+const AE0 = u256zero();
+const AE1 = u256zero();
+const AE2 = u256zero();
+const AE3 = u256zero();
+const AE4 = u256zero();
+const AE5 = u256zero();
+const AE6 = u256zero();
+const AE7 = u256zero();
+const AE8 = u256zero();
+const AE9 = u256zero();
+const AE10 = u256zero();
+const AE11 = u256zero();
+const AE12 = u256zero();
+const AE13 = u256zero();
+const AE14 = u256zero();
+const AE15 = u256zero();
+
+const ZERO_U256 = u256zero(); // 只读零常量
+
+/** out = 0（无穷远点的坐标）。 */
+function setZero(out: JPoint): void {
+  u256copy(ZERO_U256, out.x);
+  u256copy(ZERO_U256, out.y);
+  u256copy(ZERO_U256, out.z);
+}
+
 /**
- * 小整数乘：k·a mod p，k ∈ {2,3,4,8}。
+ * out = k·a mod p，k ∈ {2,3,4,8}。
  *
  * 全部用加倍/加法实现 —— 原先走 `fpMul(a, u256fromU32(k))`，即**整次模乘**
  * （64 次 32×32 乘法 + 归约）。倍点里有 4 处、点加里有 2 处这种调用，一次标量乘
- * 累计上千次，改成模加（各一次条件减）后这部分成本基本消失。
+ * 累计上千次，改成模加（各一次条件减）后这部分开销基本消失。
+ *
+ * k = 3 时 out 可能与 a 别名，故先把 a 备份到 scratch（否则第二个 fpAddTo 读到的是
+ * 已被覆盖成 2a 的 a，会算成 4a）。k ∈ {2,4,8} 不需要 a 的原值。
  */
-function mulSmall(a: U256, k: u32): U256 {
-  const d = fpAdd(a, a); // 2a
-  if (k === 2) return d;
-  if (k === 3) return fpAdd(d, a); // 2a + a
-  const q = fpAdd(d, d); // 4a
-  if (k === 4) return q;
-  return fpAdd(q, q); // 8a
+const MS_TMP = u256zero();
+
+function mulSmallTo(out: U256, a: U256, k: u32): void {
+  if (k === 3) {
+    u256copy(a, MS_TMP);
+    fpAddTo(out, a, a); // 2a
+    fpAddTo(out, out, MS_TMP); // 2a + a = 3a
+    return;
+  }
+  fpAddTo(out, a, a); // 2a
+  if (k === 2) return;
+  fpAddTo(out, out, out); // 4a
+  if (k === 4) return;
+  fpAddTo(out, out, out); // 8a
 }
 
 // ---------- 标量模运算（mod n） ----------
@@ -393,22 +489,6 @@ export function scalarMulG(k: U256): JPoint {
     addInto(Q, Q, G[combIndex(k, j)]);
   }
   return Q;
-}
-
-/** out = 2·p（原地，避免逐次分配 JPoint + 三个 U256）。 */
-function doubleInto(out: JPoint, p: JPoint): void {
-  const r = doublePoint(p);
-  u256copy(r.x, out.x);
-  u256copy(r.y, out.y);
-  u256copy(r.z, out.z);
-}
-
-/** out = p + q（原地）。 */
-function addInto(out: JPoint, p: JPoint, q: JPoint): void {
-  const r = addPoints(p, q);
-  u256copy(r.x, out.x);
-  u256copy(r.y, out.y);
-  u256copy(r.z, out.z);
 }
 
 /** Jacobian → 仿射：返回 (x, y)。Z == 0 时返回全 0。 */

@@ -39,30 +39,32 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 | 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
 |---|---|---|---|---|
-| SM3 | hash 1 KB | 4.8 µs | 7.3 µs | 快 1.5× |
-| SM4 | ECB 1 KB | 20.6 µs | — | — |
-| SM4 | CBC 1 KB | 27.3 µs | 40.5 µs | 快 1.5× |
-| SM4 | GCM 1 KB | 35.1 µs | — | — |
-| ZUC | EEA3 1 KB | 5.9 µs | 16.7 µs | 快 2.8× |
-| SM2 | sign 64 B | 287 µs | 348 µs | 快 1.2× |
-| SM2 | verify 64 B | 432 µs | 2.33 ms | 快 5.4× |
-| SM2 | getPublicKey 64 B | 125 µs | — | — |
-| SM9 | sign / verify 32 B | 6.05 / 11.83 ms | 无纯 JS 实现 | — |
+| SM3 | hash 1 KB | 4.9 µs | 7.5 µs | 快 1.5× |
+| SM4 | ECB 1 KB | 20.7 µs | — | — |
+| SM4 | CBC 1 KB | 25.8 µs | 39.2 µs | 快 1.5× |
+| SM4 | GCM 1 KB | 40.5 µs | — | — |
+| ZUC | EEA3 1 KB | 5.8 µs | 16.4 µs | 快 2.8× |
+| SM2 | sign 64 B | 263 µs | 347 µs | 快 1.3× |
+| SM2 | verify 64 B | 400 µs | 2.34 ms | 快 5.9× |
+| SM2 | getPublicKey 64 B | 113 µs | — | — |
+| SM9 | sign / verify 32 B | 6.03 / 11.67 ms | 无纯 JS 实现 | — |
 
 要点：
 
-- **全部算法都不慢于纯 JS 参考**：SM3 / SM4 / ZUC 与 SM2 的 sign 快 1.2~2.8×，
-  SM2 的 verify 快 5.4×；
+- **全部算法都不慢于纯 JS 参考**：SM3 / SM4 / ZUC 与 SM2 的 sign 快 1.3~2.8×，
+  SM2 的 verify 快 5.9×；
 - **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
-  每次导出调用回卷），在这一层之上做了三件事：
+  每次导出调用回卷），在这一层之上做了四件事：
   1. **素域 p 的归约走 Solinas**——p = 2^256−2^224−2^96+2^64−1 是伪 Mersenne，展开
      2^256 ≡ 2^224+2^96−2^64+1 后归约只需加减移位、没有乘法；
   2. **平方改 Comba（列扫描）+ 统一进位**——旧实现每对 (i,j) 要跑两遍完整的进位传播
      循环（共 56 次内存循环），是整个库最贵的单个函数；
   3. **标量乘分两条路**：固定基点走 comb 预计算表（w=5、32 项；51 次倍点 + 52 次点加），
      任意点走 wNAF（w=5，点加从 ~128 次降到 ~43 次）。表惰性构造一次，缓存在 arena
-     之外的永久区。
-  合起来签名从 6.10 ms 降到 287 µs（21×），公钥派生 2.96 ms → 125 µs（23×）；
+     之外的永久区；
+  4. **点运算全程原地**：倍点 / 点加写模块级 scratch，不再逐次 `new U256` + `new JPoint`
+     （一次倍点原本 ~11 次堆分配，而标量乘要调用它几百次）。
+  合起来签名从 6.10 ms 降到 263 µs（23×），公钥派生 2.96 ms → 113 µs（26×）；
 - **代价与取舍**：comb 只适用于固定基点，Solinas 只适用于伪 Mersenne 模数——SM2 的
   标量模 n 与 SM9 的 p/n 都不是这个形状（仍走 Barrett），SM9 若要再快需要换 Montgomery，
   而那意味着把该曲线全部常数搬进 Montgomery 域，属重写级改动；
@@ -337,23 +339,23 @@ inside WASM. Measured on Apple M4 / Node 26.7 / macOS 27 via `pnpm bench`
 
 | Algorithm | Operation | sm-crypto-wasm | pure-JS reference (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 1 KB | 4.8 µs | 7.3 µs | 1.5× faster |
-| SM4 | ECB 1 KB | 20.6 µs | — | — |
-| SM4 | CBC 1 KB | 27.3 µs | 40.5 µs | 1.5× faster |
-| SM4 | GCM 1 KB | 35.1 µs | — | — |
-| ZUC | EEA3 1 KB | 5.9 µs | 16.7 µs | 2.8× faster |
-| SM2 | sign 64 B | 287 µs | 348 µs | 1.2× faster |
-| SM2 | verify 64 B | 432 µs | 2.33 ms | 5.4× faster |
-| SM2 | getPublicKey 64 B | 125 µs | — | — |
-| SM9 | sign / verify 32 B | 6.05 / 11.83 ms | no pure-JS implementation | — |
+| SM3 | hash 1 KB | 4.9 µs | 7.5 µs | 1.5× faster |
+| SM4 | ECB 1 KB | 20.7 µs | — | — |
+| SM4 | CBC 1 KB | 25.8 µs | 39.2 µs | 1.5× faster |
+| SM4 | GCM 1 KB | 40.5 µs | — | — |
+| ZUC | EEA3 1 KB | 5.8 µs | 16.4 µs | 2.8× faster |
+| SM2 | sign 64 B | 263 µs | 347 µs | 1.3× faster |
+| SM2 | verify 64 B | 400 µs | 2.34 ms | 5.9× faster |
+| SM2 | getPublicKey 64 B | 113 µs | — | — |
+| SM9 | sign / verify 32 B | 6.03 / 11.67 ms | no pure-JS implementation | — |
 
 Notes:
 
 - **No algorithm is now slower than the pure-JS reference**: SM3 / SM4 / ZUC and
-  SM2 signing are 1.2–2.8× faster, SM2 verification 5.4× faster;
+  SM2 signing are 1.3–2.8× faster, SM2 verification 5.9× faster;
 - **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
   backed by a module-level bump arena that rewinds at every exported entry), and
-  on top of that three things changed:
+  on top of that four things changed:
   1. **Reduction in the prime field p uses Solinas** — p = 2^256−2^224−2^96+2^64−1
      is pseudo-Mersenne, so expanding 2^256 ≡ 2^224+2^96−2^64+1 makes reduction
      pure add/subtract/shift with no multiplication at all;
@@ -363,9 +365,13 @@ Notes:
   3. **Scalar multiplication takes two routes**: fixed-base uses a comb table
      (w=5, 32 entries; 51 doublings + 52 additions), arbitrary-point uses wNAF
      (w=5, cutting additions from ~128 to ~43). The table is built lazily once and
-     cached in a permanent area outside the arena.
-  Together: signing 6.10 ms → 287 µs (21×), public-key derivation 2.96 ms → 125 µs
-  (23×);
+     cached in a permanent area outside the arena;
+  4. **Point arithmetic is fully in-place**: doubling and addition write
+     module-level scratch instead of allocating a fresh `U256` per operation plus
+     a `JPoint` (a single doubling used to cost ~11 heap allocations, and scalar
+     multiplication calls it hundreds of times).
+  Together: signing 6.10 ms → 263 µs (23×), public-key derivation 2.96 ms → 113 µs
+  (26×);
 - **Trade-offs**: comb applies only to the fixed base point and Solinas only to
   pseudo-Mersenne moduli — SM2's scalar modulus n and SM9's p/n are not of that
   shape (they still use Barrett), and making SM9 faster than this would mean
@@ -677,23 +683,23 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 
 | Алгоритм | Операция | sm-crypto-wasm | чистая JS (gmkitx) | |
 |---|---|---|---|---|
-| SM3 | hash 1 KB | 4.8 µs | 7.3 µs | в 1.5× быстрее |
-| SM4 | ECB 1 KB | 20.6 µs | — | — |
-| SM4 | CBC 1 KB | 27.3 µs | 40.5 µs | в 1.5× быстрее |
-| SM4 | GCM 1 KB | 35.1 µs | — | — |
-| ZUC | EEA3 1 KB | 5.9 µs | 16.7 µs | в 2.8× быстрее |
-| SM2 | sign 64 B | 287 µs | 348 µs | в 1.2× быстрее |
-| SM2 | verify 64 B | 432 µs | 2.33 ms | в 5.4× быстрее |
-| SM2 | getPublicKey 64 B | 125 µs | — | — |
-| SM9 | sign / verify 32 B | 6.05 / 11.83 ms | нет чистой JS-реализации | — |
+| SM3 | hash 1 KB | 4.9 µs | 7.5 µs | в 1.5× быстрее |
+| SM4 | ECB 1 KB | 20.7 µs | — | — |
+| SM4 | CBC 1 KB | 25.8 µs | 39.2 µs | в 1.5× быстрее |
+| SM4 | GCM 1 KB | 40.5 µs | — | — |
+| ZUC | EEA3 1 KB | 5.8 µs | 16.4 µs | в 2.8× быстрее |
+| SM2 | sign 64 B | 263 µs | 347 µs | в 1.3× быстрее |
+| SM2 | verify 64 B | 400 µs | 2.34 ms | в 5.9× быстрее |
+| SM2 | getPublicKey 64 B | 113 µs | — | — |
+| SM9 | sign / verify 32 B | 6.03 / 11.67 ms | нет чистой JS-реализации | — |
 
 Примечания:
 
 - **Ни один алгоритм больше не медленнее чистой JS-реализации**: SM3 / SM4 / ZUC и
-  подпись SM2 быстрее в 1.2–2.8×, проверка подписи SM2 — в 5.4×;
+  подпись SM2 быстрее в 1.3–2.8×, проверка подписи SM2 — в 5.9×;
 - **Большие числа в wasm-части SM2 — сырые указатели в линейной памяти** (`U256` —
   это `usize` поверх bump-арены уровня модуля, которая откатывается на каждом входе
-  в экспортируемую функцию); поверх этого сделано три вещи:
+  в экспортируемую функцию); поверх этого сделано четыре вещи:
   1. **Приведение в простом поле p по схеме Солинаса** — p = 2^256−2^224−2^96+2^64−1
      псевдо-мерсенново, поэтому после разложения 2^256 ≡ 2^224+2^96−2^64+1 приведение
      состоит только из сложений, вычитаний и сдвигов, без умножений вообще;
@@ -704,8 +710,12 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   3. **Скалярное умножение идёт двумя путями**: для фиксированной базовой точки —
      comb-таблица (w=5, 32 записи; 51 удвоение + 52 сложения), для произвольной точки —
      wNAF (w=5, сложений ~128 → ~43). Таблица строится лениво один раз и кэшируется в
-     постоянной области вне арены.
-  Итого: подпись 6.10 ms → 287 µs (21×), вывод открытого ключа 2.96 ms → 125 µs (23×);
+     постоянной области вне арены;
+  4. **Операции над точками полностью на месте**: удвоение и сложение пишут в
+     модульные scratch-буферы вместо `new U256` на каждую операцию плюс `JPoint`
+     (одно удвоение стоило ~11 выделений в куче, а скалярное умножение вызывает его
+     сотни раз).
+  Итого: подпись 6.10 ms → 263 µs (23×), вывод открытого ключа 2.96 ms → 113 µs (26×);
 - **Компромиссы**: comb применим только к фиксированной базовой точке, Солинас — только
   к псевдо-мерсенновым модулям: скалярный модуль n у SM2 и p/n у SM9 не такой формы
   (там по-прежнему Барретт), а чтобы ускорить SM9 дальше, нужен Монтгомери — то есть

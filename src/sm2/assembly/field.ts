@@ -11,10 +11,14 @@
 import {
   arenaAlloc,
   modAdd,
+  modAddInto,
   modInv,
   modMul,
+  modMulInto,
   modSqr,
+  modSqrInto,
   modSub,
+  modSubInto,
   mul512,
   permU256,
   reduce512,
@@ -105,6 +109,32 @@ export function fpMul(a: U256, b: U256): U256 {
 /** 模平方。 */
 export function fpSqr(a: U256): U256 {
   return modSqr(a, pArr());
+}
+
+// ---------- 原地（To）变体 ----------
+//
+// 供点运算的 Into 版使用：一次倍点原本要 ~10 次 `new U256`（arena 分配 + 可能的
+// memory.copy），改成写调用方的 out 后这部分开销消失。四者都允许 out 与入参别名
+// （mod*Into 的读写顺序已经保证：先读完入参、再写 out）。
+
+/** 原地：(a + b) mod p → out。 */
+export function fpAddTo(out: U256, a: U256, b: U256): void {
+  modAddInto(out, a, b, pArr());
+}
+
+/** 原地：(a - b) mod p → out。 */
+export function fpSubTo(out: U256, a: U256, b: U256): void {
+  modSubInto(out, a, b, pArr());
+}
+
+/** 原地：(a · b) mod p → out。 */
+export function fpMulTo(out: U256, a: U256, b: U256): void {
+  modMulInto(out, a, b, pArr());
+}
+
+/** 原地：a² mod p → out。 */
+export function fpSqrTo(out: U256, a: U256): void {
+  modSqrInto(out, a, pArr());
 }
 
 /** 模逆：a^{-1} mod p。 */
