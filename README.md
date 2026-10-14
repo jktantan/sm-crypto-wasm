@@ -1,5 +1,26 @@
 # sm-crypto-wasm
 
+[🇨🇳 中文](#zh-阅读下面的中文文档) · [🇺🇸 English](#en-english-documentation) · [🇷🇺 Русский](#ru-документация-на-русском)
+
+Chinese cryptography standards (**SM2 / SM3 / SM4 / SM9 / ZUC**) implemented in
+**AssemblyScript → WebAssembly**. Works on Node 18+ and modern browsers (incl.
+Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
+
+- **Performance**: elliptic curves and bilinear pairings run in WASM, ~10×
+  faster than pure-JS implementations;
+- **Zero toolchain**: the published artifact is `.wasm` + a thin TS shim; users
+  do not need `node-gyp`, Rust, or a compiler;
+- **Runtime-agnostic**: the same API works in Node, browsers, and Workers;
+- **Standards-aligned**: implementations follow the GM/T 0003 / 0004 / 0002 /
+  0044 / 0001 series, cross-validated against official test vectors and
+  OpenSSL / GmSSL / gmkitx.
+
+---
+
+## zh 阅读下面的中文文档
+
+# sm-crypto-wasm
+
 国密算法（SM2 / SM3 / SM4 / SM9 / ZUC）的 **AssemblyScript → WebAssembly** 实现，Node 18+ 与现代浏览器（含 Web Worker）均可使用，按算法分包、按需懒加载。
 
 - **性能**：椭圆曲线与双线性对跑在 WASM 里，比纯 JS 实现快一个数量级；
@@ -242,3 +263,592 @@ pnpm typecheck      # tsc --noEmit
 
 - [GmSSL](https://github.com/guanzhi/GmSSL) —— SM2 / SM9 的算法语义与命名对齐基准；
 - [gmkit / gmkitx](https://github.com/gmkits/gmkit) —— ZUC 实现的移植来源。
+
+---
+
+<details>
+<summary><h2 id="en-english-documentation" style="display:inline-block">🇺🇸 English</h2></summary>
+
+# sm-crypto-wasm
+
+An **AssemblyScript → WebAssembly** implementation of Chinese cryptography
+standards (**SM2 / SM3 / SM4 / SM9 / ZUC**). Runs on Node 18+ and modern
+browsers (including Web Workers). Algorithms are split into sub-packages and
+lazy-loaded on demand.
+
+- **Performance**: elliptic curves and bilinear pairings run inside WASM,
+  roughly an order of magnitude faster than pure-JS implementations;
+- **Zero toolchain**: the published artifact is `.wasm` plus a thin TS shim;
+  users don't need `node-gyp`, Rust, or a compiler;
+- **Runtime-agnostic**: the same API works in Node, browsers, and Workers;
+- **Standards-aligned**: implementations follow the GM/T 0003 / 0004 / 0002 /
+  0044 / 0001 series and are cross-checked against official vectors using
+  OpenSSL / GmSSL / gmkitx.
+
+---
+
+## Installation
+
+```bash
+pnpm add sm-crypto-wasm
+# or: npm i sm-crypto-wasm / yarn add sm-crypto-wasm
+```
+
+Requires Node **>= 18** (browsers must support WebAssembly and
+`crypto.getRandomValues`).
+
+---
+
+## Quick Start
+
+> **Call `await algo.ensureLoaded()` once before the first use of each
+> algorithm.** Instantiating a WASM module is asynchronous; afterwards every
+> business function is synchronous. Only the `.wasm` files you actually use
+> are downloaded.
+
+### SM3 — hash & HMAC
+
+```ts
+import { sm3 } from 'sm-crypto-wasm';
+
+await sm3.ensureLoaded();
+sm3.hash('616263');                          // '66c7f0f4…8f4ba8e0' — hex input is decoded byte-wise
+sm3.hash(new Uint8Array([0x61, 0x62, 0x63])); // same output; byte input is the most ergonomic
+sm3.hmac('00112233445566778899aabbccddeeff', '616263');
+```
+
+### SM4 — symmetric encryption (ECB / CBC / CTR / CFB / OFB / GCM)
+
+```ts
+import { sm4 } from 'sm-crypto-wasm';
+
+await sm4.ensureLoaded();
+const key   = '0123456789abcdeffedcba9876543210';
+const iv    = '000102030405060708090a0b0c0d0e0f';
+const msg16 = '00112233445566778899aabbccddeeff';  // 16 bytes
+const aad   = 'aabbccdd';                          // additional authenticated data (hex)
+
+sm4.encryptECB(key, msg16);                    // ECB has no padding; input must be a multiple of 16 bytes
+sm4.encryptCBC(key, iv, '616263');             // CBC uses PKCS#7 padding; any length is fine
+sm4.decryptCBC(key, iv, sm4.encryptCBC(key, iv, '616263'));
+sm4.encryptCTR(key, iv, '616263');             // CTR / OFB are stream modes (aliases of cryptCTR / cryptOFB)
+const { ct, tag } = sm4.encryptGCM(key, iv, '616263', aad);
+sm4.decryptGCM(key, iv, ct, tag, aad);         // throws DecryptionError on auth failure; pass { safeMode: true } to suppress
+```
+
+### SM2 — key generation / signature / verification / encryption
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+const { privateKeyPem, publicKeyPem } = await sm2.generateKeyPair();  // async; returns PKCS#8 / SPKI PEM
+
+const sig = sm2.sign(privateKeyPem, '616263');          // default SM3withSM2; output is r||s as hex
+sm2.verify(publicKeyPem, '616263', sig);                // → true
+
+const ct  = sm2.encrypt(publicKeyPem, '616263');                  // default C1C3C2
+const ct2 = sm2.encrypt(publicKeyPem, '616263', { outputFormat: 'C1C2C3' });
+sm2.decrypt(privateKeyPem, ct);                         // decrypt side auto-detects C1C3C2 / C1C2C3
+sm2.decrypt(privateKeyPem, ct, { safeMode: true });     // returns null instead of throwing on failure
+```
+
+Keys may also be passed as raw hex / `Uint8Array` (32-byte private key, 64- or
+65-byte public key).
+
+### SM2 — key exchange (GM/T 0003.3)
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+const A = await sm2.generateKeyPair();
+const B = await sm2.generateKeyPair();
+
+const alice = await sm2.createExchangeInitiator(A.privateKeyPem, B.publicKeyPem, {
+  idSelf: 'Alice', idPeer: 'Bob',
+});
+const bob = await sm2.createExchangeResponder(B.privateKeyPem, A.publicKeyPem, {
+  idSelf: 'Bob', idPeer: 'Alice',
+});
+
+const r1 = alice.initiate();      // initiator → responder, round 1
+const r2 = bob.respond(r1);       // responder → initiator, reply
+const r3 = alice.confirm(r2);     // initiator confirmation (carries S_A for the responder to verify)
+
+alice.getSharedKey(r3);           // both sides derive the same shared secret
+bob.getSharedKey(r3);
+```
+
+### SM9 — sign / encrypt / KEM (GM/T 0044)
+
+```ts
+import { sm9 } from 'sm-crypto-wasm';
+
+// SM9 has two master keys (distinguished by purpose): the sign master uses a
+// G2 master public key, the encrypt master uses a G1 master public key.
+const signKp = await sm9.generateKeyPair({ id: 'alice@foo.com' });                 // default purpose: 'sign'
+const encKp  = await sm9.generateKeyPair({ id: 'alice@foo.com', purpose: 'enc' });
+
+const sig = sm9.sign(signKp.masterPrivatePem, 'alice@foo.com', '616263');
+sm9.verify(signKp.masterPublicPem, 'alice@foo.com', '616263', sig);
+// The first argument of verify / encrypt also accepts the master private key (legacy shape).
+
+const ct = sm9.encrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
+sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);      // → '616263'
+
+// Key encapsulation (KEM): negotiate a symmetric key without sending a message.
+// Note the first parameter is the *encryption master private key* (KEM needs it to
+// derive Ppub-e; encrypt() above can take a master public key instead).
+const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
+sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // === key
+```
+
+### ZUC — EEA3 confidentiality + EIA3 integrity
+
+```ts
+import { zuc } from 'sm-crypto-wasm';
+
+await zuc.ensureLoaded();
+const key = '000102030405060708090a0b0c0d0e0f';
+const iv  = '00000000000000000000000000000000';
+
+zuc.zucKeystream(key, iv, 16);                  // keystream (Uint8Array)
+zuc.zucEncrypt(key, iv, '616263');              // EEA3 — each (key, iv, counter) may be encrypted once
+zuc.zucDecrypt(key, iv, ct);                    // decryption (exempt from the reuse guard)
+
+// EIA3 integrity tag (32-bit); IV is assembled from COUNT / BEARER / DIRECTION
+const macIv = zuc.zucEia3Iv(0x66035492, 0x0f, 0);
+zuc.zucMac(key, macIv, '616263');               // → 4-byte tag
+```
+
+---
+
+## API at a glance
+
+| Module | Functions |
+|---|---|
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm3` | `hash` · `hmac` |
+| `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
+| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
+
+Documented aliases (they point to the same implementation):
+`sm4.encryptCTR` / `decryptCTR` alias `cryptCTR`,
+`encryptOFB` / `decryptOFB` alias `cryptOFB`;
+`zuc.encrypt` / `decrypt` / `generateKeystream` / `mac` / `eia3` alias
+`zucEncrypt` / `zucDecrypt` / `zucKeystream` / `zucMac`.
+
+---
+
+## Using a single algorithm (sub-path imports)
+
+For size-sensitive scenarios, you can skip the aggregated entry point and
+load just the `.wasm` you need:
+
+```ts
+import { hash } from 'sm-crypto-wasm/sm3';
+import { encryptCBC } from 'sm-crypto-wasm/sm4';
+```
+
+Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+
+---
+
+## Cross-runtime
+
+| Environment | Notes |
+|---|---|
+| Node 18+ | reads `dist/<algo>/<algo>.wasm` via `fs/promises` |
+| Browser / Vite / Webpack | `fetch(new URL('./<algo>.wasm', import.meta.url))`; the bundler rewrites the URL |
+| Web Worker | the loader is DOM-free and works inside a Worker |
+| Deno / Bun | follows the Node path |
+
+Strict-streaming WASM environments such as Cloudflare Workers / Vercel Edge
+are **out of scope**.
+
+---
+
+## Error handling
+
+All "rejected because of input" errors are subclasses of `SmCryptoError`, in
+two branches:
+
+```ts
+import { SmCryptoError, InvalidKeyError, InvalidPublicKeyError,
+         CiphertextError, InvalidCiphertextError, DecryptionError } from 'sm-crypto-wasm';
+
+try {
+  sm2.decrypt(priv, ct);
+} catch (e) {
+  if (e instanceof DecryptionError) { /* ciphertext / key mismatch */ }
+  else if (e instanceof CiphertextError) { /* structure or validation issue */ }
+  else if (e instanceof InvalidKeyError) { /* key format / length / curve */ }
+  else throw e;
+}
+```
+
+- Key branch: `InvalidKeyError` (with `InvalidPublicKeyError` as a subclass);
+- Ciphertext branch: `CiphertextError` (with `InvalidCiphertextError` for
+  structural errors and `DecryptionError` for validation failures);
+- Type or range problems (e.g. length caps, invalid enum values) keep the
+  host's native `TypeError` / `RangeError`.
+
+---
+
+## Security notes
+
+- **The library uses only the host's RNG**: `crypto.getRandomValues`
+  (browsers / Node 19+) or the Node 18 `node:crypto` shim. **No RNG is
+  implemented inside the library.**
+- **No disk writes, no logs of private keys**: the library never serializes
+  keys to disk or to logs.
+- **ZUC reuse guard**: encrypting twice with the same `(key, iv, counter)`
+  throws (keystream reuse is a confidentiality breach). If you manage the
+  counter yourself, you can disable the guard globally with
+  `configureReuseGuard({ enabled: false })` or per call via `{ reuseGuard: false }`.
+- **SM2 public-key validity**: `encrypt` throws `InvalidPublicKeyError` for
+  points not on the curve; `verify` simply returns `false`.
+- No integration with crypto hardware / HSM / PKCS#11 / soft-cert handles;
+  no key parsing outside PEM.
+
+---
+
+## Development
+
+```bash
+pnpm install
+pnpm build          # asc (5 .wasm files) + tsc → dist/
+pnpm test           # Node runner (vitest)
+pnpm test:browser   # browser runner (happy-dom)
+pnpm bench          # mitata micro-benchmarks (5 algorithm blocks)
+pnpm lint           # biome (lint + format)
+pnpm typecheck      # tsc --noEmit
+```
+
+Files under `src/**/assembly/**` are AssemblyScript sources compiled by
+`asc`. **Do not** use `import { type X }` in those files or let the
+formatter reorder imports — `asc` 0.28 doesn't recognize the type modifier
+(those rules are already turned off for the directory in the biome config).
+
+Each `src/*/assembly/` directory contains a single-line `tsconfig.json`
+that just `extends` the root `tsconfig.assembly.json`. It pulls in the AS
+type definitions **only so that IDEs type-check these files with AS
+semantics** — otherwise editing them reports `TS2304` for things like
+`usize`, `u32`, `StaticArray`. The root `tsconfig.json` `exclude`s the
+directory, so the CLI `tsc` doesn't touch them; these per-directory
+configs don't affect the build or typecheck.
+
+---
+
+## License
+
+[Apache-2.0](./LICENSE).
+
+The algorithm implementations in this project reference or are ported from
+the following Apache-2.0 projects; attribution details are in [`NOTICE`](./NOTICE):
+
+- [GmSSL](https://github.com/guanzhi/GmSSL) — the alignment baseline for
+  SM2 / SM9 semantics and naming;
+- [gmkit / gmkitx](https://github.com/gmkits/gmkit) — the source the ZUC
+  implementation was ported from.
+
+</details>
+
+---
+
+<details>
+<summary><h2 id="ru-документация-на-русском" style="display:inline-block">🇷🇺 Русский</h2></summary>
+
+# sm-crypto-wasm
+
+Реализация китайских криптографических стандартов (**SM2 / SM3 / SM4 / SM9 /
+ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ и в
+современных браузерах (включая Web Workers). Алгоритмы разделены по
+подпакетам и подгружаются лениво.
+
+- **Производительность**: эллиптические кривые и билинейные спаривания
+  выполняются в WASM — примерно на порядок быстрее, чем чистый JS;
+- **Без инструментария**: на выходе `.wasm` плюс тонкая TS-прослойка;
+  пользователю не нужны `node-gyp`, Rust или компилятор;
+- **Кросс-рантайм**: один и тот же API работает в Node, браузере и
+  Worker'е;
+- **Соответствие стандартам**: реализации следуют серии GM/T 0003 / 0004 /
+  0002 / 0044 / 0001 и сверяются с официальными векторами через
+  OpenSSL / GmSSL / gmkitx.
+
+---
+
+## Установка
+
+```bash
+pnpm add sm-crypto-wasm
+# либо: npm i sm-crypto-wasm / yarn add sm-crypto-wasm
+```
+
+Требуется Node **>= 18** (в браузере — поддержка WebAssembly и
+`crypto.getRandomValues`).
+
+---
+
+## Быстрый старт
+
+> **Перед первым использованием каждого алгоритма нужен
+> `await algo.ensureLoaded()`** — инстанцирование WASM-модуля
+> асинхронное; после него все рабочие функции синхронные. Загружаются
+> только те `.wasm`, которые вы реально используете.
+
+### SM3 — хеш и HMAC
+
+```ts
+import { sm3 } from 'sm-crypto-wasm';
+
+await sm3.ensureLoaded();
+sm3.hash('616263');                          // '66c7f0f4…8f4ba8e0' — hex-строка декодируется побайтово
+sm3.hash(new Uint8Array([0x61, 0x62, 0x63])); // тот же результат; байтовый ввод удобнее всего
+sm3.hmac('00112233445566778899aabbccddeeff', '616263');
+```
+
+### SM4 — симметричное шифрование (ECB / CBC / CTR / CFB / OFB / GCM)
+
+```ts
+import { sm4 } from 'sm-crypto-wasm';
+
+await sm4.ensureLoaded();
+const key   = '0123456789abcdeffedcba9876543210';
+const iv    = '000102030405060708090a0b0c0d0e0f';
+const msg16 = '00112233445566778899aabbccddeeff';  // 16 байт
+const aad   = 'aabbccdd';                          // дополнительные аутентифицируемые данные (hex)
+
+sm4.encryptECB(key, msg16);                    // ECB без паддинга: ввод должен быть кратен 16 байтам
+sm4.encryptCBC(key, iv, '616263');             // CBC с PKCS#7-паддингом; допустима любая длина
+sm4.decryptCBC(key, iv, sm4.encryptCBC(key, iv, '616263'));
+sm4.encryptCTR(key, iv, '616263');             // CTR/OFB — потоковые режимы (алиасы cryptCTR / cryptOFB)
+const { ct, tag } = sm4.encryptGCM(key, iv, '616263', aad);
+sm4.decryptGCM(key, iv, ct, tag, aad);         // при ошибке аутентификации бросает DecryptionError; можно передать { safeMode: true }
+```
+
+### SM2 — генерация ключей / подпись / проверка / шифрование
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+const { privateKeyPem, publicKeyPem } = await sm2.generateKeyPair();  // async; возвращает PKCS#8 / SPKI PEM
+
+const sig = sm2.sign(privateKeyPem, '616263');          // по умолчанию SM3withSM2; на выходе r||s в hex
+sm2.verify(publicKeyPem, '616263', sig);                // → true
+
+const ct  = sm2.encrypt(publicKeyPem, '616263');                  // по умолчанию C1C3C2
+const ct2 = sm2.encrypt(publicKeyPem, '616263', { outputFormat: 'C1C2C3' });
+sm2.decrypt(privateKeyPem, ct);                         // на стороне расшифровки автоматически распознаётся C1C3C2 / C1C2C3
+sm2.decrypt(privateKeyPem, ct, { safeMode: true });     // при ошибке возвращает null вместо исключения
+```
+
+Ключи также можно передавать как «сырой» hex или `Uint8Array` (32 байта для
+закрытого ключа, 64 или 65 байт для открытого).
+
+### SM2 — протокол обмена ключами (GM/T 0003.3)
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+const A = await sm2.generateKeyPair();
+const B = await sm2.generateKeyPair();
+
+const alice = await sm2.createExchangeInitiator(A.privateKeyPem, B.publicKeyPem, {
+  idSelf: 'Alice', idPeer: 'Bob',
+});
+const bob = await sm2.createExchangeResponder(B.privateKeyPem, A.publicKeyPem, {
+  idSelf: 'Bob', idPeer: 'Alice',
+});
+
+const r1 = alice.initiate();      // инициатор → ответчик, первое сообщение
+const r2 = bob.respond(r1);       // ответчик → инициатор, ответ
+const r3 = alice.confirm(r2);     // подтверждение инициатора (содержит S_A для проверки ответчиком)
+
+alice.getSharedKey(r3);           // обе стороны получают один и тот же общий секрет
+bob.getSharedKey(r3);
+```
+
+### SM9 — подпись / шифрование / инкапсуляция ключей (GM/T 0044)
+
+```ts
+import { sm9 } from 'sm-crypto-wasm';
+
+// В SM9 два мастер-ключа (различаются по purpose): мастер-ключ подписи
+// использует мастер-публичный ключ в G2, мастер-ключ шифрования — в G1.
+const signKp = await sm9.generateKeyPair({ id: 'alice@foo.com' });                 // по умолчанию purpose: 'sign'
+const encKp  = await sm9.generateKeyPair({ id: 'alice@foo.com', purpose: 'enc' });
+
+const sig = sm9.sign(signKp.masterPrivatePem, 'alice@foo.com', '616263');
+sm9.verify(signKp.masterPublicPem, 'alice@foo.com', '616263', sig);
+// Первый аргумент verify / encrypt также принимает мастер-приватный ключ (для обратной совместимости).
+
+const ct = sm9.encrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
+sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);      // → '616263'
+
+// Инкапсуляция ключа (KEM): согласование симметричного ключа без передачи сообщения.
+// Обратите внимание: первый аргумент — это *мастер-приватный ключ шифрования*
+// (KEM нуждается в нём, чтобы вывести Ppub-e; для encrypt выше допустим мастер-публичный ключ).
+const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
+sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // === key
+```
+
+### ZUC — конфиденциальность EEA3 и целостность EIA3
+
+```ts
+import { zuc } from 'sm-crypto-wasm';
+
+await zuc.ensureLoaded();
+const key = '000102030405060708090a0b0c0d0e0f';
+const iv  = '00000000000000000000000000000000';
+
+zuc.zucKeystream(key, iv, 16);                  // поток ключей (Uint8Array)
+zuc.zucEncrypt(key, iv, '616263');              // EEA3 — каждая тройка (key, iv, counter) может шифроваться лишь единожды
+zuc.zucDecrypt(key, iv, ct);                    // расшифровка (защита от повторного использования не действует)
+
+// Тег целостности EIA3 (32 бита); IV собирается из COUNT / BEARER / DIRECTION
+const macIv = zuc.zucEia3Iv(0x66035492, 0x0f, 0);
+zuc.zucMac(key, macIv, '616263');               // → 4-байтовый тег
+```
+
+---
+
+## Сводка API
+
+| Модуль | Функции |
+|---|---|
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm3` | `hash` · `hmac` |
+| `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
+| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
+
+Документированные алиасы (указывают на ту же реализацию):
+`sm4.encryptCTR` / `decryptCTR` — алиасы `cryptCTR`,
+`encryptOFB` / `decryptOFB` — алиасы `cryptOFB`;
+`zuc.encrypt` / `decrypt` / `generateKeystream` / `mac` / `eia3` — алиасы
+`zucEncrypt` / `zucDecrypt` / `zucKeystream` / `zucMac`.
+
+---
+
+## Использование одного алгоритма (импорт по подпутям)
+
+В сценариях, критичных к размеру, можно обойти агрегированную точку входа
+и подгружать только нужный `.wasm`:
+
+```ts
+import { hash } from 'sm-crypto-wasm/sm3';
+import { encryptCBC } from 'sm-crypto-wasm/sm4';
+```
+
+Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+
+---
+
+## Кросс-рантайм
+
+| Среда | Примечания |
+|---|---|
+| Node 18+ | читает `dist/<algo>/<algo>.wasm` через `fs/promises` |
+| Браузер / Vite / Webpack | `fetch(new URL('./<algo>.wasm', import.meta.url))`; бандлер переписывает URL |
+| Web Worker | загрузчик не зависит от DOM и работает внутри Worker'а |
+| Deno / Bun | идут по Node-пути |
+
+Среды со строго потоковой загрузкой WASM, такие как Cloudflare Workers /
+Vercel Edge, **вне области поддержки**.
+
+---
+
+## Обработка ошибок
+
+Все ошибки вида «отклонено из-за ввода» — подклассы `SmCryptoError`, в двух
+ветках:
+
+```ts
+import { SmCryptoError, InvalidKeyError, InvalidPublicKeyError,
+         CiphertextError, InvalidCiphertextError, DecryptionError } from 'sm-crypto-wasm';
+
+try {
+  sm2.decrypt(priv, ct);
+} catch (e) {
+  if (e instanceof DecryptionError) { /* шифртекст не соответствует ключу */ }
+  else if (e instanceof CiphertextError) { /* проблема структуры или валидации */ }
+  else if (e instanceof InvalidKeyError) { /* формат / длина / кривая ключа */ }
+  else throw e;
+}
+```
+
+- Ветка ключей: `InvalidKeyError` (с подклассом `InvalidPublicKeyError`);
+- Ветка шифртекста: `CiphertextError` (с подклассом
+  `InvalidCiphertextError` для структурных ошибок и `DecryptionError` —
+  для ошибок валидации);
+- Проблемы с типом или диапазоном (например, ограничения длины,
+  недопустимые значения перечислений) сохраняют нативные `TypeError` /
+  `RangeError` среды исполнения.
+
+---
+
+## Замечания по безопасности
+
+- **Используется только ГПСЧ среды исполнения**: `crypto.getRandomValues`
+  (браузеры / Node 19+) либо `node:crypto`-shim для Node 18. **Собственный
+  ГПСЧ в библиотеке не реализован.**
+- **Закрытые ключи не пишутся на диск и не журналируются**: библиотека
+  не выполняет никакой сериализации ключей на диск и не пишет их в логи.
+- **Защита от повторного использования ZUC**: повторное шифрование с той
+  же тройкой `(key, iv, counter)` приводит к исключению (повторное
+  использование потока ключей — инцидент конфиденциальности). Если
+  счётчик ведётся внешне, защиту можно отключить глобально через
+  `configureReuseGuard({ enabled: false })` либо разово передав
+  `{ reuseGuard: false }`.
+- **Корректность открытого ключа SM2**: `encrypt` бросает
+  `InvalidPublicKeyError` для точек вне кривой; `verify` возвращает
+  просто `false`.
+- Нет интеграции с криптографическим оборудованием / HSM / PKCS#11 /
+  программными сертификатами; форматы ключей за пределами PEM не
+  разбираются.
+
+---
+
+## Разработка
+
+```bash
+pnpm install
+pnpm build          # asc (5 .wasm-файлов) + tsc → dist/
+pnpm test           # Node-раннер (vitest)
+pnpm test:browser   # браузерный раннер (happy-dom)
+pnpm bench          # микро-бенчмарки mitata (5 блоков алгоритмов)
+pnpm lint           # biome (lint + format)
+pnpm typecheck      # tsc --noEmit
+```
+
+Файлы в `src/**/assembly/**` — это исходники AssemblyScript, компилируемые
+`asc`. **Не используйте** в них `import { type X }` и не позволяйте
+форматтеру переставлять импорты — `asc` 0.28 не понимает модификатор типа
+(соответствующие правила уже отключены для этого каталога в конфиге
+biome).
+
+В каждом каталоге `src/*/assembly/` лежит одно-строчный `tsconfig.json`,
+который лишь `extends` корневой `tsconfig.assembly.json`. Он подтягивает
+определения типов AS **исключительно ради того, чтобы IDE проверяла эти
+файлы по семантике AS** — иначе при редактировании появляется `TS2304`
+для `usize`, `u32`, `StaticArray` и т. п. Корневой `tsconfig.json`
+`exclude`ит этот каталог, поэтому CLI-`tsc` их не трогает; эти
+конфигурации не влияют ни на сборку, ни на проверку типов.
+
+---
+
+## Лицензия
+
+[Apache-2.0](./LICENSE).
+
+Реализации алгоритмов в этом проекте ссылаются на или портированы из
+следующих проектов под Apache-2.0; сведения об авторстве — в
+[`NOTICE`](./NOTICE):
+
+- [GmSSL](https://github.com/guanzhi/GmSSL) — базовый источник семантики
+  и наименований SM2 / SM9;
+- [gmkit / gmkitx](https://github.com/gmkits/gmkit) — источник, из
+  которого портирована реализация ZUC.
+
+</details>
