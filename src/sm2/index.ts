@@ -9,7 +9,7 @@
  * - `decrypt(privateKey, ciphertext)`：解密
  *
  * 说明：
- * - 当前返回/接受 64/65 字节的裸字节（hex）密钥与密文。
+ * - 密钥输入同时接受裸字节（hex）与 PEM（PKCS#8/SEC1 私钥、SPKI 公钥）。
  * - PEM 编解码（PKCS#8/SPKI）在 `src/pem/` 已有基础；高层 PEM API 见后续迭代。
  * - **随机数一律走宿主 CSPRNG**（`src/runtime/random.ts`）。
  *
@@ -18,6 +18,7 @@
 import { loadWasm } from '../runtime/loadWasm.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
+import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -74,8 +75,7 @@ function putHex(hex: string, ptr: number, len: number): void {
  * @returns 公钥 hex（128 字符，x || y）。
  */
 export function getPublicKey(privateKey: string | Uint8Array): string {
-  const d = toBytes(privateKey, 'privateKey');
-  if (d.length !== 32) throw new RangeError('sm2: privateKey must be 32 bytes');
+  const d = toPrivateKeyBytes(privateKey);
   const { exports } = getModule();
   const dp = exports.alloc(32);
   const op = exports.alloc(64);
@@ -89,9 +89,7 @@ export function getPublicKey(privateKey: string | Uint8Array): string {
 }
 
 function splitPub(pub: string | Uint8Array): { x: Uint8Array; y: Uint8Array } {
-  let b = toBytes(pub, 'publicKey');
-  if (b.length === 65 && b[0] === 0x04) b = b.subarray(1);
-  if (b.length !== 64) throw new RangeError('sm2: publicKey must be 64 or 65 bytes');
+  const b = toPublicKeyBytes(pub);
   return { x: b.subarray(0, 32), y: b.subarray(32, 64) };
 }
 
@@ -112,9 +110,8 @@ function randomK(): Uint8Array {
  * @returns 64 字节签名（r || s）的 hex。
  */
 export function sign(privateKey: string | Uint8Array, message: string | Uint8Array): string {
-  const d = toBytes(privateKey, 'privateKey');
+  const d = toPrivateKeyBytes(privateKey);
   const m = toBytes(message, 'message');
-  if (d.length !== 32) throw new RangeError('sm2: privateKey must be 32 bytes');
   const pub = toBytes(getPublicKey(d), 'pub');
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);
@@ -215,9 +212,8 @@ export function encrypt(publicKey: string | Uint8Array, message: string | Uint8A
  * @returns 明文的 hex。
  */
 export function decrypt(privateKey: string | Uint8Array, ciphertext: string | Uint8Array): string {
-  const d = toBytes(privateKey, 'privateKey');
+  const d = toPrivateKeyBytes(privateKey);
   const ct = toBytes(ciphertext, 'ciphertext');
-  if (d.length !== 32) throw new RangeError('sm2: privateKey must be 32 bytes');
   if (ct.length < 97) throw new RangeError('sm2: ciphertext too short');
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);
@@ -235,3 +231,7 @@ export function decrypt(privateKey: string | Uint8Array, ciphertext: string | Ui
     exports.freeAll();
   }
 }
+
+// SM2 密钥交换协议（GM/T 0003.3-2014）：createExchangeInitiator /
+// createExchangeResponder 由 `./exchange` 提供，在此并入 sm2 命名空间。
+export * from './exchange.js';

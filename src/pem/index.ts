@@ -3,4 +3,5 @@
  */
 export * from './asn1.js';
 export * from './pkcs8.js';
+export * from './sm2.js';
 export * from './sm9.js';

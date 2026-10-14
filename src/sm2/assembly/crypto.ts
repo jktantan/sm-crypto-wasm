@@ -16,7 +16,7 @@ import {
   fpAdd, fpSub, fpMul,
   pArr,
 } from './field';
-import { JPoint, basePoint, scalarMul, scalarMulG, toAffine, infinity, addPoints } from './point';
+import { JPoint, basePoint, scalarMul, scalarMulG, toAffine, infinity, addPoints, isInfinity } from './point';
 import { addModN, subModN, mulModN, invModN, nArr } from './modn';
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
 
@@ -376,4 +376,123 @@ export function kdf(zPtr: usize, zLen: usize, outPtr: usize, klen: usize): i32 {
     ct++;
   }
   return allZero ? 0 : 1;
+}
+
+// ---------- 密钥交换（GM/T 0003.3-2014 §6.4，对齐 GmSSL src/sm2_exch.c） ----------
+//
+// U = t · (P_peer + x̄(R_peer)·R_peer)，其中 t = (x̄(R_self)·r_self + d) mod n。
+// x̄(x) = 2^127 + (x mod 2^127)：x 的低 128 位置其最高位为 1，高 128 位清零。
+//
+// 说明：确认值与共享密钥的协议视角映射（ZA/ZB/RA/RB 恒按「发起方 A 在前」排列，
+// S_A/S_B 仅前缀不同）由 TS 门面层负责，本层只做纯运算，与 GmSSL 的
+// sm2_key_exchange / sm2_key_exchange_compute_confirm 语义一一对应。
+
+/** x̄ = 2^127 + (x mod 2^127)。 */
+function xHat(x: U256): U256 {
+  const r = new StaticArray<u32>(8);
+  r[0] = x[0];
+  r[1] = x[1];
+  r[2] = x[2];
+  r[3] = (x[3] & 0x7fffffff) | <u32>0x80000000; // bit127 置 1
+  r[4] = 0;
+  r[5] = 0;
+  r[6] = 0;
+  r[7] = 0;
+  return r;
+}
+
+/** 从内存读仿射点（x || y，各 32 字节大端）为 Jacobian 点（Z = 1）。 */
+function affinePoint(xyPtr: usize): JPoint {
+  const p = new JPoint();
+  p.x = ld(xyPtr);
+  p.y = ld(xyPtr + 32);
+  const one = u256zero();
+  one[0] = 1;
+  p.z = one;
+  return p;
+}
+
+/**
+ * 密钥交换共享点 U = t·(P_peer + x̄(R_peer)·R_peer)。
+ *
+ * @param privPtr 本端静态私钥 d（32 字节）。
+ * @param rSelfPtr 本端临时私钥 r（32 字节）。
+ * @param rSelfXYPtr 本端临时公钥 R_self（x || y，64 字节）。
+ * @param peerPubXYPtr 对端静态公钥 P_peer（x || y，64 字节）。
+ * @param peerRXYPtr 对端临时公钥 R_peer（x || y，64 字节）。
+ * @param outPtr 输出 U（65 字节：04 || x || y）。
+ * @returns 1 成功；0 出现无穷远点（调用方需重试）。
+ */
+export function kexComputeU(
+  privPtr: usize, rSelfPtr: usize,
+  rSelfXYPtr: usize, peerPubXYPtr: usize, peerRXYPtr: usize,
+  outPtr: usize,
+): i32 {
+  const d = ld(privPtr);
+  const r = ld(rSelfPtr);
+  const xSelf = xHat(ld(rSelfXYPtr));
+  const xPeer = xHat(ld(peerRXYPtr));
+
+  // t = (x̄(R_self)·r + d) mod n
+  const t = addModN(mulModN(xSelf, r), d);
+
+  // point = P_peer + x̄(R_peer)·R_peer
+  const peerPub = affinePoint(peerPubXYPtr);
+  const peerR = affinePoint(peerRXYPtr);
+  const sum = addPoints(peerPub, scalarMul(xPeer, peerR));
+  if (isInfinity(sum)) return 0;
+
+  // U = t · point
+  const u = scalarMul(t, sum);
+  if (isInfinity(u)) return 0;
+
+  const aff = toAffine(u);
+  store<u8>(outPtr, 0x04);
+  st(aff.x, outPtr + 1);
+  st(aff.y, outPtr + 33);
+  return 1;
+}
+
+/**
+ * 密钥交换确认值 S = SM3(prefix || Uy || SM3(Ux || ZA || ZB || RA || RB))。
+ *
+ * ZA/ZB/RA/RB 恒按「发起方 A 在前」的协议视角传入；S_A 用 prefix = 0x03、
+ * S_B 用 prefix = 0x02（与 GmSSL sm2_key_exchange_compute_confirm 一致）。
+ *
+ * @param prefix 0x03（发起方）或 0x02（响应方）。
+ * @param uPtr U（65 字节：04 || x || y）。
+ * @param zaPtr ZA（32 字节）。
+ * @param zbPtr ZB（32 字节）。
+ * @param raXYPtr RA（x || y，64 字节）。
+ * @param rbXYPtr RB（x || y，64 字节）。
+ * @param outPtr 输出 S（32 字节）。
+ */
+export function kexConfirm(
+  prefix: i32,
+  uPtr: usize, zaPtr: usize, zbPtr: usize,
+  raXYPtr: usize, rbXYPtr: usize,
+  outPtr: usize,
+): void {
+  // inner = SM3(Ux || ZA || ZB || RA(64) || RB(64))
+  const inner = new StaticArray<u8>(32);
+  const innerLen = 32 + 32 + 32 + 64 + 64;
+  const buf = new StaticArray<u8>(innerLen);
+  let off = 0;
+  for (let i = 0; i < 32; i++) buf[off + i] = load<u8>(uPtr + 1 + i); // Ux（跳过 04 前缀）
+  off = 32;
+  for (let i = 0; i < 32; i++) buf[off + i] = load<u8>(zaPtr + i);
+  off = 64;
+  for (let i = 0; i < 32; i++) buf[off + i] = load<u8>(zbPtr + i);
+  off = 96;
+  for (let i = 0; i < 64; i++) buf[off + i] = load<u8>(raXYPtr + i);
+  off = 160;
+  for (let i = 0; i < 64; i++) buf[off + i] = load<u8>(rbXYPtr + i);
+  sm3HashInto(changetype<usize>(buf), innerLen, changetype<usize>(inner));
+
+  // out = SM3(prefix || Uy || inner)
+  const out2 = new StaticArray<u8>(1 + 32 + 32);
+  out2[0] = <u8>prefix;
+  for (let i = 0; i < 32; i++) out2[1 + i] = load<u8>(uPtr + 33 + i); // Uy
+  for (let i = 0; i < 32; i++) out2[33 + i] = inner[i];
+  sm3HashInto(changetype<usize>(out2), 1 + 32 + 32, outPtr);
 }

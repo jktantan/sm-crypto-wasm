@@ -24,7 +24,7 @@ import {
   reduce512Debug,
 } from './field';
 import { JPoint, basePoint, scalarMulG, toAffine, scalarMul } from './point';
-import { computeZ, computeZDefaultId, sign, verify, kdf, encrypt, decrypt } from './crypto';
+import { computeZ, computeZDefaultId, sign, verify, kdf, encrypt, decrypt, kexComputeU, kexConfirm } from './crypto';
 
 const pinned: Array<StaticArray<u8>> = [];
 
@@ -163,4 +163,37 @@ export function encryptOut(
 /** SM2 解密：ctLen = 97 + ml。返回 1 成功（C3 校验过）。 */
 export function decryptOut(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usize): i32 {
   return decrypt(privPtr, ctPtr, ctLen, outPtr);
+}
+
+// ---------- 密钥交换（供 TS 门面调用） ----------
+
+/** 计算 Z 值（自定义 ID）：out = Z(IDA ‖ P)。 */
+export function computeZIdOut(
+  pubXPtr: usize, pubYPtr: usize, idPtr: usize, idLen: usize, outPtr: usize,
+): void {
+  computeZ(pubXPtr, pubYPtr, idPtr, idLen, outPtr);
+}
+
+/**
+ * 密钥交换共享点 U（65 字节：04 || x || y）。
+ *
+ * @param rSelfXYPtr 本端临时公钥 R_self（x || y，64 字节）。
+ * @param peerPubXYPtr 对端静态公钥 P_peer（x || y，64 字节）。
+ * @param peerRXYPtr 对端临时公钥 R_peer（x || y，64 字节）。
+ * @returns 1 成功；0 无穷远点。
+ */
+export function kexComputeUOut(
+  privPtr: usize, rSelfPtr: usize,
+  rSelfXYPtr: usize, peerPubXYPtr: usize, peerRXYPtr: usize,
+  outPtr: usize,
+): i32 {
+  return kexComputeU(privPtr, rSelfPtr, rSelfXYPtr, peerPubXYPtr, peerRXYPtr, outPtr);
+}
+
+/** 密钥交换确认值 S（32 字节）。prefix：0x03 发起方 / 0x02 响应方。 */
+export function kexConfirmOut(
+  prefix: i32, uPtr: usize, zaPtr: usize, zbPtr: usize,
+  raXYPtr: usize, rbXYPtr: usize, outPtr: usize,
+): void {
+  kexConfirm(prefix, uPtr, zaPtr, zbPtr, raXYPtr, rbXYPtr, outPtr);
 }
