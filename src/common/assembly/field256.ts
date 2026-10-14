@@ -311,9 +311,12 @@ function sub9(a: StaticArray<u32>, b: U256): void {
   }
 }
 
-/** (a * b) mod m。 */
+/** (a * b) mod m。已知模数（SM2/SM9 的 p、n）走 Barrett 归约，否则回退多 limb 长除法。 */
 export function modMul(a: U256, b: U256, m: U256): U256 {
-  return reduce512(mul512(a, b), m);
+  const x = mul512(a, b);
+  const mu = barrettMu(m);
+  if (mu !== null) return barrettReduce(x, m, mu);
+  return reduce512(x, m);
 }
 
 /** a² mod m。 */
@@ -386,4 +389,108 @@ export function modPow(a: U256, k: U256, m: U256): U256 {
     base = modSqr(base, m);
   }
   return result;
+}
+
+// ---------- Barrett 归约（SM2/SM9 的 p、n） ----------
+//
+// μ = floor(2^512 / m)（257 bit，9 limb，预计算）。归约 = q1=x>>224；
+// q2=q1·μ；q3=q2>>288；r=x[0..8]−((q3·m)[0..8])；再减 m 到 < m。
+// 纯乘法 + 移位 + 加减，**无除法**——比通用多 limb 长除法快。
+
+const SM2_P_MU: StaticArray<u32> = [
+  0x00000003, 0x00000002, 0x00000002, 0x00000002,
+  0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+];
+const SM2_N_MU: StaticArray<u32> = [
+  0xf15149a0, 0x12ac6361, 0xfa323c01, 0x8dfc2096,
+  0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+];
+const SM9_P_MU: StaticArray<u32> = [
+  0xd5c22146, 0x71188f90, 0x1e36081c, 0xf2665f6d,
+  0xdcd1312a, 0x55f73aeb, 0xeb5759a6, 0x67980e0b, 0x00000001,
+];
+const SM9_N_MU: StaticArray<u32> = [
+  0xdfc97c2f, 0x74df4fd4, 0xc9c073b0, 0x9c95d85e,
+  0xdcd1312c, 0x55f73aeb, 0xeb5759a6, 0x67980e0b, 0x00000001,
+];
+
+/** 按模数取 Barrett 常数 μ；未知模数返回 null（回退长除法）。 */
+function barrettMu(m: U256): StaticArray<u32> | null {
+  const hi = m[7];
+  if (hi === 0xfffffffe) {
+    if (m[3] === 0xffffffff) return SM2_P_MU;
+    if (m[3] === 0x7203df6b) return SM2_N_MU;
+  } else if (hi === 0xb6400000) {
+    if (m[3] === 0x21f2934b) return SM9_P_MU;
+    if (m[3] === 0x49f2934b) return SM9_N_MU;
+  }
+  return null;
+}
+
+/** out(na+nb) = a(na) · b(nb)（schoolbook）。 */
+function mulLimbArrays(a: StaticArray<u32>, na: i32, b: StaticArray<u32>, nb: i32, out: StaticArray<u32>): void {
+  for (let i = 0; i < na + nb; i++) out[i] = 0;
+  for (let i = 0; i < na; i++) {
+    let carry: u64 = 0;
+    const ai = u64(a[i]);
+    for (let j = 0; j < nb; j++) {
+      const cur = u64(out[i + j]) + ai * u64(b[j]) + carry;
+      out[i + j] = <u32>(cur & 0xffffffff);
+      carry = cur >>> 32;
+    }
+    let k = i + nb;
+    while (carry !== 0) {
+      const cur = u64(out[k]) + carry;
+      out[k] = <u32>(cur & 0xffffffff);
+      carry = cur >>> 32;
+      k++;
+    }
+  }
+}
+
+/** Barrett 归约：x(16 limb) mod m(8 limb) → 结果 < m。 */
+function barrettReduce(x: U512, m: U256, mu: StaticArray<u32>): U256 {
+  const q1 = new StaticArray<u32>(9);
+  for (let i = 0; i < 9; i++) q1[i] = x[7 + i]; // x >> 224
+  const q2 = new StaticArray<u32>(18);
+  mulLimbArrays(q1, 9, mu, 9, q2);
+  const q3 = new StaticArray<u32>(9);
+  for (let i = 0; i < 9; i++) q3[i] = q2[9 + i]; // q2 >> 288
+  const r2 = new StaticArray<u32>(17);
+  mulLimbArrays(q3, 9, m, 8, r2);
+
+  const r = new StaticArray<u32>(10);
+  let borrow: i64 = 0;
+  for (let i = 0; i < 9; i++) {
+    const d: i64 = i64(x[i]) - i64(r2[i]) - borrow;
+    if (d < 0) {
+      r[i] = <u32>(d + 0x100000000);
+      borrow = 1;
+    } else {
+      r[i] = <u32>d;
+      borrow = 0;
+    }
+  }
+  r[9] = <u32>borrow; // r 为负时 +2^288
+
+  let guard = 0;
+  while (guard < 4 && (r[9] !== 0 || r[8] !== 0 || cmp9(r, m) >= 0)) {
+    let b: i64 = 0;
+    for (let i = 0; i < 10; i++) {
+      const mi: i64 = i < 8 ? i64(m[i]) : 0;
+      const d: i64 = i64(r[i]) - mi - b;
+      if (d < 0) {
+        r[i] = <u32>(d + 0x100000000);
+        b = 1;
+      } else {
+        r[i] = <u32>d;
+        b = 0;
+      }
+    }
+    guard++;
+  }
+
+  const out = new StaticArray<u32>(8);
+  for (let i = 0; i < 8; i++) out[i] = r[i];
+  return out;
 }
