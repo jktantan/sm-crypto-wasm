@@ -53,7 +53,8 @@
       "includes": ["src/**/assembly/**/*.ts"],
       "linter": {
         "rules": {
-          "correctness": { "useImportExtensions": "off" }
+          "correctness": { "useImportExtensions": "off" },
+          "style": { "useImportType": "off" }
         }
       }
     }

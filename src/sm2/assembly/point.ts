@@ -19,7 +19,7 @@ import {
   fpSub,
   nArr,
   pArr,
-  type U256,
+  U256,
   u256cmp,
   u256fromBytes,
   u256isZero,

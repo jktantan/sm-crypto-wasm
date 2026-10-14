@@ -19,14 +19,14 @@ import {
   u256toBytes,
 } from '../../common/assembly/field256';
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
-import { addModN, invModN, mulModN, nArr, type U256 } from './fp';
-import type { Fp2 } from './fp2';
-import type { Fp4 } from './fp4';
-import { type Fp12, fp12Mul, fp12one, fp12Pow } from './fp12';
+import { addModN, invModN, mulModN, nArr, U256 } from './fp';
+import { Fp2 } from './fp2';
+import { Fp4 } from './fp4';
+import { Fp12, fp12Mul, fp12one, fp12Pow } from './fp12';
 import { sm9Pairing } from './pairing';
 import {
   G1,
-  type G2,
+  G2,
   g1Add,
   g1Generator,
   g1Mul,

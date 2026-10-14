@@ -12,7 +12,7 @@
 // 本文件是**纯运算层**：输入输出均为线性内存指针，由 index.ts 的导出包装。
 
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
-import { type U256, u256cmp, u256fromBytes, u256isZero, u256toBytes, u256zero } from './field';
+import { U256, u256cmp, u256fromBytes, u256isZero, u256toBytes, u256zero } from './field';
 import { addModN, invModN, mulModN, nArr, subModN } from './modn';
 import { addPoints, isInfinity, JPoint, scalarMul, scalarMulG, toAffine } from './point';
 

@@ -9,7 +9,7 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { type U256, u256 } from './fp';
+import { U256, u256 } from './fp';
 import {
   fp2Conjugate,
   fp2copy,
@@ -23,7 +23,7 @@ import {
   fp2Tri,
 } from './fp2';
 import {
-  type Fp12,
+  Fp12,
   fp12Frobenius,
   fp12Frobenius2,
   fp12Frobenius3,
@@ -36,7 +36,7 @@ import {
   fp12Sqr,
   fp12zero,
 } from './fp12';
-import { type G1, type G2, g2Add, g2AddFull, g2Copy, g2Double } from './point';
+import { G1, G2, g2Add, g2AddFull, g2Copy, g2Double } from './point';
 
 // ---------- twist 点自同构 ----------
 

@@ -30,7 +30,7 @@ import {
   fpSub,
   mul512Debug,
   reduce512Debug,
-  type U256,
+  U256,
   u256fromBytes,
   u256toBytes,
 } from './field';

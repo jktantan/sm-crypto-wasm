@@ -6,9 +6,9 @@
 // 参考：GM/T 0044-2016。
 
 import { u256zero } from '../../common/assembly/field256';
-import type { U256 } from './fp';
+import { U256 } from './fp';
 import {
-  type Fp2,
+  Fp2,
   fp2Add,
   fp2Conjugate,
   fp2copy,

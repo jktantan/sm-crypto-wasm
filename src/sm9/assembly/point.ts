@@ -17,9 +17,9 @@ import {
   u256shr1,
   u256zero,
 } from '../../common/assembly/field256';
-import { fpAdd, fpDiv2, fpInv, fpMul, fpNeg, fpSqr, fpSub, pArr, type U256 } from './fp';
+import { fpAdd, fpDiv2, fpInv, fpMul, fpNeg, fpSqr, fpSub, pArr, U256 } from './fp';
 import {
-  type Fp2,
+  Fp2,
   fp2Add,
   fp2copy,
   fp2Dbl,
