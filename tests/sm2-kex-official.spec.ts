@@ -158,6 +158,18 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
       }
       return r;
     };
+    /**
+     * `mul` 的「必须非无穷远」版本。标量非零时结果不可能是无穷远点；真出现就说明
+     * 曲线参数或标量写错了 —— 抛一个带上下文的错，而不是用 `!` 把问题留到 null 上
+     * 炸出 "Cannot read properties of null"。
+     */
+    const mulDef = (k: bigint, pt: Pt): NonNullable<Pt> => {
+      const r = mul(k, pt);
+      if (r === null) {
+        throw new Error(`mul(k=0x${k.toString(16)}, pt) 返回无穷远点：标量或曲线参数有误`);
+      }
+      return r;
+    };
     const b32 = (x: bigint): Buffer => {
       const o = Buffer.alloc(32);
       for (let i = 0; i < 32; i++) o[31 - i] = Number((x >> BigInt(i * 8)) & 0xffn);
@@ -182,8 +194,8 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
       );
 
     // PA = [dA]G, PB = [dB]G
-    const PA = mul(BigInt(`0x${v.dA}`), G)!;
-    const PB = mul(BigInt(`0x${v.dB}`), G)!;
+    const PA = mulDef(BigInt(`0x${v.dA}`), G);
+    const PB = mulDef(BigInt(`0x${v.dB}`), G);
     expect(Buffer.concat([b32(PA.x), b32(PA.y)]).toString('hex')).toBe(v.pubA);
     expect(Buffer.concat([b32(PB.x), b32(PB.y)]).toString('hex')).toBe(v.pubB);
 
@@ -192,15 +204,15 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
     expect(zOf(v.idB, PB).toString('hex')).toBe(v.ZB);
 
     // RA = [rA]G, RB = [rB]G
-    const RA = mul(BigInt(`0x${v.rA}`), G)!;
-    const RB = mul(BigInt(`0x${v.rB}`), G)!;
+    const RA = mulDef(BigInt(`0x${v.rA}`), G);
+    const RB = mulDef(BigInt(`0x${v.rB}`), G);
     expect(Buffer.concat([b32(RA.x), b32(RA.y)]).toString('hex')).toBe(v.RA);
     expect(Buffer.concat([b32(RB.x), b32(RB.y)]).toString('hex')).toBe(v.RB);
 
     // U = [tA](PB + [x̄(RB.x)]RB), tA = (dA + x̄(RA.x)·rA) mod n
     const xbar = (x: bigint): bigint => (1n << 127n) | (x & ((1n << 127n) - 1n));
     const tA = mod(BigInt(`0x${v.dA}`) + mod(xbar(RA.x) * BigInt(`0x${v.rA}`), N), N);
-    const U = mul(tA, add(PB, mul(xbar(RB.x), RB)))!;
+    const U = mulDef(tA, add(PB, mul(xbar(RB.x), RB)));
     expect(Buffer.concat([b32(U.x), b32(U.y)]).toString('hex')).toBe(v.U);
 
     // S_A / S_B / K

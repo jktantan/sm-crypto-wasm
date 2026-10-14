@@ -531,7 +531,10 @@ GREEN；全量套件 112/112。
 
 ### Declined to judge
 
-- 5 条 `noNonNullAssertion` warning 保留在 tests（固定向量断言的必要写法）。
+- ~~5 条 `noNonNullAssertion` warning 保留在 tests~~ → 后续已消除：`tests/sm2-kex-official.spec.ts`
+  的 `mul(...)!` 改为 `mulDef(...)` 辅助函数（内部做 null 检查、抛带上下文的错），
+  biome warning 归零，且"返回无穷远点"这种失败从 `Cannot read properties of null`
+  变成可读的诊断信息。
 - biome 修复拆两个 commit 而非一个（便于 review）。
 
 ---
