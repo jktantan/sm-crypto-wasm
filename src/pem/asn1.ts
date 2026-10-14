@@ -33,7 +33,7 @@ export class Asn1Error extends Error {
 }
 
 const TAG_INTEGER = 0x02;
-const TAG_BIT_STRING = 0x03;
+const _TAG_BIT_STRING = 0x03;
 const TAG_OCTET_STRING = 0x04;
 const TAG_NULL = 0x05;
 const TAG_OID = 0x06;

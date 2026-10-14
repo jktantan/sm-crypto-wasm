@@ -115,7 +115,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 }
 
 /** base64 字符串 → bytes。失败抛 TypeError。 */
-export function base64ToBytes(b64: string, label = 'base64'): Uint8Array {
+export function base64ToBytes(b64: string, _label = 'base64'): Uint8Array {
   if (typeof atob === 'function') {
     const bin = atob(b64);
     const out = new Uint8Array(bin.length);

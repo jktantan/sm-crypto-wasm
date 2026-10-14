@@ -16,7 +16,7 @@ describe('SM2 vs gmkitx oracle', () => {
     const ours = sm2.getPublicKey(D);
     const ref = String(sm2GetPublicKeyFromPrivateKey(D, false)).toLowerCase();
     // oracle 带 04 前缀。
-    expect('04' + ours).toBe(ref);
+    expect(`04${ours}`).toBe(ref);
   });
 
   it('our signature verifies under ourselves', () => {
@@ -33,7 +33,7 @@ describe('SM2 vs gmkitx oracle', () => {
   });
 
   it('oracle-encrypted ciphertext decrypts with our impl', () => {
-    const pub = '04' + sm2.getPublicKey(D);
+    const pub = `04${sm2.getPublicKey(D)}`;
     const ct = String(sm2Encrypt(pub, Buffer.from(MSG, 'utf8'))).toLowerCase();
     const pt = sm2.decrypt(D, ct);
     expect(Buffer.from(pt, 'hex').toString('utf8')).toBe(MSG);
@@ -57,7 +57,7 @@ describe('SM2 vs gmkitx oracle', () => {
     // sign(PEM) → verify(PEM / 裸 hex)。
     const sig = sm2.sign(privPem, MSG);
     expect(sm2.verify(pubPem, MSG, sig)).toBe(true);
-    expect(sm2.verify('04' + pub, MSG, sig)).toBe(true);
+    expect(sm2.verify(`04${pub}`, MSG, sig)).toBe(true);
 
     // encrypt(PEM 公钥) → decrypt(PEM 私钥)。
     const ct = sm2.encrypt(pubPem, Buffer.from(MSG, 'utf8'));
@@ -147,7 +147,7 @@ describe('SM2 公钥合法性', () => {
     // x = y = 0：不在曲线（b ≠ 0），且这是仿射表示里最典型的坏点。
     expect(() => sm2.encrypt(new Uint8Array(64), ONES)).toThrow(InvalidPublicKeyError);
     // 同一坏点以 04 前缀 + hex 形式传入，也要被拒。
-    expect(() => sm2.encrypt('04' + '00'.repeat(64), ONES)).toThrow(InvalidPublicKeyError);
+    expect(() => sm2.encrypt(`04${'00'.repeat(64)}`, ONES)).toThrow(InvalidPublicKeyError);
   });
 
   it('encrypt rejects coordinates that exceed the field prime', () => {

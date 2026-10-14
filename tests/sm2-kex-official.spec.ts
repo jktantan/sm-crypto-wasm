@@ -113,10 +113,10 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
 
   it('example-curve oracle reproduces the full official transcript', () => {
     const { p, a, b, gx, gy, n } = v.curve;
-    const P = BigInt('0x' + p);
-    const A = BigInt('0x' + a);
-    const N = BigInt('0x' + n);
-    const G = { x: BigInt('0x' + gx), y: BigInt('0x' + gy) };
+    const P = BigInt(`0x${p}`);
+    const A = BigInt(`0x${a}`);
+    const N = BigInt(`0x${n}`);
+    const G = { x: BigInt(`0x${gx}`), y: BigInt(`0x${gy}`) };
 
     const mod = (x: bigint, m: bigint): bigint => {
       const r = x % m;
@@ -174,7 +174,7 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
         entla(id),
         Buffer.from(id, 'latin1'),
         b32(A),
-        b32(BigInt('0x' + b)),
+        b32(BigInt(`0x${b}`)),
         b32(G.x),
         b32(G.y),
         b32(pub.x),
@@ -182,8 +182,8 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
       );
 
     // PA = [dA]G, PB = [dB]G
-    const PA = mul(BigInt('0x' + v.dA), G)!;
-    const PB = mul(BigInt('0x' + v.dB), G)!;
+    const PA = mul(BigInt(`0x${v.dA}`), G)!;
+    const PB = mul(BigInt(`0x${v.dB}`), G)!;
     expect(Buffer.concat([b32(PA.x), b32(PA.y)]).toString('hex')).toBe(v.pubA);
     expect(Buffer.concat([b32(PB.x), b32(PB.y)]).toString('hex')).toBe(v.pubB);
 
@@ -192,14 +192,14 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
     expect(zOf(v.idB, PB).toString('hex')).toBe(v.ZB);
 
     // RA = [rA]G, RB = [rB]G
-    const RA = mul(BigInt('0x' + v.rA), G)!;
-    const RB = mul(BigInt('0x' + v.rB), G)!;
+    const RA = mul(BigInt(`0x${v.rA}`), G)!;
+    const RB = mul(BigInt(`0x${v.rB}`), G)!;
     expect(Buffer.concat([b32(RA.x), b32(RA.y)]).toString('hex')).toBe(v.RA);
     expect(Buffer.concat([b32(RB.x), b32(RB.y)]).toString('hex')).toBe(v.RB);
 
     // U = [tA](PB + [x̄(RB.x)]RB), tA = (dA + x̄(RA.x)·rA) mod n
     const xbar = (x: bigint): bigint => (1n << 127n) | (x & ((1n << 127n) - 1n));
-    const tA = mod(BigInt('0x' + v.dA) + mod(xbar(RA.x) * BigInt('0x' + v.rA), N), N);
+    const tA = mod(BigInt(`0x${v.dA}`) + mod(xbar(RA.x) * BigInt(`0x${v.rA}`), N), N);
     const U = mul(tA, add(PB, mul(xbar(RB.x), RB)))!;
     expect(Buffer.concat([b32(U.x), b32(U.y)]).toString('hex')).toBe(v.U);
 

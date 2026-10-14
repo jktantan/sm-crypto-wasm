@@ -223,8 +223,8 @@ describe('SM2 key exchange vs independent BigInt oracle', () => {
     const r3 = alice.confirm(r2);
 
     // 临时公钥
-    expect(r1.ephemeralPub).toBe('04' + hex(v.raBytes));
-    expect(r2.ephemeralPub).toBe('04' + hex(v.rbBytes));
+    expect(r1.ephemeralPub).toBe(`04${hex(v.raBytes)}`);
+    expect(r2.ephemeralPub).toBe(`04${hex(v.rbBytes)}`);
     // 确认值（S_B 由响应方算出、S_A 由发起方算出）
     expect(r2.confirm).toBe(hex(v.SB));
     expect(r3.confirm).toBe(hex(v.SA));
@@ -337,7 +337,7 @@ describe('SM2 key exchange end-to-end', () => {
       idPeer: IDB,
     });
     expect(() =>
-      alice.confirm({ ephemeralPub: '04' + hex(v.rbBytes), confirm: '00'.repeat(32) }),
+      alice.confirm({ ephemeralPub: `04${hex(v.rbBytes)}`, confirm: '00'.repeat(32) }),
     ).toThrow(/initiate/);
     expect(() => alice.initiate()).not.toThrow();
     expect(() => alice.initiate()).toThrow(/只能调用一次/);

@@ -115,7 +115,7 @@ function getModule(): Sm2Module {
 }
 
 /** 把 32/64 字节数据写进 wasm 内存。 */
-function putHex(hex: string, ptr: number, len: number): void {
+function _putHex(hex: string, ptr: number, len: number): void {
   const mem = new Uint8Array(getModule().memory.buffer);
   mem.set(Buffer.from(hex, 'hex'), ptr);
   void len;

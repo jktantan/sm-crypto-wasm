@@ -304,7 +304,7 @@ function mem(): Uint8Array {
   return new Uint8Array(getModule().memory.buffer);
 }
 
-function allocBytes(n: number): number {
+function _allocBytes(n: number): number {
   return getModule().exports.alloc(n);
 }
 

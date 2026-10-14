@@ -43,7 +43,7 @@ const f2mul = (a: F2, b: F2): F2 => [
 const f2sqr = (a: F2): F2 => f2mul(a, a);
 
 const f4add = (a: F4t, b: F4t): F4t => [f2add(a[0], b[0]), f2add(a[1], b[1])];
-const f4dbl = (a: F4t): F4t => [f2dbl(a[0]), f2dbl(a[1])];
+const _f4dbl = (a: F4t): F4t => [f2dbl(a[0]), f2dbl(a[1])];
 /** 乘以 v：(b0 + b1 v)·v = b0 v + b1 v² = u·b1 + b0·v。 */
 const f4mulV = (a: F4t): F4t => [f2mulU(a[1]), a[0]];
 /** 多项式乘后模 v² = u。 */

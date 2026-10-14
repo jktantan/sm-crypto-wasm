@@ -51,9 +51,9 @@ async function runBoth(v: Vector, kLen: number) {
 
   const gA = keyExchange({
     privateKey: v.dA,
-    peerPublicKey: '04' + PB,
+    peerPublicKey: `04${PB}`,
     tempPrivateKey: v.rA,
-    peerTempPublicKey: '04' + RB,
+    peerTempPublicKey: `04${RB}`,
     isInitiator: true,
     userId: v.idA,
     peerUserId: v.idB,
@@ -61,9 +61,9 @@ async function runBoth(v: Vector, kLen: number) {
   });
   const gB = keyExchange({
     privateKey: v.dB,
-    peerPublicKey: '04' + PA,
+    peerPublicKey: `04${PA}`,
     tempPrivateKey: v.rB,
-    peerTempPublicKey: '04' + RA,
+    peerTempPublicKey: `04${RA}`,
     isInitiator: false,
     userId: v.idB,
     peerUserId: v.idA,

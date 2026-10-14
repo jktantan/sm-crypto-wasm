@@ -34,7 +34,7 @@ import {
   u256fromBytes,
   u256toBytes,
 } from './field';
-import { basePoint, JPoint, scalarMul, scalarMulG, toAffine } from './point';
+import { JPoint, scalarMul, scalarMulG, toAffine } from './point';
 
 const pinned: Array<StaticArray<u8>> = [];
 

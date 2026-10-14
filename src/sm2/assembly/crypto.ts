@@ -12,29 +12,9 @@
 // 本文件是**纯运算层**：输入输出均为线性内存指针，由 index.ts 的导出包装。
 
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
-import {
-  fpAdd,
-  fpMul,
-  fpSub,
-  pArr,
-  type U256,
-  u256cmp,
-  u256fromBytes,
-  u256isZero,
-  u256toBytes,
-  u256zero,
-} from './field';
+import { type U256, u256cmp, u256fromBytes, u256isZero, u256toBytes, u256zero } from './field';
 import { addModN, invModN, mulModN, nArr, subModN } from './modn';
-import {
-  addPoints,
-  basePoint,
-  infinity,
-  isInfinity,
-  JPoint,
-  scalarMul,
-  scalarMulG,
-  toAffine,
-} from './point';
+import { addPoints, isInfinity, JPoint, scalarMul, scalarMulG, toAffine } from './point';
 
 // ---------- 工具 ----------
 
@@ -51,7 +31,7 @@ function st(x: U256, ptr: usize): void {
 }
 
 /** 拷贝 k 字节。 */
-function memcpy(dst: usize, src: usize, n: usize): void {
+function _memcpy(dst: usize, src: usize, n: usize): void {
   for (let i: usize = 0; i < n; i++) store<u8>(dst + i, load<u8>(src + i));
 }
 

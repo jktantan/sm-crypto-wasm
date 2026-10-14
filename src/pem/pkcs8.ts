@@ -46,20 +46,20 @@ export function parsePkcs8PrivateKey(pem: string): ParsedPrivateKey {
     throw new InvalidKeyError('parsePkcs8PrivateKey: PrivateKeyInfo needs at least 3 elements');
   }
   const [version, algId, privateKeyOctets] = seq.children;
-  if (!version || version.tag !== 0x02) {
+  if (version?.tag !== 0x02) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing version INTEGER');
   }
   if (version.value[0] !== 0) {
     throw new InvalidKeyError(`parsePkcs8PrivateKey: unsupported version ${version.value[0]}`);
   }
-  if (!algId || !algId.children || algId.children.length < 1) {
+  if (!algId?.children || algId.children.length < 1) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing AlgorithmIdentifier');
   }
   const oidNode = algId.children[0];
-  if (!oidNode || oidNode.tag !== 0x06) {
+  if (oidNode?.tag !== 0x06) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing algorithm OID');
   }
-  if (!privateKeyOctets || privateKeyOctets.tag !== 0x04) {
+  if (privateKeyOctets?.tag !== 0x04) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing privateKey OCTET STRING');
   }
   return {
@@ -98,14 +98,14 @@ export function parseSpkiPublicKey(pem: string): ParsedPublicKey {
   }
   const algId = seq.children[0];
   const bitString = seq.children[1];
-  if (!algId || !algId.children || algId.children.length < 1) {
+  if (!algId?.children || algId.children.length < 1) {
     throw new InvalidKeyError('parseSpkiPublicKey: missing AlgorithmIdentifier');
   }
   const oidNode = algId.children[0];
-  if (!oidNode || oidNode.tag !== 0x06) {
+  if (oidNode?.tag !== 0x06) {
     throw new InvalidKeyError('parseSpkiPublicKey: missing algorithm OID');
   }
-  if (!bitString || bitString.tag !== 0x03) {
+  if (bitString?.tag !== 0x03) {
     throw new InvalidKeyError('parseSpkiPublicKey: missing BIT STRING');
   }
   // 去掉 BIT STRING 第一个字节的"未使用位"计数（我们固定为 0）。

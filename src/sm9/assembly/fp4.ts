@@ -25,7 +25,6 @@ import {
   fp2Sqr,
   fp2SqrU,
   fp2Sub,
-  fp2set,
   fp2TimesU,
   fp2zero,
 } from './fp2';

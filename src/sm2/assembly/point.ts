@@ -23,7 +23,6 @@ import {
   u256cmp,
   u256fromBytes,
   u256isZero,
-  u256toBytes,
   u256zero,
 } from './field';
 
@@ -195,7 +194,7 @@ function mulSmall(a: U256, k: u32): U256 {
 // ---------- 标量模运算（mod n） ----------
 
 /** 把标量（256-bit）折到 [0, n)。假定输入 < 2^256，n 接近 2^256，最多减一次。 */
-function reduceModN(a: U256): U256 {
+function _reduceModN(a: U256): U256 {
   const n = nArr();
   if (u256cmp(a, n) >= 0) {
     return fpSubRaw(a, n);

@@ -18,7 +18,7 @@ import {
   u256toBytes,
 } from '../../common/assembly/field256';
 import type { U256 } from './fp';
-import { type Fp2, fp2fromBytes, fp2Inv, fp2Mul, fp2one, fp2Sqr, fp2set, fp2zero } from './fp2';
+import { type Fp2, fp2Inv, fp2Mul, fp2one, fp2Sqr, fp2set, fp2zero } from './fp2';
 import { type Fp4, fp4Inv, fp4Mul, fp4Sqr, fp4zero } from './fp4';
 import { type Fp12, fp12Inv, fp12Mul, fp12Pow, fp12Sqr, fp12zero } from './fp12';
 import {
@@ -52,7 +52,6 @@ import {
   encMasterPublic,
   exchExtractKeyDe,
   hash1,
-  kdf,
   signExtractKeyDs,
   signMasterPublic,
   signT2,

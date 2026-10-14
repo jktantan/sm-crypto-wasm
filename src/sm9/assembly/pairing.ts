@@ -11,7 +11,6 @@
 
 import { type U256, u256 } from './fp';
 import {
-  Fp2,
   fp2Conjugate,
   fp2copy,
   fp2Div2,

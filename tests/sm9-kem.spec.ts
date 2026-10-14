@@ -26,7 +26,7 @@ describe('SM9 KEM (GM/T 0044.4)', () => {
   }, 120_000);
 
   it('encapsulation C1 equals the SM9 encrypt C1 for the same r', async () => {
-    const r = '00'.repeat(31) + '07';
+    const r = `${'00'.repeat(31)}07`;
     const { encapsulation } = sm9.kemEncrypt(KE, ID, 32, r);
     // encrypt 返回 C1(65B)||C3(32B)||C2；C1 即前 65 字节。
     const ct = sm9.encrypt(KE, ID, 'hello sm9 kem', r);

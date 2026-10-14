@@ -322,7 +322,7 @@ export async function createExchangeInitiator(
         ? prepPriv(options.ephemeralPrivateKey, 'rA')
         : scalarToBytes(randomScalarBelow(N));
       RA = derivePublicKey(rA);
-      return { ephemeralPub: '04' + bytesToHex(RA) };
+      return { ephemeralPub: `04${bytesToHex(RA)}` };
     },
 
     confirm(msg: ResponderMessage): InitiatorConfirm {
@@ -402,7 +402,7 @@ export async function createExchangeResponder(
       RA = incomingRA;
       RB = selfRB;
       U = sharedU;
-      return { ephemeralPub: '04' + bytesToHex(selfRB), confirm: bytesToHex(sB) };
+      return { ephemeralPub: `04${bytesToHex(selfRB)}`, confirm: bytesToHex(sB) };
     },
 
     getSharedKey(msg: InitiatorConfirm, kLen = 32): string {

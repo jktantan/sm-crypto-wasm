@@ -65,7 +65,7 @@ describe('SM2 key exchange with PEM inputs', () => {
     expect(privPem).toMatch(/^-----BEGIN PRIVATE KEY-----/);
     expect(pubPem).toMatch(/^-----BEGIN PUBLIC KEY-----/);
     expect(Buffer.from(parseSm2PrivateKeyPem(privPem)).toString('hex')).toBe(D_A);
-    expect(Buffer.from(parseSm2PublicKeyPem(pubPem)).toString('hex')).toBe('04' + pubA);
+    expect(Buffer.from(parseSm2PublicKeyPem(pubPem)).toString('hex')).toBe(`04${pubA}`);
   });
 
   it('completes a key exchange when given PEM keys', async () => {
@@ -100,7 +100,7 @@ describe('SM2 key exchange with PEM inputs', () => {
   it('accepts 65-byte uncompressed public keys too', async () => {
     const pubA = sm2.getPublicKey(D_A); // 64 字节
     const pubB = sm2.getPublicKey(D_B);
-    const { kA, kB } = await runExchange(D_A, '04' + pubB, D_B, '04' + pubA);
+    const { kA, kB } = await runExchange(D_A, `04${pubB}`, D_B, `04${pubA}`);
     expect(kA).toBe(kB);
   });
 
@@ -173,7 +173,7 @@ describeMaybe('SM2 PEM parsing vs OpenSSL (authoritative oracle)', () => {
 
   it('parses the private scalar and public point exactly as OpenSSL does', () => {
     expect(Buffer.from(parseSm2PrivateKeyPem(A.privPem)).toString('hex')).toBe(A.d);
-    expect('04' + sm2.getPublicKey(A.d)).toBe(A.pub);
+    expect(`04${sm2.getPublicKey(A.d)}`).toBe(A.pub);
     expect(Buffer.from(parseSm2PublicKeyPem(A.pubPem)).toString('hex')).toBe(A.pub);
   });
 
