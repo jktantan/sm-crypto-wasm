@@ -110,12 +110,15 @@ export function fp2MulFp(a: Fp2, k: U256): Fp2 {
  * 乘法：(a0 + a1 u)(b0 + b1 u)，u² = -2
  *   r0 = a0*b0 - 2*a1*b1
  *   r1 = a0*b1 + a1*b0
+ *
+ * Karatsuba：交叉项由 (a0+a1)(b0+b1) 一次求出，Fp 乘法 4 → 3 次。
  */
 export function fp2Mul(a: Fp2, b: Fp2): Fp2 {
   const t0 = fpMul(a[0], b[0]);
   const t1 = fpMul(a[1], b[1]);
+  const s = fpMul(fpAdd(a[0], a[1]), fpAdd(b[0], b[1])); // (a0+a1)(b0+b1)
   const r0 = fpSub(t0, fpAdd(t1, t1)); // a0b0 - 2 a1b1
-  const r1 = fpAdd(fpMul(a[0], b[1]), fpMul(a[1], b[0]));
+  const r1 = fpSub(fpSub(s, t0), t1); // a0b1 + a1b0
   return fp2set(r0, r1);
 }
 
@@ -123,11 +126,17 @@ export function fp2Mul(a: Fp2, b: Fp2): Fp2 {
  * (a * b) * u（对齐 GmSSL fp2_mul_u）：
  *   r0 = -2·(a0 b1 + a1 b0)
  *   r1 = a0 b0 - 2·a1 b1
+ *
+ * 先用 Karatsuba 求 a*b 的两个分量，再乘 u。原实现把交叉项整段写了两遍、
+ * a1b1 也算了两次，一次调用共 7 次 Fp 乘法。
  */
 export function fp2MulU(a: Fp2, b: Fp2): Fp2 {
-  const r0 = fpSub(u256zero(), fpAdd(fpAdd(fpMul(a[0], b[1]), fpMul(a[1], b[0])), fpAdd(fpMul(a[0], b[1]), fpMul(a[1], b[0]))));
-  const r1 = fpSub(fpMul(a[0], b[0]), fpAdd(fpMul(a[1], b[1]), fpMul(a[1], b[1])));
-  return fp2set(r0, r1);
+  const t0 = fpMul(a[0], b[0]);
+  const t1 = fpMul(a[1], b[1]);
+  const s = fpMul(fpAdd(a[0], a[1]), fpAdd(b[0], b[1]));
+  const m0 = fpSub(t0, fpAdd(t1, t1)); // a0b0 - 2 a1b1
+  const m1 = fpSub(fpSub(s, t0), t1); // a0b1 + a1b0
+  return fp2set(fpSub(u256zero(), fpAdd(m1, m1)), m0);
 }
 
 /**
@@ -140,15 +149,17 @@ export function fp2TimesU(a: Fp2): Fp2 {
 }
 
 /**
- * 平方：
+ * 平方（复平方公式，2 次 Fp 乘法）：
  *   r0 = a0² - 2 a1²
  *   r1 = 2 a0 a1
+ *
+ * 取 m = a0·a1、p = (a0+a1)(a0−2a1)，则 r0 = p + m、r1 = 2m。
+ * 比原来的「2 次 fpSqr + 1 次 fpMul」少一次 256-bit 模乘。
  */
 export function fp2Sqr(a: Fp2): Fp2 {
-  const r0 = fpSub(fpSqr(a[0]), fpAdd(fpSqr(a[1]), fpSqr(a[1])));
-  const t = fpMul(a[0], a[1]);
-  const r1 = fpAdd(t, t);
-  return fp2set(r0, r1);
+  const m = fpMul(a[0], a[1]); // a0 a1
+  const p = fpMul(fpAdd(a[0], a[1]), fpSub(a[0], fpAdd(a[1], a[1]))); // (a0+a1)(a0-2a1)
+  return fp2set(fpAdd(p, m), fpAdd(m, m));
 }
 
 /**

@@ -11,7 +11,7 @@ import {
 } from './fp2';
 import {
   Fp4, fp4zero, fp4one, fp4copy, fp4isZero, fp4eq, fp4Add, fp4Sub, fp4Neg, fp4Dbl,
-  fp4Mul, fp4MulV, fp4Sqr, fp4SqrV, fp4Inv, fp4Conjugate, fp4MulFp, fp4MulFp2, fp4set,
+  fp4Mul, fp4MulV, fp4TimesV, fp4Sqr, fp4SqrV, fp4Inv, fp4Conjugate, fp4MulFp, fp4MulFp2, fp4set,
 } from './fp4';
 import { u256zero } from '../../common/assembly/field256';
 
@@ -75,20 +75,25 @@ export function fp12Dbl(a: Fp12): Fp12 {
  *   r0 = a0 b0 + v·(a1 b2 + a2 b1)
  *   r1 = a0 b1 + a1 b0 + v·(a2 b2)
  *   r2 = a0 b2 + a1 b1 + a2 b0
+ *
+ * Karatsuba：6 个积 p0/p1/p2 + s01/s02/s12 求出全部交叉项，
+ * fp4Mul 9 → 6 次（这是 pairing 最热的路径）。
  */
 export function fp12Mul(a: Fp12, b: Fp12): Fp12 {
-  let r0 = fp4Mul(a[0], b[0]);
-  r0 = fp4Add(r0, fp4MulV(a[1], b[2]));
-  r0 = fp4Add(r0, fp4MulV(a[2], b[1]));
+  const p0 = fp4Mul(a[0], b[0]);
+  const p1 = fp4Mul(a[1], b[1]);
+  const p2 = fp4Mul(a[2], b[2]);
+  const s01 = fp4Mul(fp4Add(a[0], a[1]), fp4Add(b[0], b[1]));
+  const s02 = fp4Mul(fp4Add(a[0], a[2]), fp4Add(b[0], b[2]));
+  const s12 = fp4Mul(fp4Add(a[1], a[2]), fp4Add(b[1], b[2]));
 
-  let r1 = fp4Mul(a[0], b[1]);
-  r1 = fp4Add(r1, fp4Mul(a[1], b[0]));
-  r1 = fp4Add(r1, fp4MulV(a[2], b[2]));
+  const c01 = fp4Sub(fp4Sub(s01, p0), p1); // a0b1 + a1b0
+  const c02 = fp4Sub(fp4Sub(s02, p0), p2); // a0b2 + a2b0
+  const c12 = fp4Sub(fp4Sub(s12, p1), p2); // a1b2 + a2b1
 
-  let r2 = fp4Mul(a[0], b[2]);
-  r2 = fp4Add(r2, fp4Mul(a[1], b[1]));
-  r2 = fp4Add(r2, fp4Mul(a[2], b[0]));
-
+  const r0 = fp4Add(p0, fp4TimesV(c12));
+  const r1 = fp4Add(c01, fp4TimesV(p2));
+  const r2 = fp4Add(c02, p1);
   return fp12set(r0, r1, r2);
 }
 

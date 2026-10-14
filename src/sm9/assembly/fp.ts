@@ -37,14 +37,20 @@ export const SM9_N_LIMBS: StaticArray<u32> = [
   0xf58ec744, 0xd603ab4f, 0x02a3a6f1, 0xb6400000,
 ];
 
-/** 返回 p。 */
+// p / n 的 U256 形式只构造一次。每次 fpAdd/fpSub/fpMul 都重建一份 U256 是这里最贵的
+// 固定开销（实测 fpAdd ≈ 0.66µs ≈ fpMul 的 1/3，足以吃掉 Karatsuba 省下的那次乘法）。
+// field256 的 mod* 系列只读模数（输入自行 clone），不会写这块共享内存。
+const P_CACHE: U256 = u256fromLimbs(SM9_P_LIMBS);
+const N_CACHE: U256 = u256fromLimbs(SM9_N_LIMBS);
+
+/** 返回 p（共享常量：只读，勿就地修改）。 */
 export function pArr(): U256 {
-  return u256fromLimbs(SM9_P_LIMBS);
+  return P_CACHE;
 }
 
-/** 返回 n。 */
+/** 返回 n（共享常量：只读，勿就地修改）。 */
 export function nArr(): U256 {
-  return u256fromLimbs(SM9_N_LIMBS);
+  return N_CACHE;
 }
 
 /** SM9 素域加：(a + b) mod p。 */

@@ -25,6 +25,7 @@ import {
   fp2Inv,
   fp2Conjugate,
   fp2MulU,
+  fp2TimesU,
   fp2MulFp,
 } from './fp2';
 import { u256zero } from '../../common/assembly/field256';
@@ -94,33 +95,52 @@ export function fp4MulFp2(a: Fp4, b: Fp2): Fp4 {
  * 普通乘法 (a0 + a1 v)(b0 + b1 v)，v² = u：
  *   r0 = a0 b0 + u·(a1 b1)
  *   r1 = a0 b1 + a1 b0
+ *
+ * Karatsuba：交叉项 r1 由 (a0+a1)(b0+b1) 一次求出，fp2Mul 4 → 3 次。
  */
 export function fp4Mul(a: Fp4, b: Fp4): Fp4 {
-  const t = fp2MulU(a[1], b[1]);
-  const r0 = fp2Add(fp2Mul(a[0], b[0]), t);
-  const r1 = fp2Add(fp2Mul(a[0], b[1]), fp2Mul(a[1], b[0]));
+  const t0 = fp2Mul(a[0], b[0]);
+  const t1 = fp2Mul(a[1], b[1]);
+  const s = fp2Mul(fp2Add(a[0], a[1]), fp2Add(b[0], b[1]));
+  const r0 = fp2Add(t0, fp2TimesU(t1));
+  const r1 = fp2Sub(fp2Sub(s, t0), t1);
   return fp4set(r0, r1);
 }
 
 /**
- * 乘以 v：(a0 + a1 v)·v = a0 v + a1 v² = u·a1 + a0 v
- *   r0 = u·a1
- *   r1 = a0
+ * 乘以 v：(a·b)·v。设 m = a·b，则 m·v = u·m1 + m0·v。
+ *   r0 = u·m1
+ *   r1 = m0
+ *
+ * 其中 m 用 Karatsuba 求（fp2Mul 4 → 3 次），原实现直接展开成 4 次乘法。
  */
 export function fp4MulV(a: Fp4, b: Fp4): Fp4 {
-  const r0 = fp2Add(fp2MulU(a[0], b[1]), fp2MulU(a[1], b[0]));
-  const r1 = fp2Add(fp2Mul(a[0], b[0]), fp2MulU(a[1], b[1]));
-  return fp4set(r0, r1);
+  const t0 = fp2Mul(a[0], b[0]);
+  const t1 = fp2Mul(a[1], b[1]);
+  const s = fp2Mul(fp2Add(a[0], a[1]), fp2Add(b[0], b[1]));
+  const m0 = fp2Add(t0, fp2TimesU(t1));
+  const m1 = fp2Sub(fp2Sub(s, t0), t1);
+  return fp4set(fp2TimesU(m1), m0);
+}
+
+/** 乘以 v（单参）：(b0 + b1 v)·v = u·b1 + b0·v。 */
+export function fp4TimesV(a: Fp4): Fp4 {
+  return fp4set(fp2TimesU(a[1]), a[0]);
 }
 
 /**
  * 平方（对齐 fp4_sqr）：
  *   r0 = a0² + (a1²·u)
  *   r1 = 2 a0 a1
+ *
+ * 交叉项用 Karatsuba 形式 (a0+a1)² − a0² − a1²，三次都是 fp2Sqr（比一次 fp2Mul 便宜）。
  */
 export function fp4Sqr(a: Fp4): Fp4 {
-  const r0 = fp2Add(fp2Sqr(a[0]), fp2SqrU(a[1]));
-  const r1 = fp2Dbl(fp2Mul(a[0], a[1]));
+  const t0 = fp2Sqr(a[0]);
+  const t1 = fp2Sqr(a[1]);
+  const s = fp2Sqr(fp2Add(a[0], a[1]));
+  const r0 = fp2Add(t0, fp2TimesU(t1));
+  const r1 = fp2Sub(fp2Sub(s, t0), t1);
   return fp4set(r0, r1);
 }
 
