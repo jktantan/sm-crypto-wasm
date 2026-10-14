@@ -101,3 +101,30 @@ dispatch. See spec §12.1 Q3.
   SM3 校验值，失败即说明顺序或密钥不对，这是唯一无需外部提示的判别方式。
   代价：错误密文多跑一次解密（常数级）。
 - 注：plan Task 6 写的 `DecryptionError` 仍按现状抛 `Error` —— 属 P2 项，未在本轮范围。
+
+### Task 3 — SM9 facade 导出 + generateKeyPair（PKCS#8/SPKI + SM9 OID）
+
+- `src/index.ts` 补上 `export * as sm9`：spec §6 要求 `import { sm2, sm3, sm4, sm9, zuc }`，
+  此前 facade 漏了 sm9，`tests/facade.spec.ts` 也没断言它。
+- `src/pem/sm9.ts`：`encodeSm9PrivateKeyPem` / `parseSm9PrivateKeyPem` /
+  `encodeSm9PublicKeyPem` / `parseSm9PublicKeyPem`，统一 OID `1.2.156.10197.1.100`；
+  解析时校验 OID，不符抛 `InvalidKeyError`。
+- `src/sm9/index.ts`：新增 `generateKeyPair({ id, purpose })`，把 wasm 已有的
+  `signPubOut`/`signDsOut`（或 `encPubOut`/`encDeOut`）接到 JS 层并编码为 PEM；
+  所有以主私钥为第一参数的入口（sign / verify / encrypt / decrypt / kem* / exchange*）
+  现在也接受 PKCS#8 PEM —— 在模块内的 `toBytes` 里统一嗅探 `-----BEGIN`。
+- 测试：`npx vitest run --config vitest.config.ts tests/sm9-keys.spec.ts` → 8/8 pass；
+  `npx tsc --noEmit` 干净。（`Sm9Exports` 接口原先没声明 `signDsOut`/`encDeOut`，一并补上。）
+- `Ruling:` `generateKeyPair` 返回 **3** 个 PEM（masterPrivate / masterPublic /
+  userPrivate），不返回 plan Task 10 写的 `userPublicPem`。理由：SM9 的用户公钥是
+  `(id, 主公钥)` 的确定函数、不是独立持有物，且 wasm 侧没有"任意 G1 点标量乘"入口可算
+  `[H1(id)]P1 + Ppub-e`。代价：对接方若期望显式的用户公钥文件，需自行约定或多加一个
+  wasm 入口。
+- `Ruling:` PEM 嗅探放在 sm9 模块的 `toBytes` 里（一处），而不是改 10 个调用点。
+  理由：SM9 各入口第一参数一律是主私钥，`-----BEGIN` 守卫不会误伤 id/msg。
+  代价：将来若要传"以 PEM 表示的 id"，得改回显式分支。
+- `Ruling:` 本轮**未**让 `verify` / `encrypt` 接受主公钥 PEM。理由：wasm 的
+  `sm9VerifyOut` / `sm9EncryptOut` 内部自行从主私钥派生主公钥，没有接受点字节的入口；
+  补它要新增 2 个 AS 导出并重编 sm9.wasm，属新功能而非 P0 缺口。
+  代价：spec §6 示例里的 `verify(masterPublicPem, ...)` 形态目前仍需传主私钥 PEM，
+  已记入后续缺口清单。

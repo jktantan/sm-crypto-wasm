@@ -19,6 +19,7 @@
 export * as sm2 from './sm2/index.js';
 export * as sm3 from './sm3/index.js';
 export * as sm4 from './sm4/index.js';
+export * as sm9 from './sm9/index.js';
 export * as zuc from './zuc/index.js';
 
 // 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。

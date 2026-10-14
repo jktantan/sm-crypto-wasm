@@ -24,6 +24,8 @@
  */
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
+import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem } from '../pem/sm9.js';
+import { InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
@@ -34,6 +36,8 @@ interface Sm9Exports extends WebAssembly.Exports {
   readonly freeAll: () => void;
   readonly signPubOut: (ksPtr: number, outPtr: number) => void;
   readonly encPubOut: (kePtr: number, outPtr: number) => void;
+  readonly signDsOut: (ksPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
+  readonly encDeOut: (kePtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly sm9SignOut: (
     ksPtr: number, idPtr: number, idLen: number,
     msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
@@ -111,6 +115,17 @@ function getModule(): Sm9Module {
 function toBytes(input: string | Uint8Array, label: string): Uint8Array {
   if (input instanceof Uint8Array) return new Uint8Array(input);
   if (typeof input !== 'string') throw new TypeError(`sm9: ${label} 必须是字符串或 Uint8Array`);
+  if (input.includes('-----BEGIN')) {
+    // PKCS#8 主私钥 PEM（spec §12.1 Q3）。SM9 各入口的第一参数一律是主私钥，
+    // 所以在这里统一嗅探 PEM，免得每个调用点各写一遍分支。
+    const parsed = parseSm9PrivateKeyPem(input);
+    if (parsed.length !== 32) {
+      throw new InvalidKeyError(
+        `sm9: ${label} 作为 PEM 主私钥应为 32 字节，实际 ${parsed.length}`,
+      );
+    }
+    return parsed;
+  }
   if (input.startsWith('0x') || /^[0-9a-fA-F]+$/.test(input)) {
     const s = input.startsWith('0x') ? input.slice(2) : input;
     if (s.length % 2 !== 0) throw new TypeError(`sm9: ${label} hex 长度必须为偶数`);
@@ -148,6 +163,85 @@ function randomRHex(): string {
 }
 
 // ---------------- API ----------------
+
+/** SM9 主密钥用途。 */
+export type Sm9KeyPurpose = 'sign' | 'enc';
+
+/** `generateKeyPair` 选项。 */
+export interface Sm9KeyPairOptions {
+  /** 用户标识（用户私钥绑定到该 id）。 */
+  id: string | Uint8Array;
+  /** 主密钥用途：`'sign'`（默认）或 `'enc'`。 */
+  purpose?: Sm9KeyPurpose;
+}
+
+/**
+ * SM9 密钥对（PEM 形态：PKCS#8 私钥 / SPKI 公钥，算法 OID `1.2.156.10197.1.100`）。
+ *
+ * SM9 的用户"公钥"是 `(id, 主公钥)` 的确定函数、不是独立持有物，故不单独编码。
+ */
+export interface Sm9KeyPair {
+  /** 主私钥（32 字节标量：签名 ks / 加密 ke）。 */
+  masterPrivatePem: string;
+  /** 主公钥点：签名 `[ks]P2`（G2，128B）/ 加密 `[ke]P1`（G1，64B）。 */
+  masterPublicPem: string;
+  /** 用户私钥点：签名 ds（G1，64B）/ 加密 de（G2，128B）。 */
+  userPrivatePem: string;
+}
+
+/**
+ * 生成 SM9 主密钥对与对应用户私钥（spec §6、§12.1 Q3）。
+ *
+ * 异步：含 wasm 实例化与宿主 CSPRNG 取主私钥。
+ *
+ * @param opts `id` 与 `purpose`（默认 `'sign'`）。
+ */
+export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPair> {
+  await ensureLoaded();
+  const purpose = opts.purpose ?? 'sign';
+  if (purpose !== 'sign' && purpose !== 'enc') {
+    throw new RangeError(`sm9.generateKeyPair: 未知的 purpose ${String(purpose)}`);
+  }
+  const idB = toBytes(opts.id, 'id');
+  if (idB.length === 0) throw new RangeError('sm9.generateKeyPair: 用户标识不能为空');
+
+  const masterHex = randomRHex();
+  const { exports } = getModule();
+  const masterPtr = exports.alloc(32);
+  const idPtr = exports.alloc(idB.length);
+  const pubPtr = exports.alloc(128);
+  const userPtr = exports.alloc(128);
+  try {
+    putHex(masterHex, masterPtr);
+    putBytes(idB, idPtr);
+    let pubLen: number;
+    let userLen: number;
+    if (purpose === 'sign') {
+      exports.signPubOut(masterPtr, pubPtr); // [ks]P2 → 128B
+      exports.signDsOut(masterPtr, idPtr, idB.length, userPtr); // ds → 64B
+      pubLen = 128;
+      userLen = 64;
+    } else {
+      exports.encPubOut(masterPtr, pubPtr); // [ke]P1 → 64B
+      exports.encDeOut(masterPtr, idPtr, idB.length, userPtr); // de → 128B
+      pubLen = 64;
+      userLen = 128;
+    }
+    // 调用后重新取 buffer 视图：WASM 内存可能在分配后增长。
+    const memView = mem();
+    return {
+      masterPrivatePem: encodeSm9PrivateKeyPem(Buffer.from(masterHex, 'hex')),
+      masterPublicPem: encodeSm9PublicKeyPem(
+        new Uint8Array(memView.buffer, pubPtr, pubLen).slice(),
+      ),
+      userPrivatePem: encodeSm9PrivateKeyPem(
+        new Uint8Array(memView.buffer, userPtr, userLen).slice(),
+      ),
+    };
+  } finally {
+    exports.freeAll();
+  }
+}
 
 /** 32 字节签名主私钥 ks → 256 字节 G2 仿射（X[1]||X[0]||Y[1]||Y[0]）= 128 字节 hex。 */
 export function getSignPublicKey(ks: string | Uint8Array): string {
