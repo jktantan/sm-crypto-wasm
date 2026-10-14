@@ -24,8 +24,20 @@ import { readFile as readFileAsync } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** 算法枚举。扩展时同步更新 `nodeReadWasm` 路径解析。 */
-export type WasmAlgo = 'sm2' | 'sm3' | 'sm4' | 'sm9' | 'zuc';
+/** 算法白名单：确保非法 `name` 在到达文件系统 / 浏览器分支前被拒绝。 */
+const WASM_ALGOS = ['sm2', 'sm3', 'sm4', 'sm9', 'zuc'] as const;
+export type WasmAlgo = (typeof WASM_ALGOS)[number];
+
+function isWasmAlgo(name: unknown): name is WasmAlgo {
+  return typeof name === 'string' && (WASM_ALGOS as readonly string[]).includes(name);
+}
+
+function rejectBadName(name: unknown): never {
+  const got = typeof name === 'string' ? `"${name}"` : typeof name;
+  throw new RangeError(
+    `loadWasm: 未知算法 ${got}，期望 ${WASM_ALGOS.map((a) => `"${a}"`).join(' | ')}`,
+  );
+}
 
 /** 加载完成后的 WASM 模块封装。`exports` 已类型化为 `WebAssembly.Exports`。 */
 export interface WasmModule {
@@ -101,6 +113,20 @@ async function loadArrayBuffer(name: WasmAlgo): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
+/** ASC 默认产物会导入 `env` 模块（abort / trace / __assert_fail）。
+ *  这些 stub 与 `loadWasm` 异步路径一致；统一到模块级常量以便 sync/async 共享。 */
+const ASC_ENV: WebAssembly.Imports = {
+  env: {
+    abort: () => {
+      throw new Error('wasm: abort');
+    },
+    trace: () => {},
+    __assert_fail: () => {
+      throw new Error('wasm: assert_fail');
+    },
+  },
+};
+
 /**
  * 同步实例化 wasm（仅 Node）。失败抛 WebAssembly 自身的 CompileError / LinkError。
  *
@@ -108,7 +134,7 @@ async function loadArrayBuffer(name: WasmAlgo): Promise<ArrayBuffer> {
  */
 function instantiateFromBuffer(buf: ArrayBuffer): WasmModule {
   const mod = new WebAssembly.Module(buf);
-  const inst = new WebAssembly.Instance(mod, {});
+  const inst = new WebAssembly.Instance(mod, ASC_ENV);
   const exports = inst.exports as WebAssembly.Exports;
   const memory =
     (exports.memory as WebAssembly.Memory | undefined) ?? new WebAssembly.Memory({ initial: 1 });
@@ -127,29 +153,12 @@ const cache = new Map<WasmAlgo, Promise<WasmModule>>();
  * @returns 解析后冻结的 WasmModule。
  */
 export function loadWasm(name: WasmAlgo): Promise<WasmModule> {
+  if (!isWasmAlgo(name)) rejectBadName(name);
   let p = cache.get(name);
   if (!p) {
     p = (async () => {
       const buf = await loadArrayBuffer(name);
-      // ASC 默认产物会导入 `env` 模块（abort、trace 等）；
-      // 我们提供空 stub，AS 库函数都不会被调用所以足够。
-      const imports: WebAssembly.Imports = {
-        env: {
-          abort: () => {
-            throw new Error('wasm: abort');
-          },
-          trace: () => {},
-          __assert_fail: () => {
-            throw new Error('wasm: assert_fail');
-          },
-        },
-      };
-      const { instance } = await WebAssembly.instantiate(buf, imports);
-      const exports = instance.exports as WebAssembly.Exports;
-      const memory =
-        (exports.memory as WebAssembly.Memory | undefined) ??
-        new WebAssembly.Memory({ initial: 1 });
-      return Object.freeze({ exports, memory });
+      return instantiateFromBuffer(buf);
     })();
     cache.set(name, p);
   }
@@ -169,6 +178,7 @@ export function loadWasmSync(name: WasmAlgo): WasmModule {
   if (!isNode) {
     throw new Error('loadWasmSync: browser must await loadWasm() first');
   }
+  if (!isWasmAlgo(name)) rejectBadName(name);
   const buf = nodeReadWasmSync(name);
   return instantiateFromBuffer(buf);
 }
