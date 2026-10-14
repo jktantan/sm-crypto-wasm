@@ -14,6 +14,7 @@
 import {
   U256,
   pArr,
+  nArr,
   fpAdd,
   fpSub,
   fpMul,
@@ -192,15 +193,6 @@ function mulSmall(a: U256, k: u32): U256 {
 }
 
 // ---------- 标量模运算（mod n） ----------
-
-/** n 的小端 limb。 */
-const N_BYTES = 'FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123';
-
-function nArr(): U256 {
-  const b = new Uint8Array(32);
-  hexToBytesInto(N_BYTES, b);
-  return u256fromBytes(b, 0);
-}
 
 /** 把标量（256-bit）折到 [0, n)。假定输入 < 2^256，n 接近 2^256，最多减一次。 */
 function reduceModN(a: U256): U256 {

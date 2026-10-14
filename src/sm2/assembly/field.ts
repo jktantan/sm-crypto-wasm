@@ -61,14 +61,20 @@ export const N_LIMBS: StaticArray<u32> = [
   0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
 ];
 
-/** 返回 p（新对象）。 */
+// p / n 的 U256 形式只构造一次。每次 fpAdd/fpSub/fpMul 都重建一份 U256 是最贵的固定开销
+// （SM2 实测 fpAdd ≈ 0.83µs ≈ fpMul 的 1/3）。field256 的 mod* 系列只读模数（输入自行
+// clone），不会写这块共享内存；调用方也不要就地修改 pArr()/nArr() 的返回值。
+const P_CACHE: U256 = u256fromLimbs(P_LIMBS);
+const N_CACHE: U256 = u256fromLimbs(N_LIMBS);
+
+/** 返回 p（共享常量：只读，勿就地修改）。 */
 export function pArr(): U256 {
-  return u256fromLimbs(P_LIMBS);
+  return P_CACHE;
 }
 
-/** 返回 n（新对象）。 */
+/** 返回 n（共享常量：只读，勿就地修改）。 */
 export function nArr(): U256 {
-  return u256fromLimbs(N_LIMBS);
+  return N_CACHE;
 }
 
 /** 模加：(a + b) mod p。 */
