@@ -27,10 +27,10 @@
 | 9 SM4 六模式 | ✅ | 含 GCM（OpenSSL KAT）；CTR/OFB 现名 `cryptCTR`/`cryptOFB`，另有别名 |
 | 10 SM9 | ✅ | sign/verify/encrypt/decrypt + KEM + 密钥交换；`generateKeyPair` 于 2026-10-14 补齐 |
 | 11 ZUC | ✅ | EEA3 + EIA3（2026-10-14 补齐）+ 复用保护 |
-| 12 构建 / 打包 | ◐ | `asc` + `tsc` 可用；缺 rollup、CJS 产物、`vitest.browser.config.ts`、`biome.json` |
-| 13 CI / 发布 | ❌ | `.github/workflows` 与 `.release-it.json` 均缺 |
-| 14 bench | ❌ | `bench/` 不存在，而 `package.json` 已引用 `bench/run.ts` |
-| 15 README | ❌ | 仅标题两行 |
+| 12 构建 / 打包 | ✅ | `asc` + `tsc` 产出 dist；`biome.json` / `vitest.browser.config.ts` 已补；仍未引入 rollup（ESM-only） |
+| 13 CI / 发布 | ✅ | `.github/workflows/{ci,release}.yml` + `.release-it.json`（2026-10-14） |
+| 14 bench | ✅ | `bench/`（5 大块算法 mitata 基准）（2026-10-14） |
+| 15 README | ✅ | 5 大块速查，示例经实跑验证（2026-10-14） |
 
 ✅ 完成 · ◐ 部分完成 · ❌ 未做。剩余缺口的完整清单见 spec §14。
 

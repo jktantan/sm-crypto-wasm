@@ -446,3 +446,90 @@ GREEN；全量套件 112/112。
 - 签名场景的 `userPublicPem` 并非标准定义的对象 —— 裁决：返回值形状一致性优先，
   已在 Task 4 的 ruling 里说明。
 - 明文长度错保留 `RangeError` —— 裁决：加密侧的明文形状错属编程错误，保留。
+
+---
+
+# P1 批次（2026-10-14）
+
+用户裁决："接着做 P1"。范围 = spec §14 的 P1 清单。
+
+### Task 1 — biome（lint + format）
+
+- 新增 `biome.json`。踩到两个 biome 2.5 配置坑（`linter.rules.recommended` 已废弃 → `preset`；
+  `useImportExtensions` 的选项是 `forceJsExtensions` 而非 `fixStyle`），用 `biome migrate` 修好。
+- 修净仓库既有 100+ 处违规，分两个 commit（`22316ad` 批量格式化、`23c8663` 规则违反）便于 review。
+- `Ruling:` 对 `src/**/assembly/**` 关闭 `useImportExtensions` —— AS 模块互引用不带 `.js` 后缀，
+  而非 assembly 源带后缀是 NodeNext 的要求。
+
+### Task 2 — bench/
+
+- `bench/`（`run.ts` + 5 个 `.bench.ts`），`pnpm bench` 可跑通并输出 mitata 报告。
+- `Ruling:` 单 entry 串 5 个 group（与 plan 形态一致），而不是拆 5 个可执行入口。
+
+### Task 3 — 浏览器 runner
+
+- `vitest.browser.config.ts`（happy-dom）+ `tests/browser/smoke.spec.ts`（6 条）。
+- `vitest.config.ts` 的 exclude 增加 `tests/browser/**`：两套 runner 必须严格独立
+  —— 这里踩过坑（Node runner 一开始吃进了浏览器测试，`window` undefined 导致失败）。
+- `Ruling:` 用 happy-dom 而非 Playwright/Chromium（库对外只暴露纯 wasm + TS API）。
+  已知差异：happy-dom 下 `loadWasm` 的 `isNode` 仍为 true，浏览器分支走不到 —— 已在测试注释写明。
+
+### Task 4 — runtime 单测 + fuzz
+
+- `tests/runtime/{loadWasm,convert,random}.spec.ts`（32 条）+ `tests/fuzz/wycheproof-style.spec.ts`（3 条）。
+- 过程中修了 `src/runtime/loadWasm.ts` 两个真 bug：
+  1. sync 路径 instantiate 缺 `env` stub（ASC 产物需要）→ 提取 `ASC_ENV` 常量供 sync/async 共用；
+  2. 非法算法名会漏到文件系统、抛 ENOENT → 新增 `WASM_ALGOS` 白名单 + `rejectBadName`（RangeError）。
+- `Ruling:` 非法算法名走**同步 throw**（`loadWasm` 不是 async function）—— 错误越早抛越好，
+  不增加一次 microtask 调度。
+
+### Task 5 — CI / 发布
+
+- `.github/workflows/ci.yml`（2 个 job）+ `release.yml`（tag → `--provenance` 发布）+ `.release-it.json`。
+- **关键阻塞**：`pnpm build` 原本跑不通 —— 见下面 Final review 的 fix pass。
+- `Ruling:` CI 分 2 个 job（而非 plan 写的 5 个）—— 避免重复 5 次 asc 编译。
+- `Ruling:` CI 用 `--frozen-lockfile` —— `pnpm-lock.yaml` 实际被 git 跟踪。
+
+### Task 6 — README
+
+- 从两行标题扩为完整速查（安装 / 6 档示例 / API 表 / 子路径 / 跨运行时 / 错误层级 / 安全 / 开发）。
+- **每个示例都提取成脚本实跑验证**，抓出 3 处文档错误（ECB 输入不足 16 字节、GCM 的 aad 用中文
+  被当 base64、`sm9.kemEncrypt` 的第一参数其实是加密主私钥）。
+
+### Task 7 — 文档同步 + 回归 + 自审
+
+- spec §13 DoD 全部勾选、§14 的 P1 段改为已完成并新增「P1 批次」小节；
+  plan 的执行状态表 Task 12–15 更新为 ✅。
+- `.gitignore`：删掉 `pnpm-lock.yaml` / `pnpm-workspace.yaml` 两行死配置（文件本就跟踪）。
+- 最终链路：`lint → typecheck → build → test(182) → test:browser(6) → pack` 全绿。
+
+---
+
+## Final review（P1 批次）
+
+`Final review: self-review (no subagent tool)`。
+
+### Strengths
+
+- 每条新增能力都有测试：runtime 32 条、fuzz 3 条、browser 6 条。
+- README 的示例不是"看着对"，而是逐条执行验证过（23/23）。
+- 发布链路从"根本跑不通"修到全绿，且定位到根因（格式化器介入 AssemblyScript 语义），而非绕过。
+
+### Issues
+
+- Critical：无。
+- Important：无。
+- Minor（deferred）：spec §14「本批次新发现」两条；rollup/CJS 双产物未做（ESM-only，已文档化）；
+  `tests/packaging/smoke.spec.ts` 未单独建；biome 不能校验 workflow 的 YAML（交给 GitHub）。
+
+### Fix pass
+
+- `Final: fixed 发布链路` —— biome 的 `useImportType` 把 assembly 源的 import 改成
+  `import { type X }`，`asc` 0.28 不认类型修饰符，`pnpm build`（进而 `prepack`）完全断掉。
+  修复：对该目录关闭 `useImportType` 与 `organizeImports`，恢复 23 处 import（commit `c509319`）。
+- `Final: fixed loadWasm 两个真 bug` —— sync 路径 env stub 缺失、非法算法名抛 ENOENT 而非 RangeError。
+
+### Declined to judge
+
+- 5 条 `noNonNullAssertion` warning 保留在 tests（固定向量断言的必要写法）。
+- biome 修复拆两个 commit 而非一个（便于 review）。

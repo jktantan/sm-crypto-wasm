@@ -289,12 +289,12 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 勾选状态以 §14 的对账为准（2026-10-14）。
 
 - [x] `pnpm install` 一键装齐依赖；
-- [x] `pnpm build` 产出 `dist/`，体积符合第 5 节（实际走 `asc` + `tsc`，未用 rollup）；
-- [ ] `pnpm test` 在 Node 与浏览器两套 runner 全绿（**Node 端已全绿；浏览器 runner 不存在**）；
-- [ ] `pnpm bench` 跑通，给出 micro-bench 报告（**`bench/` 不存在**）；
-- [ ] README 含 5 大块算法的 5 分钟速查（**README 目前只有标题**）；
-- [ ] GitHub Actions `ci.yml` + `release.yml` 都通过（**两个 workflow 均未创建**）；
-- [ ] `npm publish --dry-run` 报出正确字段（name、version、license、engines、exports、types）。
+- [x] `pnpm build` 产出 `dist/`（实际走 `asc` + `tsc`，未引入 rollup/CJS 双产物）；
+- [x] `pnpm test` 在 Node 与浏览器两套 runner 全绿（Node 182/182，浏览器 6/6）；
+- [x] `pnpm bench` 跑通，给出 micro-bench 报告（mitata，5 大块算法）；
+- [x] README 含 5 大块算法的 5 分钟速查（每个示例都经实跑验证）；
+- [x] GitHub Actions `ci.yml` + `release.yml` 已创建（本地已模拟全链通过）；
+- [x] `pnpm pack --dry-run` 报出正确字段（name、version、license、engines、exports、types）。
 
 ---
 
@@ -320,14 +320,36 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 
 **P1 — 工程化与发布（§2 Goals、§10、§13）**
 
-- `bench/` 不存在，而 `package.json` 的 `bench` script 已指向 `bench/run.ts` → 命令直接失败；
-- `vitest.browser.config.ts` 不存在 → `pnpm test:browser` 失败，浏览器 runner 缺位；
-- `.github/workflows/ci.yml`、`.github/workflows/release.yml`、`.release-it.json` 全缺；
-- fuzz 用例（`tests/fuzz/` + fast-check）零引用 —— Wycheproof 风格攻击向量未做；
-- `biome.json` 缺失：`pnpm lint` 没有配置，且其目标包含不存在的 `bench/`；
-- README 仅标题两行，四档速查未写；
-- 打包仍为纯 `tsc` ESM：无 CJS 产物、`exports` 无 `require`、无 `rollup.config.mjs`；
-- `tests/runtime/{loadWasm,convert,random}.spec.ts` 与 `tests/packaging/smoke.spec.ts` 缺失。
+已在 2026-10-14 全部处理（见「P1 批次」），仅两条有意留下：
+
+- 打包仍为纯 `tsc` ESM：无 CJS 产物、`exports` 无 `require`、无 `rollup.config.mjs` ——
+  实际分发形态是 ESM-only，`package.json` 与 README 均按现状描述；
+- `tests/packaging/smoke.spec.ts` 未单独建（facade 与浏览器 smoke 已覆盖同一批 API）。
+
+### P1 批次（2026-10-14 补齐）
+
+- **biome**：新增 `biome.json`（lint + format 双开），并修净仓库内 100+ 处既有违规；
+- **bench**：`bench/` 落地 5 大块算法的 mitata 微型基准，`pnpm bench` 可跑；
+- **浏览器 runner**：新增 `vitest.browser.config.ts`（happy-dom）+ `tests/browser/smoke.spec.ts`；
+- **runtime 单测**：`tests/runtime/{loadWasm,convert,random}.spec.ts`；
+- **fuzz**：`tests/fuzz/wycheproof-style.spec.ts`（SM2 坏点、SM4 tag 翻转、SM3 跨 oracle 对拍）；
+- **CI / 发布**：`.github/workflows/{ci,release}.yml` + `.release-it.json`；
+- **README**：5 大块算法速查 + API 一览 + 错误层级 + 安全说明，示例经实跑验证。
+
+### 顺带修掉的阻塞（2026-10-14）
+
+- **`pnpm build` 原本跑不通**：biome 的 `useImportType` 规则把 `src/**/assembly/**` 的
+  `import { U256 }` 改成了 `import { type U256 }`，而 `asc` 0.28 不认类型修饰符 ——
+  发布链路（`prepack = build && test`）因此完全断掉。已对该目录关闭 `useImportType`
+  与 `organizeImports`，并恢复 23 处 import 形态（commit `c509319`）。
+  教训：**格式化器不得介入 AssemblyScript 源的类型与导入语义**。
+
+### 本批次新发现、留作后续的小项
+
+- `sm9.kemEncrypt` / `kemDecrypt` 的第一参数只接受**加密主私钥**，而 `sm9.encrypt`
+  同时接受主公钥（按长度判别）。二者不一致，建议下一轮把 KEM 也放宽到主公钥形态。
+- `.gitignore` 里列了 `pnpm-lock.yaml` / `pnpm-workspace.yaml`，但两者其实都被 git
+  跟踪 —— 配置与事实矛盾（CI 因此仍可用 `--frozen-lockfile`）。
 
 **P2 — 已实现但与本文档不符**
 
