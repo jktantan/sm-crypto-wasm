@@ -50,6 +50,33 @@ interface Sm9Exports extends WebAssembly.Exports {
     kePtr: number, idPtr: number, idLen: number,
     ctPtr: number, ctLen: number, outPtr: number,
   ) => number;
+  readonly sm9KemEncryptOut: (
+    kePtr: number, idPtr: number, idLen: number,
+    rPtr: number, klen: number, c1Ptr: number, kPtr: number,
+  ) => number;
+  readonly sm9KemDecryptOut: (
+    kePtr: number, idPtr: number, idLen: number,
+    c1Ptr: number, klen: number, kPtr: number,
+  ) => number;
+  readonly sm9ExchEphemeralOut: (
+    kePtr: number, peerIdPtr: number, peerIdLen: number, rPtr: number, outPtr: number,
+  ) => void;
+  readonly sm9ExchKeyOut: (
+    kePtr: number, isInitiator: number,
+    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
+    rPtr: number, selfRPtr: number, peerRPtr: number, klen: number, outPtr: number,
+  ) => number;
+  readonly sm9ExchConfirmOut: (
+    kePtr: number, isInitiator: number,
+    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
+    rPtr: number, selfRPtr: number, peerRPtr: number, prefix: number, outPtr: number,
+  ) => void;
+  readonly sm9ExchAllOut: (
+    kePtr: number, isInitiator: number,
+    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
+    rPtr: number, selfRPtr: number, peerRPtr: number, klen: number,
+    saPtr: number, sbPtr: number, kPtr: number,
+  ) => number;
   readonly memory: WebAssembly.Memory;
 }
 
@@ -292,4 +319,305 @@ export function decrypt(
   } finally {
     exports.freeAll();
   }
+}
+
+// ---------------- KEM（密钥封装机制，GM/T 0044.4） ----------------
+
+/** KEM 封装结果。 */
+export interface KemResult {
+  /** 会话密钥 K（hex，长度为 `2*klen`）。 */
+  key: string;
+  /** 封装点 C1（65 字节未压缩 G1 点 hex：`04 || x || y`）。 */
+  encapsulation: string;
+}
+
+/**
+ * SM9 密钥封装（GM/T 0044.4）：用接收方 id 与其加密主公钥 [ke]P1 封装一个会话密钥。
+ *
+ * @param ke   32 字节加密主私钥 hex（用于派生主公钥 [ke]P1）
+ * @param id   接收方标识
+ * @param klen 会话密钥字节长度（默认 32）
+ * @param r    32 字节随机数 hex（可选；不传则由宿主 CSPRNG 提供）
+ * @returns    `{ key, encapsulation }`
+ */
+export function kemEncrypt(
+  ke: string | Uint8Array,
+  id: string | Uint8Array,
+  klen = 32,
+  r?: string | Uint8Array,
+): KemResult {
+  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const idB = toBytes(id, 'id');
+  const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
+  requireLen(rB, 32, 'r');
+  if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
+
+  const { exports } = getModule();
+  const keP = exports.alloc(32);
+  const idP = exports.alloc(idB.length);
+  const rP = exports.alloc(32);
+  const c1P = exports.alloc(65);
+  const kP = exports.alloc(klen);
+  try {
+    putBytes(keB, keP);
+    putBytes(idB, idP);
+    putBytes(rB, rP);
+    const rc = exports.sm9KemEncryptOut(keP, idP, idB.length, rP, klen, c1P, kP);
+    if (rc !== 1) throw new Error('sm9: kemEncrypt 失败（K 全 0，需换随机数重试）');
+    return { key: readHex(kP, klen), encapsulation: readHex(c1P, 65) };
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/**
+ * SM9 密钥解封装：用本端加密主私钥 ke 与 id 从封装点 C1 恢复会话密钥。
+ *
+ * @param encapsulation 65 字节封装点 C1 hex
+ * @returns 会话密钥 hex
+ */
+export function kemDecrypt(
+  ke: string | Uint8Array,
+  id: string | Uint8Array,
+  encapsulation: string | Uint8Array,
+  klen = 32,
+): string {
+  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const idB = toBytes(id, 'id');
+  const c1B = toBytes(encapsulation, 'encapsulation');
+  if (c1B.length !== 65) throw new RangeError(`sm9: encapsulation 必须是 65 字节，实际 ${c1B.length}`);
+  if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
+
+  const { exports } = getModule();
+  const keP = exports.alloc(32);
+  const idP = exports.alloc(idB.length);
+  const c1P = exports.alloc(65);
+  const kP = exports.alloc(klen);
+  try {
+    putBytes(keB, keP);
+    putBytes(idB, idP);
+    putBytes(c1B, c1P);
+    const rc = exports.sm9KemDecryptOut(keP, idP, idB.length, c1P, klen, kP);
+    if (rc !== 1) throw new Error('sm9: kemDecrypt 失败（封装非法 / K 全 0）');
+    return readHex(kP, klen);
+  } finally {
+    exports.freeAll();
+  }
+}
+
+// ---------------- 密钥交换（GM/T 0044.3） ----------------
+
+/** 密钥交换端点配置。 */
+export interface Sm9ExchangeOptions {
+  /** 会话密钥字节长度（默认 32）。 */
+  kLen?: number;
+  /** 测试注入：本端临时私钥 r（32 字节）。默认由宿主 CSPRNG 生成。 */
+  ephemeral?: string | Uint8Array;
+}
+
+/** 阶段 1 消息：发起方临时点 RA（65 字节未压缩 G1 点 hex）。 */
+export interface Sm9InitiatorMessage {
+  ephemeral: string;
+}
+/** 阶段 2 消息：响应方临时点 RB + 确认值 SB。 */
+export interface Sm9ResponderMessage extends Sm9InitiatorMessage {
+  confirm: string;
+}
+/** 阶段 3 消息：发起方确认值 SA。 */
+export interface Sm9InitiatorConfirm {
+  confirm: string;
+}
+
+export interface Sm9KeyExchangeInitiator {
+  initiate(): Sm9InitiatorMessage;
+  confirm(msg: Sm9ResponderMessage): Sm9InitiatorConfirm;
+  getSharedKey(msg: Sm9ResponderMessage, kLen?: number): string;
+}
+export interface Sm9KeyExchangeResponder {
+  respond(msg: Sm9InitiatorMessage): Sm9ResponderMessage;
+  getSharedKey(msg: Sm9InitiatorConfirm, kLen?: number): string;
+}
+
+function ctEq(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return d === 0;
+}
+
+function r32(options: Sm9ExchangeOptions): Uint8Array {
+  const r = options.ephemeral !== undefined ? toBytes(options.ephemeral, 'ephemeral') : toBytes(randomRHex(), 'r');
+  requireLen(r, 32, 'ephemeral');
+  return r;
+}
+
+/** 本端临时点 R = [r](H1(ID_peer||hid,N)P1 + Ppube)，65 字节。 */
+function exchEphemeral(ke: Uint8Array, peerId: Uint8Array, r: Uint8Array): Uint8Array {
+  const { exports } = getModule();
+  const keP = exports.alloc(32);
+  const pidP = exports.alloc(peerId.length);
+  const rP = exports.alloc(32);
+  const outP = exports.alloc(65);
+  try {
+    putBytes(ke, keP);
+    putBytes(peerId, pidP);
+    putBytes(r, rP);
+    exports.sm9ExchEphemeralOut(keP, pidP, peerId.length, rP, outP);
+    return new Uint8Array(mem().subarray(outP, outP + 65));
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/** 一次算出的结果：SA(0x83)、SB(0x82) 与共享密钥。 */
+interface ExchAll {
+  sa: string;
+  sb: string;
+  key: string;
+}
+
+/**
+ * 调用一次 wasm（`sm9ExchAllOut`）即得 SA/SB/共享密钥，避免重复 pairing。
+ * SA 为发起方确认值（prefix 0x83）、SB 为响应方确认值（prefix 0x82）。
+ */
+function exchAll(
+  ke: Uint8Array, isInitiator: boolean,
+  selfId: Uint8Array, peerId: Uint8Array,
+  r: Uint8Array, selfR: Uint8Array, peerR: Uint8Array, kLen: number,
+): ExchAll {
+  if (!Number.isInteger(kLen) || kLen <= 0) throw new RangeError('sm9.exch: kLen 必须为正整数');
+  const { exports } = getModule();
+  const keP = exports.alloc(32);
+  const sidP = exports.alloc(selfId.length);
+  const pidP = exports.alloc(peerId.length);
+  const rP = exports.alloc(32);
+  const srP = exports.alloc(65);
+  const prP = exports.alloc(65);
+  const saP = exports.alloc(32);
+  const sbP = exports.alloc(32);
+  const kP = exports.alloc(kLen);
+  try {
+    putBytes(ke, keP);
+    putBytes(selfId, sidP);
+    putBytes(peerId, pidP);
+    putBytes(r, rP);
+    putBytes(selfR, srP);
+    putBytes(peerR, prP);
+    const rc = exports.sm9ExchAllOut(
+      keP, isInitiator ? 1 : 0, sidP, selfId.length, pidP, peerId.length,
+      rP, srP, prP, kLen, saP, sbP, kP,
+    );
+    if (rc !== 1) throw new Error('sm9.exch: 共享密钥为全 0');
+    return { sa: readHex(saP, 32), sb: readHex(sbP, 32), key: readHex(kP, kLen) };
+  } finally {
+    exports.freeAll();
+  }
+}
+
+function readPoint65(b: string | Uint8Array, label: string): Uint8Array {
+  const p = toBytes(b, label);
+  if (p.length !== 65) throw new RangeError(`sm9.exch: ${label} 必须是 65 字节未压缩点`);
+  return p;
+}
+
+/**
+ * 构造 SM9 密钥交换发起方（GM/T 0044.3）。A 是发起方，B 是响应方。
+ *
+ * @param ke 本端（A）加密主私钥
+ * @param selfId 本端标识 ID_A
+ * @param peerId 对端标识 ID_B
+ */
+export async function createExchangeInitiator(
+  ke: string | Uint8Array,
+  selfId: string | Uint8Array,
+  peerId: string | Uint8Array,
+  options: Sm9ExchangeOptions = {},
+): Promise<Sm9KeyExchangeInitiator> {
+  await ensureLoaded();
+  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const selfIdB = toBytes(selfId, 'idSelf');
+  const peerIdB = toBytes(peerId, 'idPeer');
+
+  let rA: Uint8Array | null = null;
+  let RA: Uint8Array | null = null;
+  let cached: { all: ExchAll; kLen: number } | null = null;
+  const defaultKL = options.kLen ?? 32;
+
+  return {
+    initiate(): Sm9InitiatorMessage {
+      if (rA !== null) throw new Error('sm9.exch: initiate() 只能调用一次');
+      rA = r32(options);
+      RA = exchEphemeral(keB, peerIdB, rA);
+      return { ephemeral: Buffer.from(RA).toString('hex') };
+    },
+    confirm(msg: Sm9ResponderMessage): Sm9InitiatorConfirm {
+      const selfR = rA;
+      const selfRA = RA;
+      if (selfR === null || selfRA === null) throw new Error('sm9.exch: 需先调用 initiate()');
+      const RB = readPoint65(msg.ephemeral, 'RB');
+      const SB = toBytes(msg.confirm, 'SB'); requireLen(SB, 32, 'SB');
+      const all = exchAll(keB, true, selfIdB, peerIdB, selfR, selfRA, RB, defaultKL);
+      if (!ctEq(SB, Buffer.from(all.sb, 'hex'))) throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
+      cached = { all, kLen: defaultKL };
+      return { confirm: all.sa };
+    },
+    getSharedKey(msg: Sm9ResponderMessage, kLen = defaultKL): string {
+      const selfR = rA;
+      const selfRA = RA;
+      if (selfR === null || selfRA === null) throw new Error('sm9.exch: 需先调用 initiate()');
+      if (cached !== null && cached.kLen === kLen) return cached.all.key;
+      const RB = readPoint65(msg.ephemeral, 'RB');
+      return exchAll(keB, true, selfIdB, peerIdB, selfR, selfRA, RB, kLen).key;
+    },
+  };
+}
+
+/**
+ * 构造 SM9 密钥交换响应方（GM/T 0044.3）。B 是响应方。
+ *
+ * @param ke 本端（B）加密主私钥
+ * @param selfId 本端标识 ID_B
+ * @param peerId 对端（A）标识 ID_A
+ */
+export async function createExchangeResponder(
+  ke: string | Uint8Array,
+  selfId: string | Uint8Array,
+  peerId: string | Uint8Array,
+  options: Sm9ExchangeOptions = {},
+): Promise<Sm9KeyExchangeResponder> {
+  await ensureLoaded();
+  const keB = toBytes(ke, 'ke'); requireLen(keB, 32, 'ke');
+  const selfIdB = toBytes(selfId, 'idSelf');
+  const peerIdB = toBytes(peerId, 'idPeer');
+
+  let rB: Uint8Array | null = null;
+  let RB: Uint8Array | null = null;
+  let RA: Uint8Array | null = null;
+  let cached: { all: ExchAll; kLen: number } | null = null;
+  const defaultKL = options.kLen ?? 32;
+
+  return {
+    respond(msg: Sm9InitiatorMessage): Sm9ResponderMessage {
+      if (rB !== null) throw new Error('sm9.exch: respond() 只能调用一次');
+      const incomingRA = readPoint65(msg.ephemeral, 'RA');
+      rB = r32(options);
+      RB = exchEphemeral(keB, peerIdB, rB);
+      const all = exchAll(keB, false, selfIdB, peerIdB, rB, RB, incomingRA, defaultKL);
+      RA = incomingRA;
+      cached = { all, kLen: defaultKL };
+      return { ephemeral: Buffer.from(RB).toString('hex'), confirm: all.sb };
+    },
+    getSharedKey(msg: Sm9InitiatorConfirm, kLen = defaultKL): string {
+      const selfR = rB;
+      const selfRB = RB;
+      const selfRA = RA;
+      if (selfR === null || selfRB === null || selfRA === null) throw new Error('sm9.exch: 需先调用 respond()');
+      const SA = toBytes(msg.confirm, 'SA'); requireLen(SA, 32, 'SA');
+      const all = cached !== null && cached.kLen === kLen
+        ? cached.all
+        : exchAll(keB, false, selfIdB, peerIdB, selfR, selfRB, selfRA, kLen);
+      if (!ctEq(SA, Buffer.from(all.sa, 'hex'))) throw new Error('sm9.exch: 发起方确认值 S_A 校验失败');
+      return all.key;
+    },
+  };
 }

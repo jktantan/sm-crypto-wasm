@@ -24,6 +24,8 @@ import {
 export const HID_SIGN: u8 = 0x01;
 /** 加密私钥派生用的 hid。 */
 export const HID_ENC: u8 = 0x03;
+/** 密钥交换私钥派生用的 hid（GM/T 0044.3）。 */
+export const HID_EXCH: u8 = 0x02;
 
 const HASH1_PREFIX: u8 = 0x01;
 const HASH2_PREFIX: u8 = 0x02;
@@ -109,12 +111,22 @@ export function signT2(ks: U256, id: StaticArray<u8>, idLen: i32): U256 {
   return mulModN(ks, invModN(t1));
 }
 
-/** de = [ke·(H1+ke)^{-1}]P2（G2）。 */
-export function encExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 {
-  const h1 = hash1(id, idLen, HID_ENC);
+/** de = [ke·(H1(ID||hid)+ke)^{-1}]P2（G2），hid 指定用途。 */
+function extractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32, hid: u8): G2 {
+  const h1 = hash1(id, idLen, hid);
   const t1 = addModN(h1, ke);
   const t2 = mulModN(ke, invModN(t1));
   return g2Mul(t2, g2Generator());
+}
+
+/** 加密私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x03）。 */
+export function encExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 {
+  return extractKeyDe(ke, id, idLen, HID_ENC);
+}
+
+/** 密钥交换私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x02）。 */
+export function exchExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 {
+  return extractKeyDe(ke, id, idLen, HID_EXCH);
 }
 
 /** Ppubs = [ks]P2。 */
@@ -349,4 +361,242 @@ export function kdfOut(zPtr: usize, zLen: i32, kPtr: usize, kLen: i32): void {
   for (let i = 0; i < kLen; i++) store<u8>(kPtr + i, K[i]);
 }
 
+// ---------- 密钥封装 KEM（GM/T 0044.4，对齐 GmSSL sm9_enc.c） ----------
+
+function isAllZero(b: StaticArray<u8>, n: i32): bool {
+  for (let i = 0; i < n; i++) if (b[i] !== 0) return false;
+  return true;
+}
+
+/**
+ * SM9 KEM 封装：Q = [H1(ID||hid,N)]P1 + Ppube；C1 = [r]Q；
+ * w = e(Ppube, P2)^r；K = KDF(C1.x||C1.y || w || ID, klen)。
+ *
+ * @param ppube 加密主公钥 [ke]P1（G1）。
+ * @param r     临时随机数（32 字节）。
+ * @returns 1 成功；0 表示 K 全 0（调用方需换 r 重试）。
+ */
+export function sm9KemEncrypt(
+  ppube: G1, idPtr: usize, idLen: i32, r: U256, klen: i32, c1Ptr: usize, kPtr: usize,
+): i32 {
+  const id = new StaticArray<u8>(idLen);
+  for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
+
+  const h1 = hash1(id, idLen, HID_ENC);
+  const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
+  const C = g1Mul(r, Q);
+
+  const g = sm9Pairing(g2Generator(), g1ToAffine(ppube));
+  const w = fp12Pow(g, r);
+
+  const C1 = g1Compressed(C);
+  const C1xy = g1xy(C);
+  const K = kdf(cat3(C1xy, fp12ToBytes(w), id), klen);
+  if (isAllZero(K, klen)) return 0;
+
+  for (let i = 0; i < 65; i++) store<u8>(c1Ptr + i, C1[i]);
+  for (let i = 0; i < klen; i++) store<u8>(kPtr + i, K[i]);
+  return 1;
+}
+
+/**
+ * SM9 KEM 解封装：w = e(de, C1)；K = KDF(C1.x||C1.y || w || ID, klen)。
+ *
+ * @param de 用户加密私钥 [ke/(H1+ke)]P2（G2）。
+ * @returns 1 成功；0 表示 C1 格式错或 K 全 0。
+ */
+export function sm9KemDecrypt(
+  de: G2, idPtr: usize, idLen: i32, c1Ptr: usize, klen: i32, kPtr: usize,
+): i32 {
+  const id = new StaticArray<u8>(idLen);
+  for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
+
+  const C1 = new StaticArray<u8>(65);
+  for (let i = 0; i < 65; i++) C1[i] = load<u8>(c1Ptr + i);
+  if (C1[0] !== 0x04) return 0;
+
+  const P = new G1();
+  P.X = u256FromBytesBE(C1, 1);
+  P.Y = u256FromBytesBE(C1, 33);
+  P.Z = u256fromU32(1);
+
+  const w = sm9Pairing(g2ToAffine(de), P);
+  const C1xy = new StaticArray<u8>(64);
+  for (let i = 0; i < 64; i++) C1xy[i] = C1[1 + i];
+  const K = kdf(cat3(C1xy, fp12ToBytes(w), id), klen);
+  if (isAllZero(K, klen)) return 0;
+
+  for (let i = 0; i < klen; i++) store<u8>(kPtr + i, K[i]);
+  return 1;
+}
+
 void fp12one; void g1Add; void g2Add;
+
+// ---------- 密钥交换（GM/T 0044.3，对齐 GmSSL sm9_exch.c） ----------
+//
+// 双方用各自加密私钥 de（= enc key，见 sm9.h: #define SM9_EXCH_KEY SM9_ENC_KEY）
+// 与主公钥 Ppube=[ke]P1：
+//   E1 = e(P2, Ppube)^r ；E2 = e(de, peerR) ；G3 = E2^r
+//   发起方：G1 = E1, G2 = E2 ；响应方：G1 = E2, G2 = E1
+//   K = KDF(IDA||IDB||RA||RB||G1||G2||G3, klen)         （RA/RB 恒按 A 在前）
+//   S = SM3(prefix || G1 || SM3(G2 || G3 || IDA || IDB || RA || RB))
+//     prefix = 0x83（发起方）/ 0x82（响应方）
+
+/** 从线性内存读 len 字节。 */
+function ldBytes(ptr: usize, len: i32): StaticArray<u8> {
+  const b = new StaticArray<u8>(len);
+  for (let i = 0; i < len; i++) b[i] = load<u8>(ptr + i);
+  return b;
+}
+
+/** 从 65 字节未压缩点取 64 字节 x||y。 */
+function xy64(p65: StaticArray<u8>): StaticArray<u8> {
+  const r = new StaticArray<u8>(64);
+  for (let i = 0; i < 64; i++) r[i] = p65[1 + i];
+  return r;
+}
+
+/** 从线性内存读 65 字节未压缩 G1 点（04||x||y）为 G1（Z=1）。 */
+function readG1Bytes(ptr: usize): G1 {
+  const P = new G1();
+  P.X = readU256(ptr + 1);
+  P.Y = readU256(ptr + 33);
+  P.Z = u256fromU32(1);
+  return P;
+}
+
+/** 计算 G1/G2/G3 的字节（各 384B），对齐 GmSSL compute_g。 */
+function exchComputeG(
+  de: G2, ppube: G1, isInitiator: bool, r: U256, peerR: G1,
+  g1b: StaticArray<u8>, g2b: StaticArray<u8>, g3b: StaticArray<u8>,
+): void {
+  const E1 = fp12Pow(sm9Pairing(g2Generator(), g1ToAffine(ppube)), r);
+  const E2 = sm9Pairing(g2ToAffine(de), g1ToAffine(peerR));
+  const G3v = fp12Pow(E2, r);
+  const G1v = isInitiator ? E1 : E2;
+  const G2v = isInitiator ? E2 : E1;
+  const b1 = fp12ToBytes(G1v);
+  const b2 = fp12ToBytes(G2v);
+  const b3 = fp12ToBytes(G3v);
+  for (let i = 0; i < 384; i++) {
+    g1b[i] = b1[i];
+    g2b[i] = b2[i];
+    g3b[i] = b3[i];
+  }
+}
+
+/** 生成本端临时点 R = [r](H1(ID_peer||hid,N)·P1 + Ppube)，输出 65B。 */
+export function sm9ExchEphemeral(ppube: G1, peerIdPtr: usize, peerIdLen: i32, r: U256, outPtr: usize): void {
+  const peerId = ldBytes(peerIdPtr, peerIdLen);
+  const h1 = hash1(peerId, peerIdLen, HID_EXCH);
+  const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
+  const R = g1Compressed(g1Mul(r, Q));
+  for (let i = 0; i < 65; i++) store<u8>(outPtr + i, R[i]);
+}
+
+/** 密钥交换共享密钥 K = KDF(...)。@returns 1 成功；0 K 全 0。 */
+export function sm9ExchKey(
+  de: G2, ppube: G1, isInitiator: i32,
+  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
+  r: U256, selfRPtr: usize, peerRPtr: usize, klen: i32, outPtr: usize,
+): i32 {
+  const selfId = ldBytes(selfIdPtr, selfIdLen);
+  const peerId = ldBytes(peerIdPtr, peerIdLen);
+  const selfR65 = ldBytes(selfRPtr, 65);
+  const peerR65 = ldBytes(peerRPtr, 65);
+
+  const g1b = new StaticArray<u8>(384);
+  const g2b = new StaticArray<u8>(384);
+  const g3b = new StaticArray<u8>(384);
+  const initiator = isInitiator !== 0;
+  exchComputeG(de, ppube, initiator, r, readG1Bytes(peerRPtr), g1b, g2b, g3b);
+
+  const idA = initiator ? selfId : peerId;
+  const idB = initiator ? peerId : selfId;
+  const ra = initiator ? selfR65 : peerR65;
+  const rb = initiator ? peerR65 : selfR65;
+
+  const z = cat2(cat2(cat2(cat2(cat2(cat2(idA, idB), xy64(ra)), xy64(rb)), g1b), g2b), g3b);
+  const K = kdf(z, klen);
+  if (isAllZero(K, klen)) return 0;
+  for (let i = 0; i < klen; i++) store<u8>(outPtr + i, K[i]);
+  return 1;
+}
+
+/** 密钥交换确认值 S = SM3(prefix || G1 || SM3(G2||G3||IDA||IDB||RA||RB))。prefix: 0x83 发起方 / 0x82 响应方。 */
+export function sm9ExchConfirm(
+  de: G2, ppube: G1, isInitiator: i32,
+  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
+  r: U256, selfRPtr: usize, peerRPtr: usize, prefix: i32, outPtr: usize,
+): void {
+  const selfId = ldBytes(selfIdPtr, selfIdLen);
+  const peerId = ldBytes(peerIdPtr, peerIdLen);
+  const selfR65 = ldBytes(selfRPtr, 65);
+  const peerR65 = ldBytes(peerRPtr, 65);
+
+  const g1b = new StaticArray<u8>(384);
+  const g2b = new StaticArray<u8>(384);
+  const g3b = new StaticArray<u8>(384);
+  const initiator = isInitiator !== 0;
+  exchComputeG(de, ppube, initiator, r, readG1Bytes(peerRPtr), g1b, g2b, g3b);
+
+  const idA = initiator ? selfId : peerId;
+  const idB = initiator ? peerId : selfId;
+  const ra = initiator ? selfR65 : peerR65;
+  const rb = initiator ? peerR65 : selfR65;
+
+  const hashIn = cat2(cat2(cat2(cat2(cat2(g2b, g3b), idA), idB), xy64(ra)), xy64(rb));
+  const hash = new StaticArray<u8>(32);
+  sm3HashInto(changetype<usize>(hashIn), hashIn.length, changetype<usize>(hash));
+
+  const pfx = new StaticArray<u8>(1);
+  pfx[0] = <u8>prefix;
+  const outIn = cat3(pfx, g1b, hash);
+  sm3HashInto(changetype<usize>(outIn), outIn.length, outPtr);
+}
+
+/**
+ * 一次算出 SA(0x83)、SB(0x82) 与共享密钥 K（避免重复 pairing）。
+ * @returns 1 成功；0 K 全 0。
+ */
+export function sm9ExchAll(
+  de: G2, ppube: G1, isInitiator: i32,
+  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
+  r: U256, selfRPtr: usize, peerRPtr: usize, klen: i32,
+  saPtr: usize, sbPtr: usize, kPtr: usize,
+): i32 {
+  const selfId = ldBytes(selfIdPtr, selfIdLen);
+  const peerId = ldBytes(peerIdPtr, peerIdLen);
+  const selfR65 = ldBytes(selfRPtr, 65);
+  const peerR65 = ldBytes(peerRPtr, 65);
+
+  const g1b = new StaticArray<u8>(384);
+  const g2b = new StaticArray<u8>(384);
+  const g3b = new StaticArray<u8>(384);
+  const initiator = isInitiator !== 0;
+  exchComputeG(de, ppube, initiator, r, readG1Bytes(peerRPtr), g1b, g2b, g3b);
+
+  const idA = initiator ? selfId : peerId;
+  const idB = initiator ? peerId : selfId;
+  const ra = initiator ? selfR65 : peerR65;
+  const rb = initiator ? peerR65 : selfR65;
+
+  const hashIn = cat2(cat2(cat2(cat2(cat2(g2b, g3b), idA), idB), xy64(ra)), xy64(rb));
+  const hash = new StaticArray<u8>(32);
+  sm3HashInto(changetype<usize>(hashIn), hashIn.length, changetype<usize>(hash));
+
+  const pA = new StaticArray<u8>(1);
+  pA[0] = 0x83;
+  const pB = new StaticArray<u8>(1);
+  pB[0] = 0x82;
+  const saIn = cat3(pA, g1b, hash);
+  sm3HashInto(changetype<usize>(saIn), saIn.length, saPtr);
+  const sbIn = cat3(pB, g1b, hash);
+  sm3HashInto(changetype<usize>(sbIn), sbIn.length, sbPtr);
+
+  const z = cat2(cat2(cat2(cat2(cat2(cat2(idA, idB), xy64(ra)), xy64(rb)), g1b), g2b), g3b);
+  const K = kdf(z, klen);
+  if (isAllZero(K, klen)) return 0;
+  for (let i = 0; i < klen; i++) store<u8>(kPtr + i, K[i]);
+  return 1;
+}

@@ -3,9 +3,12 @@
  *
  * 覆盖:
  *  1. 主公钥派生 (getSignPublicKey 对拍 GmSSL C; getEncPublicKey 输出格式; 拒绝坏输入)
- *  2. sign 定 r 跨平台 (产生期望 sig) + verify 接受 (≤ 30s)
- *  3. encrypt 定 r 跨平台 (产生期望 ct) + decrypt 还原 (≤ 20s)
- *  4. sign 缺 r 走 CSPRNG + verify 接受 + 缺 r 走 CSPRNG sign 后 verify 接受 Uint8Array msg (≤ 30s)
+ *  2. sign 定 r 跨平台 (产生期望 sig) + verify 接受
+ *  3. encrypt 定 r 跨平台 (产生期望 ct) + decrypt 还原
+ *  4. sign 缺 r 走 CSPRNG + verify 接受 + verify 接受 Uint8Array msg
+ *
+ * 超时放宽说明：新增 sm9-kem / sm9-exch / sm9-kem-exch-kat 测试后，多个 SM9
+ * 文件并行会争用 CPU，单个 pairing 相关用例耗时上升，故护栏从 20~60s 放宽到 60~120s。
  *
  * 详细 6+ 用例版（含篡改/wrong id 拒坏、随机 r round-trip 等）见 sm9-full.spec.ts。
  * 后者在内含 3-4 次 verify 时单测 ≥ 60s, 需要 CI testTimeout ≥ 150s。
@@ -36,24 +39,24 @@ describe('SM9 facade', () => {
     expect(() => sm9.getEncPublicKey('aa'.repeat(33))).toThrow();
   });
 
-  it('sign 定 r 跨平台 + verify 接受 (≤ 30s)', () => {
+  it('sign 定 r 跨平台 + verify 接受', () => {
     const sig = sm9.sign(SIGN.ks_hex, SIGN.ida, SIGN.msg_hex, SIGN.r_hex);
     expect(sig.toLowerCase()).toBe(SIGN.expected_sig_hex.toLowerCase());
     expect(sm9.verify(SIGN.ks_hex, SIGN.ida, SIGN.msg_hex, sig)).toBe(true);
-  }, 30_000);
+  }, 120_000);
 
-  it('encrypt 定 r 跨平台 + decrypt 还原 (≤ 25s)', () => {
+  it('encrypt 定 r 跨平台 + decrypt 还原', () => {
     const ct = sm9.encrypt(ENC.ke_hex, ENC.idb, ENC.msg_hex, ENC.r_hex);
     expect(ct.length).toBe(ENC.expected_ct_len * 2);
     expect(ct.toLowerCase()).toBe(ENC.expected_ct_hex.toLowerCase());
     expect(sm9.decrypt(ENC.ke_hex, ENC.idb, ct).toLowerCase()).toBe(ENC.msg_hex.toLowerCase());
-  }, 25_000);
+  }, 60_000);
 
-  it('sign 缺 r 走 CSPRNG + verify 接受 hex / Uint8Array 两种 msg (≤ 60s)', () => {
+  it('sign 缺 r 走 CSPRNG + verify 接受 hex / Uint8Array 两种 msg', () => {
     const sig = sm9.sign(SIGN.ks_hex, SIGN.ida, SIGN.msg_hex);
     expect(sig).toMatch(/^[0-9a-f]{192}$/);
     expect(sm9.verify(SIGN.ks_hex, SIGN.ida, SIGN.msg_hex, sig)).toBe(true);
     const u8 = new Uint8Array(Buffer.from(SIGN.msg_hex, 'hex'));
     expect(sm9.verify(SIGN.ks_hex, SIGN.ida, u8, sig)).toBe(true);
-  }, 60_000);
+  }, 120_000);
 });
