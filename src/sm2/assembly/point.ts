@@ -223,6 +223,94 @@ export function addPoints(p: JPoint, q: JPoint): JPoint {
   return r;
 }
 
+/**
+ * 混合坐标点加：out = P + Q，其中 **Q 为仿射点（Z2 = 1）**。
+ * 公式 madd-2007-bl：8M + 3S，比通用 Jacobian 点加（12M + 4S）省约 1/3。
+ *
+ * 前提：Q 非无穷远（调用方保证；本函数不检查 Q.z）。
+ * 别名纪律与 addInto 相同：写入 out 之前已读完 P、Q 的所有字段。
+ */
+export function addMixedInto(out: JPoint, p: JPoint, q: JPoint): void {
+  if (isInfinity(p)) {
+    u256copy(q.x, out.x);
+    u256copy(q.y, out.y);
+    u256copy(ONE_U256, out.z);
+    return;
+  }
+  fpSqrTo(ME0, p.z); // Z1Z1 = Z1²
+  fpMulTo(ME1, q.x, ME0); // U2 = X2·Z1Z1
+  fpMulTo(ME2, p.z, ME0); // Z1·Z1Z1
+  fpMulTo(ME2, q.y, ME2); // S2 = Y2·Z1³
+  fpSubTo(ME3, ME1, p.x); // H = U2 − X1
+  fpSubTo(ME4, ME2, p.y); // S2 − Y1
+
+  if (u256isZero(ME3)) {
+    if (u256isZero(ME4)) {
+      doubleInto(out, p); // 同点：退化为倍点
+      return;
+    }
+    setZero(out); // 互为逆元 → 无穷远
+    return;
+  }
+
+  fpAddTo(ME4, ME4, ME4); // r = 2·(S2 − Y1)
+  fpSqrTo(ME5, ME3); // HH = H²
+  fpAddTo(ME6, ME5, ME5); // 2·HH
+  fpAddTo(ME6, ME6, ME6); // I = 4·HH
+  fpMulTo(ME7, ME3, ME6); // J = H·I
+  fpMulTo(ME8, p.x, ME6); // V = X1·I
+  fpSqrTo(ME9, ME4); // r²
+  fpSubTo(ME9, ME9, ME7); // r² − J
+  fpAddTo(ME10, ME8, ME8); // 2V
+  fpSubTo(out.x, ME9, ME10); // X3 = r² − J − 2V
+  fpSubTo(ME9, ME8, out.x); // V − X3
+  fpMulTo(ME9, ME4, ME9); // r·(V − X3)
+  fpMulTo(ME11, p.y, ME7); // Y1·J
+  fpAddTo(ME11, ME11, ME11); // 2·Y1·J
+  fpSubTo(out.y, ME9, ME11); // Y3 = r·(V − X3) − 2·Y1·J
+  fpAddTo(ME12, p.z, ME3); // Z1 + H
+  fpSqrTo(ME12, ME12); // (Z1 + H)²
+  fpSubTo(ME12, ME12, ME0); // − Z1Z1
+  fpSubTo(out.z, ME12, ME5); // Z3 = (Z1+H)² − Z1Z1 − HH
+}
+
+/**
+ * 批量归一化：把 n 个 Jacobian 点一次性转成仿射（Z = 1）。
+ *
+ * 用 Montgomery 求逆技巧：n 次求逆换取 1 次求逆 + 3n 次乘法。
+ * comb 表（32 项）若逐点 fpInv，一次性成本 32×12.5µs ≈ 400µs；此处约 25µs。
+ * z == 0 的项（无穷远）原样保留。
+ */
+function batchToAffine(points: StaticArray<JPoint>): void {
+  const n = points.length;
+  const prod = arenaAlloc(<usize>n * 32); // 前缀积
+  const acc = arenaAlloc(32);
+  u256copy(ONE_U256, acc);
+  for (let i = 0; i < n; i++) {
+    u256copy(acc, prod + ((<usize>i) << 5)); // prod[i] = acc
+    const z = points[i].z;
+    if (!u256isZero(z)) fpMulTo(acc, acc, z); // 跳过无穷远
+  }
+
+  const inv = fpInv(acc); // 唯一一次求逆
+  for (let i = n - 1; i >= 0; i--) {
+    const p = points[i];
+    if (u256isZero(p.z)) continue;
+    const zi = arenaAlloc(32);
+    const zinv = arenaAlloc(32);
+    const z2 = arenaAlloc(32);
+    const z3 = arenaAlloc(32);
+    u256copy(prod + ((<usize>i) << 5), zi); // zi = prod[i]
+    fpMulTo(zinv, inv, zi); // z_i^{-1}
+    fpMulTo(inv, inv, p.z); // inv *= z_i（回推下一个）
+    fpSqrTo(z2, zinv);
+    fpMulTo(z3, z2, zinv);
+    fpMulTo(p.x, p.x, z2);
+    fpMulTo(p.y, p.y, z3);
+    u256copy(ONE_U256, p.z);
+  }
+}
+
 /** 无穷远点。 */
 export function infinity(): JPoint {
   return new JPoint(); // Z = 0 by default
@@ -266,7 +354,23 @@ const AE13 = u256zero();
 const AE14 = u256zero();
 const AE15 = u256zero();
 
+// 混合坐标点加（addMixedInto，Q 为仿射）的工作区。
+const ME0 = u256zero();
+const ME1 = u256zero();
+const ME2 = u256zero();
+const ME3 = u256zero();
+const ME4 = u256zero();
+const ME5 = u256zero();
+const ME6 = u256zero();
+const ME7 = u256zero();
+const ME8 = u256zero();
+const ME9 = u256zero();
+const ME10 = u256zero();
+const ME11 = u256zero();
+const ME12 = u256zero();
+
 const ZERO_U256 = u256zero(); // 只读零常量
+const ONE_U256 = u256fromU32(1); // 只读常量 1（仿射点的 Z）
 
 /** out = 0（无穷远点的坐标）。 */
 function setZero(out: JPoint): void {
@@ -465,7 +569,12 @@ function buildComb(): StaticArray<JPoint> {
 
 let g1CombCache: StaticArray<JPoint> = new StaticArray<JPoint>(0);
 
-/** 惰性取 comb 表（首次构造后缓存；坐标深拷贝到永久区，免被 arena 回卷覆盖）。 */
+/**
+ * 惰性取 comb 表（首次构造后缓存；坐标深拷贝到永久区，免被 arena 回卷覆盖）。
+ *
+ * 表项**转成仿射**（Z = 1）：构建时用一次 Montgomery 批量求逆（约 25µs，一次性），
+ * 之后每次 scalarMulG 的 52 次点加都能走混合坐标（8M+3S 而非 12M+4S）。
+ */
 function combTable(): StaticArray<JPoint> {
   if (g1CombCache.length === 0) {
     const t = buildComb();
@@ -475,18 +584,20 @@ function combTable(): StaticArray<JPoint> {
       p.y = permU256(p.y);
       p.z = permU256(p.z);
     }
+    batchToAffine(t); // G[0] 为无穷远（Z = 0），批量归一化会跳过
     g1CombCache = t;
   }
   return g1CombCache;
 }
 
-/** 标量乘 G：R = k · G（固定基点 comb）。 */
+/** 标量乘 G：R = k · G（固定基点 comb，仿射表 + 混合坐标点加）。 */
 export function scalarMulG(k: U256): JPoint {
   const G = combTable();
   const Q = clonePoint(G[combIndex(k, COMB_D - 1)]);
   for (let j = COMB_D - 2; j >= 0; j--) {
     doubleInto(Q, Q);
-    addInto(Q, Q, G[combIndex(k, j)]);
+    const c = combIndex(k, j);
+    if (c !== 0) addMixedInto(Q, Q, G[c]); // G[0] 是无穷远，跳过
   }
   return Q;
 }
