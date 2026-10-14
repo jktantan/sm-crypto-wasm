@@ -12,18 +12,18 @@
 // oracle 验证：plan Task 6；对点加/倍点/标量乘用 gmkitx 或 Node bigint 校验。
 
 import {
-  U256,
-  pArr,
-  nArr,
   fpAdd,
-  fpSub,
+  fpInv,
   fpMul,
   fpSqr,
-  fpInv,
-  u256fromBytes,
-  u256toBytes,
+  fpSub,
+  nArr,
+  pArr,
+  type U256,
   u256cmp,
+  u256fromBytes,
   u256isZero,
+  u256toBytes,
   u256zero,
 } from './field';
 

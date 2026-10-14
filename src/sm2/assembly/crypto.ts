@@ -11,14 +11,30 @@
 //
 // 本文件是**纯运算层**：输入输出均为线性内存指针，由 index.ts 的导出包装。
 
-import {
-  U256, u256fromBytes, u256toBytes, u256cmp, u256isZero, u256zero,
-  fpAdd, fpSub, fpMul,
-  pArr,
-} from './field';
-import { JPoint, basePoint, scalarMul, scalarMulG, toAffine, infinity, addPoints, isInfinity } from './point';
-import { addModN, subModN, mulModN, invModN, nArr } from './modn';
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
+import {
+  fpAdd,
+  fpMul,
+  fpSub,
+  pArr,
+  type U256,
+  u256cmp,
+  u256fromBytes,
+  u256isZero,
+  u256toBytes,
+  u256zero,
+} from './field';
+import { addModN, invModN, mulModN, nArr, subModN } from './modn';
+import {
+  addPoints,
+  basePoint,
+  infinity,
+  isInfinity,
+  JPoint,
+  scalarMul,
+  scalarMulG,
+  toAffine,
+} from './point';
 
 // ---------- 工具 ----------
 
@@ -61,9 +77,12 @@ function bytesToU256(b: Uint8Array, off: usize): U256 {
 function curveParamBytes(which: i32): Uint8Array {
   const out = new Uint8Array(32);
   let hex = '';
-  if (which === 0) hex = 'FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFC'; // a
-  else if (which === 1) hex = '28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93'; // b
-  else if (which === 2) hex = '32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7'; // Gx
+  if (which === 0)
+    hex = 'FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFC'; // a
+  else if (which === 1)
+    hex = '28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93'; // b
+  else if (which === 2)
+    hex = '32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7'; // Gx
   else hex = 'BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0'; // Gy
   for (let i = 0; i < 32; i++) {
     out[i] = <u8>((hexNib(hex.charCodeAt(i * 2)) << 4) | hexNib(hex.charCodeAt(i * 2 + 1)));
@@ -90,7 +109,13 @@ const DEFAULT_ID = '1234567812345678';
  * @param idLen 用户标识长度。
  * @param outPtr 输出 32 字节。
  */
-export function computeZ(pubXPtr: usize, pubYPtr: usize, idPtr: usize, idLen: usize, outPtr: usize): void {
+export function computeZ(
+  pubXPtr: usize,
+  pubYPtr: usize,
+  idPtr: usize,
+  idLen: usize,
+  outPtr: usize,
+): void {
   // Z 输入：ENTLA(2) || IDA(idLen) || a(32) || b(32) || Gx(32) || Gy(32) || Px(32) || Py(32)
   const entla = idLen * 8;
   const total = 2 + idLen + 32 * 6;
@@ -133,8 +158,13 @@ export function computeZDefaultId(pubXPtr: usize, pubYPtr: usize, outPtr: usize)
  * @returns 0 成功；1 表示 k 不合法需要重试。
  */
 export function sign(
-  privPtr: usize, zPtr: usize, msgPtr: usize, msgLen: usize,
-  kPtr: usize, rPtr: usize, sPtr: usize,
+  privPtr: usize,
+  zPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  rPtr: usize,
+  sPtr: usize,
 ): i32 {
   const d = ld(privPtr);
   const k = ld(kPtr);
@@ -144,7 +174,7 @@ export function sign(
   const e = hashZMsg(zPtr, msgPtr, msgLen);
   const kg = toAffine(scalarMulG(k));
   const x1 = kg.x;
-  let r = addModN(e, x1);
+  const r = addModN(e, x1);
   if (u256isZero(r)) return 1;
 
   // 检查 r + k == n
@@ -179,8 +209,13 @@ export function sign(
  * @returns 1 有效，0 无效。
  */
 export function verify(
-  pubXPtr: usize, pubYPtr: usize, zPtr: usize, msgPtr: usize, msgLen: usize,
-  rPtr: usize, sPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  zPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  rPtr: usize,
+  sPtr: usize,
 ): i32 {
   const r = ld(rPtr);
   const s = ld(sPtr);
@@ -243,8 +278,12 @@ function addPointRaw(a: JPoint, b: JPoint): JPoint {
  * @returns 1 成功，0 表示 KDF 全 0 需重试。
  */
 export function encrypt(
-  pubXPtr: usize, pubYPtr: usize, msgPtr: usize, msgLen: usize,
-  kPtr: usize, outPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  outPtr: usize,
 ): i32 {
   const pub = new JPoint();
   pub.x = ld(pubXPtr);
@@ -293,7 +332,13 @@ function c1Buffer(x: U256): Uint8Array {
   return b;
 }
 
-function bytesInto(src: Uint8Array, srcOff: usize, dst: StaticArray<u8>, dstOff: i32, n: i32): void {
+function bytesInto(
+  src: Uint8Array,
+  srcOff: usize,
+  dst: StaticArray<u8>,
+  dstOff: i32,
+  n: i32,
+): void {
   for (let i: usize = 0; i < <usize>n; i++) dst[dstOff + <i32>i] = src[srcOff + i];
 }
 
@@ -302,9 +347,7 @@ function bytesInto(src: Uint8Array, srcOff: usize, dst: StaticArray<u8>, dstOff:
  *
  * @returns 1 成功，0 C3 校验失败。
  */
-export function decrypt(
-  privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usize,
-): i32 {
+export function decrypt(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usize): i32 {
   const d = ld(privPtr);
   // C1 = 04 || x || y
   const c1 = new JPoint();
@@ -424,8 +467,11 @@ function affinePoint(xyPtr: usize): JPoint {
  * @returns 1 成功；0 出现无穷远点（调用方需重试）。
  */
 export function kexComputeU(
-  privPtr: usize, rSelfPtr: usize,
-  rSelfXYPtr: usize, peerPubXYPtr: usize, peerRXYPtr: usize,
+  privPtr: usize,
+  rSelfPtr: usize,
+  rSelfXYPtr: usize,
+  peerPubXYPtr: usize,
+  peerRXYPtr: usize,
   outPtr: usize,
 ): i32 {
   const d = ld(privPtr);
@@ -469,8 +515,11 @@ export function kexComputeU(
  */
 export function kexConfirm(
   prefix: i32,
-  uPtr: usize, zaPtr: usize, zbPtr: usize,
-  raXYPtr: usize, rbXYPtr: usize,
+  uPtr: usize,
+  zaPtr: usize,
+  zbPtr: usize,
+  raXYPtr: usize,
+  rbXYPtr: usize,
   outPtr: usize,
 ): void {
   // inner = SM3(Ux || ZA || ZB || RA(64) || RB(64))

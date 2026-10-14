@@ -15,7 +15,7 @@
  *
  * spec/plan 对应：plan Task 10；spec §6 API、§12.1 Q2（同步优先）、Q3（PKCS#8 + SM9 OID）。
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm9 from '@/sm9';
 import params from '../vectors/sm9/params.json' with { type: 'json' };
 

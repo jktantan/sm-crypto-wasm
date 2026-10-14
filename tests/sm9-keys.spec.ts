@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import * as sm9 from '@/sm9';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as pkg from '@/index';
 import {
-  SM9_OID,
-  encodeSm9PrivateKeyPem,
-  parseSm9PrivateKeyPem,
-  encodeSm9PublicKeyPem,
-  parseSm9PublicKeyPem,
   encodePkcs8PrivateKey,
+  encodeSm9PrivateKeyPem,
+  encodeSm9PublicKeyPem,
+  parseSm9PrivateKeyPem,
+  parseSm9PublicKeyPem,
+  SM9_OID,
 } from '@/pem';
 import { InvalidKeyError } from '@/runtime';
+import * as sm9 from '@/sm9';
 
 /**
  * SM9 密钥的 PKCS#8 / SPKI 编码（spec §12.1 Q3，OID 1.2.156.10197.1.100）
@@ -103,9 +103,9 @@ describe('SM9 主公钥支持', () => {
     const sig = sm9.sign(kp.masterPrivatePem, 'alice@foo.com', msg);
 
     expect(sm9.verify(kp.masterPublicPem, 'alice@foo.com', msg, sig)).toBe(true);
-    expect(
-      sm9.verify(parseSm9PublicKeyPem(kp.masterPublicPem), 'alice@foo.com', msg, sig),
-    ).toBe(true);
+    expect(sm9.verify(parseSm9PublicKeyPem(kp.masterPublicPem), 'alice@foo.com', msg, sig)).toBe(
+      true,
+    );
   });
 
   it('verify 用别的密钥对的主公钥返回 false', async () => {

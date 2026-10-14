@@ -9,17 +9,35 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { U256, u256 } from './fp';
+import { type U256, u256 } from './fp';
 import {
-  Fp2, fp2Put,
-  fp2Mul, fp2Sqr, fp2Neg, fp2Tri, fp2Div2, fp2Sub, fp2MulFp, fp2Conjugate, fp2copy,
+  Fp2,
+  fp2Conjugate,
+  fp2copy,
+  fp2Div2,
+  fp2Mul,
+  fp2MulFp,
+  fp2Neg,
+  fp2Put,
+  fp2Sqr,
+  fp2Sub,
+  fp2Tri,
 } from './fp2';
 import {
-  Fp12, fp12zero, fp12one, fp12Mul, fp12Sqr, fp12Inv,
-  fp12Pow, fp12PowSmall, fp12Frobenius, fp12Frobenius2, fp12Frobenius3, fp12Frobenius6,
+  type Fp12,
+  fp12Frobenius,
+  fp12Frobenius2,
+  fp12Frobenius3,
+  fp12Frobenius6,
+  fp12Inv,
+  fp12Mul,
+  fp12one,
+  fp12Pow,
+  fp12PowSmall,
+  fp12Sqr,
+  fp12zero,
 } from './fp12';
-import { G1 } from './point';
-import { G2, g2Copy, g2Double, g2Add, g2AddFull } from './point';
+import { type G1, type G2, g2Add, g2AddFull, g2Copy, g2Double } from './point';
 
 // ---------- twist 点自同构 ----------
 
@@ -62,8 +80,11 @@ export function twistNegPi2(Q: G2): G2 {
  * 返回 [num, den]。
  */
 export function evalGTangent(T: G2, Q: G1): StaticArray<Fp12> {
-  const XP = T.X, YP = T.Y, ZP = T.Z;
-  const xQ = Q.X, yQ = Q.Y;
+  const XP = T.X,
+    YP = T.Y,
+    ZP = T.Z;
+  const xQ = Q.X,
+    yQ = Q.Y;
 
   let t0 = fp2Sqr(ZP);
   let t1 = fp2Mul(t0, ZP);
@@ -97,9 +118,14 @@ export function evalGTangent(T: G2, Q: G1): StaticArray<Fp12> {
  * 返回 [num, den]。
  */
 export function evalGLine(T: G2, P: G2, Q: G1): StaticArray<Fp12> {
-  const XT = T.X, YT = T.Y, ZT = T.Z;
-  const XP = P.X, YP = P.Y, ZP = P.Z;
-  const xQ = Q.X, yQ = Q.Y;
+  const XT = T.X,
+    YT = T.Y,
+    ZT = T.Z;
+  const XP = P.X,
+    YP = P.Y,
+    ZP = P.Z;
+  const xQ = Q.X,
+    yQ = Q.Y;
 
   let T0 = fp2Sqr(ZP);
   let T1 = fp2Mul(T0, XT);
@@ -212,7 +238,7 @@ export function finalExponent(f: Fp12): Fp12 {
   let t0 = fp12Frobenius6(f);
   const t1 = fp12Inv(f);
   t0 = fp12Mul(t0, t1);
-  let t1b = fp12Frobenius2(t0, u256(ALPHA2), u256(ALPHA4));
+  const t1b = fp12Frobenius2(t0, u256(ALPHA2), u256(ALPHA4));
   t0 = fp12Mul(t0, t1b);
   return finalExponentHardPart(t0);
 }

@@ -8,12 +8,34 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { U256, fpAdd, fpSub, fpMul, fpSqr, fpInv, fpDiv2, fpNeg, pArr } from './fp';
 import {
-  Fp2, fp2zero, fp2one, fp2set, fp2isZero, fp2isOne, fp2copy, fp2Add, fp2Sub, fp2Neg,
-  fp2Dbl, fp2Tri, fp2Div2, fp2Mul, fp2Sqr, fp2Inv,
+  u256clone,
+  u256eq,
+  u256fromHex,
+  u256isOdd,
+  u256isZero,
+  u256shr1,
+  u256zero,
+} from '../../common/assembly/field256';
+import { fpAdd, fpDiv2, fpInv, fpMul, fpNeg, fpSqr, fpSub, pArr, type U256 } from './fp';
+import {
+  type Fp2,
+  fp2Add,
+  fp2copy,
+  fp2Dbl,
+  fp2Div2,
+  fp2Inv,
+  fp2isOne,
+  fp2isZero,
+  fp2Mul,
+  fp2Neg,
+  fp2one,
+  fp2Sqr,
+  fp2Sub,
+  fp2set,
+  fp2Tri,
+  fp2zero,
 } from './fp2';
-import { u256zero, u256eq, u256fromHex, u256clone, u256isOdd, u256isZero, u256shr1 } from '../../common/assembly/field256';
 
 /** G1 点（Fp 上），Jacobian。 */
 export class G1 {
@@ -88,12 +110,14 @@ export function g1Neg(P: G1): G1 {
 /** 倍点（对齐 point_double）。 */
 export function g1Double(P: G1): G1 {
   if (g1IsInfinity(P)) return g1Copy(P);
-  const X1 = P.X, Y1 = P.Y, Z1 = P.Z;
-  let T2 = fpMul(fpSqr(X1), U256_THREE);
+  const X1 = P.X,
+    Y1 = P.Y,
+    Z1 = P.Z;
+  const T2 = fpMul(fpSqr(X1), U256_THREE);
   let Y3 = fpAdd(Y1, Y1);
   const Z3 = fpMul(Y3, Z1);
   Y3 = fpSqr(Y3);
-  let T3 = fpMul(Y3, X1);
+  const T3 = fpMul(Y3, X1);
   Y3 = fpSqr(Y3);
   Y3 = fpDiv2(Y3);
   let X3 = fpSqr(T2);
@@ -103,7 +127,9 @@ export function g1Double(P: G1): G1 {
   T1 = fpMul(T1, T2);
   Y3 = fpSub(T1, Y3);
   const r = new G1();
-  r.X = X3; r.Y = Y3; r.Z = Z3;
+  r.X = X3;
+  r.Y = Y3;
+  r.Z = Z3;
   return r;
 }
 
@@ -111,11 +137,15 @@ export function g1Double(P: G1): G1 {
 export function g1Add(P: G1, Q: G1): G1 {
   if (g1IsInfinity(Q)) return g1Copy(P);
   if (g1IsInfinity(P)) return g1Copy(Q);
-  const X1 = P.X, Y1 = P.Y, Z1 = P.Z;
-  const X2 = Q.X, Y2 = Q.Y, Z2 = Q.Z;
+  const X1 = P.X,
+    Y1 = P.Y,
+    Z1 = P.Z;
+  const X2 = Q.X,
+    Y2 = Q.Y,
+    Z2 = Q.Z;
   let T1 = fpSqr(Z1);
   let T2 = fpSqr(Z2);
-  let U1 = fpMul(X1, T2);
+  const U1 = fpMul(X1, T2);
   let U2 = fpMul(X2, T1);
   let Z3 = fpSqr(fpAdd(Z1, Z2));
   Z3 = fpSub(Z3, T1);
@@ -149,7 +179,9 @@ export function g1Add(P: G1, Q: G1): G1 {
   Y3 = fpSub(Y3, S1);
   X3 = fpSub(I, X3);
   const r = new G1();
-  r.X = X3; r.Y = Y3; r.Z = Z3;
+  r.X = X3;
+  r.Y = Y3;
+  r.Z = Z3;
   return r;
 }
 
@@ -160,8 +192,8 @@ export function g1Add(P: G1, Q: G1): G1 {
 
 const WNAF_W = 5;
 const WNAF_LEN = 257; // 256 位 + 1
-const WNAF_HALF: u32 = <u32>1 << (WNAF_W - 1); // 16
-const WNAF_MASK: u32 = (<u32>1 << WNAF_W) - 1; // 31
+const WNAF_HALF: u32 = (<u32>1) << (WNAF_W - 1); // 16
+const WNAF_MASK: u32 = ((<u32>1) << WNAF_W) - 1; // 31
 const WNAF_TABLE = 8; // 1 << (W - 2)，存 P, 3P, …, 15P
 
 /** a -= v（v < 2^32，原地）。 */
@@ -210,7 +242,7 @@ function wnaf(k: U256, out: StaticArray<i32>): i32 {
       out[i] = digit;
       // d -= digit（digit 为负则相当于加）
       if (digit > 0) subSmallU32(d, <u32>digit);
-      else addSmallU32(d, <u32>(-digit));
+      else addSmallU32(d, <u32>-digit);
     } else {
       out[i] = 0;
     }
@@ -270,7 +302,7 @@ function combIndex(k: U256, j: i32): i32 {
   let c: i32 = 0;
   for (let t = COMB_W - 1; t >= 0; t--) {
     const i = j + t * COMB_D;
-    const bit = i < 256 ? ((k[i >> 5] >>> (i & 31)) & 1) : 0;
+    const bit = i < 256 ? (k[i >> 5] >>> (i & 31)) & 1 : 0;
     c = (c << 1) | bit;
   }
   return c;
@@ -351,24 +383,31 @@ export function g2Copy(P: G2): G2 {
 
 export function g2Neg(P: G2): G2 {
   const r = new G2();
-  r.X = P.X; r.Y = fp2Neg(P.Y); r.Z = P.Z;
+  r.X = P.X;
+  r.Y = fp2Neg(P.Y);
+  r.Z = P.Z;
   return r;
 }
 
 /** b 项 [0, 5]。 */
 function g2B(): Fp2 {
-  return fp2set(u256zero(), u256fromHex('0000000000000000000000000000000000000000000000000000000000000005'));
+  return fp2set(
+    u256zero(),
+    u256fromHex('0000000000000000000000000000000000000000000000000000000000000005'),
+  );
 }
 
 /** 倍点（对齐 twist_point_double）。 */
 export function g2Double(P: G2): G2 {
   if (g2IsInfinity(P)) return g2Copy(P);
-  const X1 = P.X, Y1 = P.Y, Z1 = P.Z;
+  const X1 = P.X,
+    Y1 = P.Y,
+    Z1 = P.Z;
   const T2 = fp2Tri(fp2Sqr(X1));
   let Y3 = fp2Dbl(Y1);
   const Z3 = fp2Mul(Y3, Z1);
   Y3 = fp2Sqr(Y3);
-  let T3 = fp2Mul(Y3, X1);
+  const T3 = fp2Mul(Y3, X1);
   Y3 = fp2Sqr(Y3);
   Y3 = fp2Div2(Y3);
   let X3 = fp2Sqr(T2);
@@ -378,7 +417,9 @@ export function g2Double(P: G2): G2 {
   T1 = fp2Mul(T1, T2);
   Y3 = fp2Sub(T1, Y3);
   const r = new G2();
-  r.X = X3; r.Y = Y3; r.Z = Z3;
+  r.X = X3;
+  r.Y = Y3;
+  r.Z = Z3;
   return r;
 }
 
@@ -386,11 +427,15 @@ export function g2Double(P: G2): G2 {
 export function g2Add(P: G2, Q: G2): G2 {
   if (g2IsInfinity(Q)) return g2Copy(P);
   if (g2IsInfinity(P)) return g2Copy(Q);
-  const X1 = P.X, Y1 = P.Y, Z1 = P.Z;
-  const X2 = Q.X, Y2 = Q.Y, Z2 = Q.Z;
+  const X1 = P.X,
+    Y1 = P.Y,
+    Z1 = P.Z;
+  const X2 = Q.X,
+    Y2 = Q.Y,
+    Z2 = Q.Z;
   let T1 = fp2Sqr(Z1);
   let T2 = fp2Sqr(Z2);
-  let U1 = fp2Mul(X1, T2);
+  const U1 = fp2Mul(X1, T2);
   let U2 = fp2Mul(X2, T1);
   let Z3 = fp2Sqr(fp2Add(Z1, Z2));
   Z3 = fp2Sub(Z3, T1);
@@ -404,7 +449,9 @@ export function g2Add(P: G2, Q: G2): G2 {
   if (fp2isZero(H)) {
     if (fp2isZero(U2)) return g2Double(Q);
     const inf = new G2();
-    inf.X = fp2one(); inf.Y = fp2one(); inf.Z = fp2zero();
+    inf.X = fp2one();
+    inf.Y = fp2one();
+    inf.Z = fp2zero();
     return inf;
   }
   Z3 = fp2Mul(Z3, H);
@@ -422,7 +469,9 @@ export function g2Add(P: G2, Q: G2): G2 {
   Y3 = fp2Sub(Y3, S1);
   X3 = fp2Sub(I, X3);
   const r = new G2();
-  r.X = X3; r.Y = Y3; r.Z = Z3;
+  r.X = X3;
+  r.Y = Y3;
+  r.Z = Z3;
   return r;
 }
 
@@ -430,8 +479,12 @@ export function g2Add(P: G2, Q: G2): G2 {
 export function g2AddFull(P: G2, Q: G2): G2 {
   if (g2IsInfinity(Q)) return g2Copy(P);
   if (g2IsInfinity(P)) return g2Copy(Q);
-  const X1 = P.X, Y1 = P.Y, Z1 = P.Z;
-  const X2 = Q.X, Y2 = Q.Y, Z2 = Q.Z;
+  const X1 = P.X,
+    Y1 = P.Y,
+    Z1 = P.Z;
+  const X2 = Q.X,
+    Y2 = Q.Y,
+    Z2 = Q.Z;
   let T1 = fp2Sqr(Z1);
   let T2 = fp2Sqr(Z2);
   let T3 = fp2Mul(X2, T1);
@@ -445,11 +498,13 @@ export function g2AddFull(P: G2, Q: G2): G2 {
   if (fp2isZero(T1) && fp2isZero(T3)) return g2Double(P);
   if (fp2isZero(T1) && fp2isZero(T6)) {
     const inf = new G2();
-    inf.X = fp2one(); inf.Y = fp2one(); inf.Z = fp2zero();
+    inf.X = fp2one();
+    inf.Y = fp2one();
+    inf.Z = fp2zero();
     return inf;
   }
   T6 = fp2Sqr(T1);
-  let T7 = fp2Mul(fp2Mul(T3, Z1), Z2);
+  const T7 = fp2Mul(fp2Mul(T3, Z1), Z2);
   const T8 = fp2Sqr(T3);
   T5 = fp2Mul(T5, T8);
   T3 = fp2Mul(T3, T8);
@@ -460,7 +515,9 @@ export function g2AddFull(P: G2, Q: G2): G2 {
   T2 = fp2Mul(T2, T3);
   T1 = fp2Sub(T1, T2);
   const r = new G2();
-  r.X = T6; r.Y = T1; r.Z = T7;
+  r.X = T6;
+  r.Y = T1;
+  r.Z = T7;
   return r;
 }
 
@@ -539,4 +596,8 @@ export function g2ToAffine(P: G2): G2 {
   return r;
 }
 
-void u256zero; void pArr; void g2B; void fp2set; void fpAdd;
+void u256zero;
+void pArr;
+void g2B;
+void fp2set;
+void fpAdd;

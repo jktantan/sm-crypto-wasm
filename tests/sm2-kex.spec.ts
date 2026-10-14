@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
 
 /**
@@ -14,12 +14,12 @@ import * as sm2 from '@/sm2';
  */
 
 // ---------- 曲线参数（GM/T 0003.5） ----------
-const P = 0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFFn;
-const A = 0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFCn;
-const B = 0x28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93n;
-const N = 0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123n;
-const GX = 0x32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7n;
-const GY = 0xBC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0n;
+const P = 0xfffffffeffffffffffffffffffffffffffffffff00000000ffffffffffffffffn;
+const A = 0xfffffffeffffffffffffffffffffffffffffffff00000000fffffffffffffffcn;
+const B = 0x28e9fa9e9d9f5e344d5a9e4bcf6509a7f39789f515ab8f92ddbcbd414d940e93n;
+const N = 0xfffffffeffffffffffffffffffffffff7203df6b21c6052b53bbf40939d54123n;
+const GX = 0x32c4ae2c1f1981195f9904466a39c9948fe30bbff2660be1715a4589334c74c7n;
+const GY = 0xbc3736a2f4f6779c59bdcee36b692153d0a9877cc62a474002df32e52139f0a0n;
 
 // 模拟 SM2 用户标识（同 GmSSL sm2_exchtest.c：'Alice' / 'Bob'）。
 const IDA = 'Alice';
@@ -100,8 +100,7 @@ const hex = (b: Buffer): string => b.toString('hex');
 const G: NonNullable<Pt> = { x: GX, y: GY };
 
 // ---------- SM3（Node crypto，独立于本库） ----------
-const sm3 = (...parts: Buffer[]): Buffer =>
-  createHash('sm3').update(Buffer.concat(parts)).digest();
+const sm3 = (...parts: Buffer[]): Buffer => createHash('sm3').update(Buffer.concat(parts)).digest();
 
 // ---------- 协议参考实现（对齐 GmSSL sm2_exch.c） ----------
 
@@ -122,7 +121,13 @@ function zOracle(id: string, pub: Buffer): Buffer {
 }
 
 /** U = (x̄(R_self)·r_self + d)·(P_peer + x̄(R_peer)·R_peer)。 */
-function uOracle(d: bigint, r: bigint, rSelf: NonNullable<Pt>, pPeer: NonNullable<Pt>, rPeer: NonNullable<Pt>): NonNullable<Pt> {
+function uOracle(
+  d: bigint,
+  r: bigint,
+  rSelf: NonNullable<Pt>,
+  pPeer: NonNullable<Pt>,
+  rPeer: NonNullable<Pt>,
+): NonNullable<Pt> {
   const t = mod(xHat(rSelf.x) * r + d, N);
   const inner = ecAdd(pPeer, ecMul(xHat(rPeer.x), rPeer));
   const u = ecMul(t, inner);
@@ -131,7 +136,14 @@ function uOracle(d: bigint, r: bigint, rSelf: NonNullable<Pt>, pPeer: NonNullabl
 }
 
 /** S = SM3(prefix || Uy || SM3(Ux || ZA || ZB || RA || RB))。 */
-function sOracle(prefix: number, u: Buffer, za: Buffer, zb: Buffer, ra: Buffer, rb: Buffer): Buffer {
+function sOracle(
+  prefix: number,
+  u: Buffer,
+  za: Buffer,
+  zb: Buffer,
+  ra: Buffer,
+  rb: Buffer,
+): Buffer {
   const inner = sm3(u.subarray(0, 32), za, zb, ra, rb);
   return sm3(Buffer.from([prefix]), u.subarray(32, 64), inner);
 }
@@ -142,7 +154,10 @@ function kdfOracle(z: Buffer, klen: number): Buffer {
   let written = 0;
   let ct = 1;
   while (written < klen) {
-    const h = sm3(z, Buffer.from([(ct >>> 24) & 0xff, (ct >>> 16) & 0xff, (ct >>> 8) & 0xff, ct & 0xff]));
+    const h = sm3(
+      z,
+      Buffer.from([(ct >>> 24) & 0xff, (ct >>> 16) & 0xff, (ct >>> 8) & 0xff, ct & 0xff]),
+    );
     const take = Math.min(32, klen - written);
     h.subarray(0, take).copy(out, written);
     written += take;
@@ -193,10 +208,14 @@ describe('SM2 key exchange vs independent BigInt oracle', () => {
     const v = oracleVector();
 
     const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
-      idSelf: IDA, idPeer: IDB, ephemeralPrivateKey: rAHex,
+      idSelf: IDA,
+      idPeer: IDB,
+      ephemeralPrivateKey: rAHex,
     });
     const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), {
-      idSelf: IDB, idPeer: IDA, ephemeralPrivateKey: rBHex,
+      idSelf: IDB,
+      idPeer: IDA,
+      ephemeralPrivateKey: rBHex,
     });
 
     const r1 = alice.initiate();
@@ -229,13 +248,23 @@ describe('SM2 key exchange end-to-end', () => {
   /** 跑一遍完整协议，返回两端与三条消息。 */
   async function run(options?: { kLen?: number }) {
     const v = oracleVector();
-    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), { idSelf: IDA, idPeer: IDB });
-    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), { idSelf: IDB, idPeer: IDA });
+    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
+      idSelf: IDA,
+      idPeer: IDB,
+    });
+    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), {
+      idSelf: IDB,
+      idPeer: IDA,
+    });
     const r1 = alice.initiate();
     const r2 = bob.respond(r1);
     const r3 = alice.confirm(r2);
     return {
-      alice, bob, r1, r2, r3,
+      alice,
+      bob,
+      r1,
+      r2,
+      r3,
       keyA: alice.getSharedKey(r3, options?.kLen),
       keyB: bob.getSharedKey(r3, options?.kLen),
     };
@@ -255,8 +284,14 @@ describe('SM2 key exchange end-to-end', () => {
 
   it('rejects a tampered responder confirm (S_B)', async () => {
     const v = oracleVector();
-    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), { idSelf: IDA, idPeer: IDB });
-    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), { idSelf: IDB, idPeer: IDA });
+    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
+      idSelf: IDA,
+      idPeer: IDB,
+    });
+    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), {
+      idSelf: IDB,
+      idPeer: IDA,
+    });
     const r1 = alice.initiate();
     const r2 = bob.respond(r1);
     const tampered = { ...r2, confirm: flipHex(r2.confirm) };
@@ -265,8 +300,14 @@ describe('SM2 key exchange end-to-end', () => {
 
   it('rejects a tampered initiator confirm (S_A)', async () => {
     const v = oracleVector();
-    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), { idSelf: IDA, idPeer: IDB });
-    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), { idSelf: IDB, idPeer: IDA });
+    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
+      idSelf: IDA,
+      idPeer: IDB,
+    });
+    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), {
+      idSelf: IDB,
+      idPeer: IDA,
+    });
     const r1 = alice.initiate();
     const r2 = bob.respond(r1);
     const r3 = alice.confirm(r2);
@@ -276,8 +317,14 @@ describe('SM2 key exchange end-to-end', () => {
   it('fails when the two sides disagree on identities', async () => {
     const v = oracleVector();
     // Bob 用了错误的发起方 ID（'Mallory'），故 ZA 不同 → S_A/S_B 不匹配。
-    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), { idSelf: IDA, idPeer: IDB });
-    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), { idSelf: IDB, idPeer: 'Mallory' });
+    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
+      idSelf: IDA,
+      idPeer: IDB,
+    });
+    const bob = await sm2.createExchangeResponder(dBHex, hex(v.paBytes), {
+      idSelf: IDB,
+      idPeer: 'Mallory',
+    });
     const r1 = alice.initiate();
     const r2 = bob.respond(r1);
     expect(() => alice.confirm(r2)).toThrow(/S_B/);
@@ -285,10 +332,13 @@ describe('SM2 key exchange end-to-end', () => {
 
   it('enforces call order', async () => {
     const v = oracleVector();
-    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), { idSelf: IDA, idPeer: IDB });
-    expect(() => alice.confirm({ ephemeralPub: '04' + hex(v.rbBytes), confirm: '00'.repeat(32) })).toThrow(
-      /initiate/,
-    );
+    const alice = await sm2.createExchangeInitiator(dAHex, hex(v.pbBytes), {
+      idSelf: IDA,
+      idPeer: IDB,
+    });
+    expect(() =>
+      alice.confirm({ ephemeralPub: '04' + hex(v.rbBytes), confirm: '00'.repeat(32) }),
+    ).toThrow(/initiate/);
     expect(() => alice.initiate()).not.toThrow();
     expect(() => alice.initiate()).toThrow(/只能调用一次/);
   });

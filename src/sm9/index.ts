@@ -22,10 +22,21 @@
  *
  * spec/plan 对应：plan Task 10；spec §6 API、§12.1 Q2（同步优先）、Q3（PKCS#8 + SM9 OID）。
  */
+
+import {
+  encodeSm9PrivateKeyPem,
+  encodeSm9PublicKeyPem,
+  parseSm9PrivateKeyPem,
+  parseSm9PublicKeyPem,
+} from '../pem/sm9.js';
+import {
+  CiphertextError,
+  DecryptionError,
+  InvalidCiphertextError,
+  InvalidKeyError,
+} from '../runtime/errors.js';
 import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
-import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem, parseSm9PrivateKeyPem, parseSm9PublicKeyPem } from '../pem/sm9.js';
-import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 曲线阶 n。 */
 const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
@@ -39,55 +50,127 @@ interface Sm9Exports extends WebAssembly.Exports {
   readonly signDsOut: (ksPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly encDeOut: (kePtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly sm9VerifyPubOut: (
-    pubPtr: number, idPtr: number, idLen: number, msgPtr: number, msgLen: number, sigPtr: number,
+    pubPtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    sigPtr: number,
   ) => number;
   readonly sm9EncryptPubOut: (
-    pubPtr: number, idPtr: number, idLen: number, msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
+    pubPtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    rPtr: number,
+    outPtr: number,
   ) => number;
   readonly sm9UserEncPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
-  readonly sm9UserSignPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
+  readonly sm9UserSignPubOut: (
+    pubPtr: number,
+    idPtr: number,
+    idLen: number,
+    outPtr: number,
+  ) => void;
   readonly sm9SignOut: (
-    ksPtr: number, idPtr: number, idLen: number,
-    msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
+    ksPtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    rPtr: number,
+    outPtr: number,
   ) => void;
   readonly sm9VerifyOut: (
-    ksPtr: number, idPtr: number, idLen: number,
-    msgPtr: number, msgLen: number, sigPtr: number,
+    ksPtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    sigPtr: number,
   ) => number;
   readonly sm9EncryptOut: (
-    kePtr: number, idPtr: number, idLen: number,
-    msgPtr: number, msgLen: number, rPtr: number, outPtr: number,
+    kePtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    rPtr: number,
+    outPtr: number,
   ) => number;
   readonly sm9DecryptOut: (
-    kePtr: number, idPtr: number, idLen: number,
-    ctPtr: number, ctLen: number, outPtr: number,
+    kePtr: number,
+    idPtr: number,
+    idLen: number,
+    ctPtr: number,
+    ctLen: number,
+    outPtr: number,
   ) => number;
   readonly sm9KemEncryptOut: (
-    kePtr: number, idPtr: number, idLen: number,
-    rPtr: number, klen: number, c1Ptr: number, kPtr: number,
+    kePtr: number,
+    idPtr: number,
+    idLen: number,
+    rPtr: number,
+    klen: number,
+    c1Ptr: number,
+    kPtr: number,
   ) => number;
   readonly sm9KemDecryptOut: (
-    kePtr: number, idPtr: number, idLen: number,
-    c1Ptr: number, klen: number, kPtr: number,
+    kePtr: number,
+    idPtr: number,
+    idLen: number,
+    c1Ptr: number,
+    klen: number,
+    kPtr: number,
   ) => number;
   readonly sm9ExchEphemeralOut: (
-    kePtr: number, peerIdPtr: number, peerIdLen: number, rPtr: number, outPtr: number,
+    kePtr: number,
+    peerIdPtr: number,
+    peerIdLen: number,
+    rPtr: number,
+    outPtr: number,
   ) => void;
   readonly sm9ExchKeyOut: (
-    kePtr: number, isInitiator: number,
-    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
-    rPtr: number, selfRPtr: number, peerRPtr: number, klen: number, outPtr: number,
+    kePtr: number,
+    isInitiator: number,
+    selfIdPtr: number,
+    selfIdLen: number,
+    peerIdPtr: number,
+    peerIdLen: number,
+    rPtr: number,
+    selfRPtr: number,
+    peerRPtr: number,
+    klen: number,
+    outPtr: number,
   ) => number;
   readonly sm9ExchConfirmOut: (
-    kePtr: number, isInitiator: number,
-    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
-    rPtr: number, selfRPtr: number, peerRPtr: number, prefix: number, outPtr: number,
+    kePtr: number,
+    isInitiator: number,
+    selfIdPtr: number,
+    selfIdLen: number,
+    peerIdPtr: number,
+    peerIdLen: number,
+    rPtr: number,
+    selfRPtr: number,
+    peerRPtr: number,
+    prefix: number,
+    outPtr: number,
   ) => void;
   readonly sm9ExchAllOut: (
-    kePtr: number, isInitiator: number,
-    selfIdPtr: number, selfIdLen: number, peerIdPtr: number, peerIdLen: number,
-    rPtr: number, selfRPtr: number, peerRPtr: number, klen: number,
-    saPtr: number, sbPtr: number, kPtr: number,
+    kePtr: number,
+    isInitiator: number,
+    selfIdPtr: number,
+    selfIdLen: number,
+    peerIdPtr: number,
+    peerIdLen: number,
+    rPtr: number,
+    selfRPtr: number,
+    peerRPtr: number,
+    klen: number,
+    saPtr: number,
+    sbPtr: number,
+    kPtr: number,
   ) => number;
   readonly memory: WebAssembly.Memory;
 }
@@ -145,9 +228,7 @@ function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Arr
   if (typeof input === 'string' && input.includes('-----BEGIN')) {
     const parsed = parseSm9PrivateKeyPem(input);
     if (parsed.length !== 32) {
-      throw new InvalidKeyError(
-        `sm9: ${label} 作为 PEM 主私钥应为 32 字节，实际 ${parsed.length}`,
-      );
+      throw new InvalidKeyError(`sm9: ${label} 作为 PEM 主私钥应为 32 字节，实际 ${parsed.length}`);
     }
     return parsed;
   }
@@ -518,9 +599,7 @@ export function getUserPublicKey(
     } else {
       exports.sm9UserEncPubOut(pubP, idP, idB.length, userPubPtr);
     }
-    return encodeSm9PublicKeyPem(
-      new Uint8Array(mem().buffer, userPubPtr, pub.length).slice(),
-    );
+    return encodeSm9PublicKeyPem(new Uint8Array(mem().buffer, userPubPtr, pub.length).slice());
   } finally {
     exports.freeAll();
   }
@@ -574,7 +653,8 @@ function decryptUnsafe(
   const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const ctB = toBytes(ct, 'ct');
-  if (ctB.length < 97) throw new InvalidCiphertextError('sm9: ct 长度必须 >= 97 字节 (C1=65 + C3=32)');
+  if (ctB.length < 97)
+    throw new InvalidCiphertextError('sm9: ct 长度必须 >= 97 字节 (C1=65 + C3=32)');
 
   const { exports } = getModule();
   const keP = exports.alloc(32);
@@ -657,7 +737,8 @@ export function kemDecrypt(
   const keB = masterPrivateBytes(ke, 'ke');
   const idB = toBytes(id, 'id');
   const c1B = toBytes(encapsulation, 'encapsulation');
-  if (c1B.length !== 65) throw new RangeError(`sm9: encapsulation 必须是 65 字节，实际 ${c1B.length}`);
+  if (c1B.length !== 65)
+    throw new RangeError(`sm9: encapsulation 必须是 65 字节，实际 ${c1B.length}`);
   if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
 
   const { exports } = getModule();
@@ -718,7 +799,10 @@ function ctEq(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 function r32(options: Sm9ExchangeOptions): Uint8Array {
-  const r = options.ephemeral !== undefined ? toBytes(options.ephemeral, 'ephemeral') : toBytes(randomRHex(), 'r');
+  const r =
+    options.ephemeral !== undefined
+      ? toBytes(options.ephemeral, 'ephemeral')
+      : toBytes(randomRHex(), 'r');
   requireLen(r, 32, 'ephemeral');
   return r;
 }
@@ -753,9 +837,14 @@ interface ExchAll {
  * SA 为发起方确认值（prefix 0x83）、SB 为响应方确认值（prefix 0x82）。
  */
 function exchAll(
-  ke: Uint8Array, isInitiator: boolean,
-  selfId: Uint8Array, peerId: Uint8Array,
-  r: Uint8Array, selfR: Uint8Array, peerR: Uint8Array, kLen: number,
+  ke: Uint8Array,
+  isInitiator: boolean,
+  selfId: Uint8Array,
+  peerId: Uint8Array,
+  r: Uint8Array,
+  selfR: Uint8Array,
+  peerR: Uint8Array,
+  kLen: number,
 ): ExchAll {
   if (!Number.isInteger(kLen) || kLen <= 0) throw new RangeError('sm9.exch: kLen 必须为正整数');
   const { exports } = getModule();
@@ -776,8 +865,19 @@ function exchAll(
     putBytes(selfR, srP);
     putBytes(peerR, prP);
     const rc = exports.sm9ExchAllOut(
-      keP, isInitiator ? 1 : 0, sidP, selfId.length, pidP, peerId.length,
-      rP, srP, prP, kLen, saP, sbP, kP,
+      keP,
+      isInitiator ? 1 : 0,
+      sidP,
+      selfId.length,
+      pidP,
+      peerId.length,
+      rP,
+      srP,
+      prP,
+      kLen,
+      saP,
+      sbP,
+      kP,
     );
     if (rc !== 1) throw new Error('sm9.exch: 共享密钥为全 0');
     return { sa: readHex(saP, 32), sb: readHex(sbP, 32), key: readHex(kP, kLen) };
@@ -827,9 +927,11 @@ export async function createExchangeInitiator(
       const selfRA = RA;
       if (selfR === null || selfRA === null) throw new Error('sm9.exch: 需先调用 initiate()');
       const RB = readPoint65(msg.ephemeral, 'RB');
-      const SB = toBytes(msg.confirm, 'SB'); requireLen(SB, 32, 'SB', 'cipher');
+      const SB = toBytes(msg.confirm, 'SB');
+      requireLen(SB, 32, 'SB', 'cipher');
       const all = exchAll(keB, true, selfIdB, peerIdB, selfR, selfRA, RB, defaultKL);
-      if (!ctEq(SB, Buffer.from(all.sb, 'hex'))) throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
+      if (!ctEq(SB, Buffer.from(all.sb, 'hex')))
+        throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
       cached = { all, kLen: defaultKL };
       return { confirm: all.sa };
     },
@@ -883,12 +985,16 @@ export async function createExchangeResponder(
       const selfR = rB;
       const selfRB = RB;
       const selfRA = RA;
-      if (selfR === null || selfRB === null || selfRA === null) throw new Error('sm9.exch: 需先调用 respond()');
-      const SA = toBytes(msg.confirm, 'SA'); requireLen(SA, 32, 'SA', 'cipher');
-      const all = cached !== null && cached.kLen === kLen
-        ? cached.all
-        : exchAll(keB, false, selfIdB, peerIdB, selfR, selfRB, selfRA, kLen);
-      if (!ctEq(SA, Buffer.from(all.sa, 'hex'))) throw new Error('sm9.exch: 发起方确认值 S_A 校验失败');
+      if (selfR === null || selfRB === null || selfRA === null)
+        throw new Error('sm9.exch: 需先调用 respond()');
+      const SA = toBytes(msg.confirm, 'SA');
+      requireLen(SA, 32, 'SA', 'cipher');
+      const all =
+        cached !== null && cached.kLen === kLen
+          ? cached.all
+          : exchAll(keB, false, selfIdB, peerIdB, selfR, selfRB, selfRA, kLen);
+      if (!ctEq(SA, Buffer.from(all.sa, 'hex')))
+        throw new Error('sm9.exch: 发起方确认值 S_A 校验失败');
       return all.key;
     },
   };

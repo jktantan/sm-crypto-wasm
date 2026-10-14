@@ -5,15 +5,41 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { U256 } from './fp';
+import { u256zero } from '../../common/assembly/field256';
+import type { U256 } from './fp';
 import {
-  Fp2, fp2zero, fp2one, fp2set, fp2copy, fp2eq, fp2Conjugate, fp2MulFp, fp2Neg,
+  type Fp2,
+  fp2Conjugate,
+  fp2copy,
+  fp2eq,
+  fp2MulFp,
+  fp2Neg,
+  fp2one,
+  fp2set,
+  fp2zero,
 } from './fp2';
 import {
-  Fp4, fp4zero, fp4one, fp4copy, fp4isZero, fp4eq, fp4Add, fp4Sub, fp4Neg, fp4Dbl,
-  fp4Mul, fp4MulV, fp4TimesV, fp4Sqr, fp4SqrV, fp4Inv, fp4Conjugate, fp4MulFp, fp4MulFp2, fp4set,
+  type Fp4,
+  fp4Add,
+  fp4Conjugate,
+  fp4copy,
+  fp4Dbl,
+  fp4eq,
+  fp4Inv,
+  fp4isZero,
+  fp4Mul,
+  fp4MulFp,
+  fp4MulFp2,
+  fp4MulV,
+  fp4Neg,
+  fp4one,
+  fp4Sqr,
+  fp4SqrV,
+  fp4Sub,
+  fp4set,
+  fp4TimesV,
+  fp4zero,
 } from './fp4';
-import { u256zero } from '../../common/assembly/field256';
 
 /** Fp12 元素：[a0, a1, a2]，各为 Fp4。 */
 export type Fp12 = StaticArray<Fp4>;
@@ -136,15 +162,15 @@ export function fp12Inv(a: Fp12): Fp12 {
     k = fp4Add(k, t);
     k = fp4Inv(k);
 
-    let r2 = fp4Mul(fp4Sqr(a[1]), k);
-    let r1 = fp4Neg(fp4Mul(fp4Mul(a[0], a[1]), k));
-    let r0 = fp4Mul(fp4Sqr(a[0]), k);
+    const r2 = fp4Mul(fp4Sqr(a[1]), k);
+    const r1 = fp4Neg(fp4Mul(fp4Mul(a[0], a[1]), k));
+    const r0 = fp4Mul(fp4Sqr(a[0]), k);
     return fp12set(r0, r1, r2);
   }
   // 通用分支
-  let t0 = fp4Sub(fp4Sqr(a[1]), fp4Mul(a[0], a[2]));
-  let t1 = fp4Sub(fp4Mul(a[0], a[1]), fp4SqrV(a[2]));
-  let t2 = fp4Sub(fp4Sqr(a[0]), fp4MulV(a[1], a[2]));
+  const t0 = fp4Sub(fp4Sqr(a[1]), fp4Mul(a[0], a[2]));
+  const t1 = fp4Sub(fp4Mul(a[0], a[1]), fp4SqrV(a[2]));
+  const t2 = fp4Sub(fp4Sqr(a[0]), fp4MulV(a[1], a[2]));
 
   let t3 = fp4Sqr(t1);
   const prod = fp4Mul(t0, t2);
@@ -208,20 +234,20 @@ function fp2FromFp(k: U256): Fp2 {
 /** Fp12 的 p 次幂（Frobenius），对齐 fp12_frobenius。 */
 export function fp12Frobenius(x: Fp12, alphas: StaticArray<U256>): Fp12 {
   // alphas = [alpha1, alpha2, alpha3, alpha4, alpha5]（均为 Fp 标量）
-  const a1 = alphas[0], a2 = alphas[1], a3 = alphas[2], a4 = alphas[3], a5 = alphas[4];
-  const xa = x[0], xb = x[1], xc = x[2];
+  const a1 = alphas[0],
+    a2 = alphas[1],
+    a3 = alphas[2],
+    a4 = alphas[3],
+    a5 = alphas[4];
+  const xa = x[0],
+    xb = x[1],
+    xc = x[2];
 
   const ra = fp4set(fp2Conjugate(xa[0]), fp2MulFp(fp2Conjugate(xa[1]), a3));
 
-  const rb = fp4set(
-    fp2MulFp(fp2Conjugate(xb[0]), a1),
-    fp2MulFp(fp2Conjugate(xb[1]), a4),
-  );
+  const rb = fp4set(fp2MulFp(fp2Conjugate(xb[0]), a1), fp2MulFp(fp2Conjugate(xb[1]), a4));
 
-  const rc = fp4set(
-    fp2MulFp(fp2Conjugate(xc[0]), a2),
-    fp2MulFp(fp2Conjugate(xc[1]), a5),
-  );
+  const rc = fp4set(fp2MulFp(fp2Conjugate(xc[0]), a2), fp2MulFp(fp2Conjugate(xc[1]), a5));
 
   return fp12set(ra, rb, rc);
 }
@@ -236,20 +262,13 @@ export function fp12Frobenius2(x: Fp12, a2: U256, a4: U256): Fp12 {
 
 /** Fp12 的 p³ 次幂，对齐 fp12_frobenius3。 */
 export function fp12Frobenius3(x: Fp12, beta: U256): Fp12 {
-  const xa = x[0], xb = x[1], xc = x[2];
+  const xa = x[0],
+    xb = x[1],
+    xc = x[2];
 
-  const ra = fp4set(
-    fp2Conjugate(xa[0]),
-    fp2Neg(fp2MulFp(fp2Conjugate(xa[1]), beta)),
-  );
-  const rb = fp4set(
-    fp2MulFp(fp2Conjugate(xb[0]), beta),
-    fp2Conjugate(xb[1]),
-  );
-  const rc = fp4set(
-    fp2Neg(fp2Conjugate(xc[0])),
-    fp2MulFp(fp2Conjugate(xc[1]), beta),
-  );
+  const ra = fp4set(fp2Conjugate(xa[0]), fp2Neg(fp2MulFp(fp2Conjugate(xa[1]), beta)));
+  const rb = fp4set(fp2MulFp(fp2Conjugate(xb[0]), beta), fp2Conjugate(xb[1]));
+  const rc = fp4set(fp2Neg(fp2Conjugate(xc[0])), fp2MulFp(fp2Conjugate(xc[1]), beta));
   return fp12set(ra, rb, rc);
 }
 
@@ -265,5 +284,11 @@ export function fp12MulFp4(a: Fp12, b: Fp4): Fp12 {
   return fp12set(fp4Mul(a[0], b), fp4Mul(a[1], b), fp4Mul(a[2], b));
 }
 
-void fp2one; void fp2set; void fp2copy; void fp2eq; void fp4MulFp; void fp12MulFp4;
-void u256zero; void fp2FromFp;
+void fp2one;
+void fp2set;
+void fp2copy;
+void fp2eq;
+void fp4MulFp;
+void fp12MulFp4;
+void u256zero;
+void fp2FromFp;

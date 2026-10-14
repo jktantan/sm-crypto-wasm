@@ -8,17 +8,34 @@
 //   C1 = 0x04||x||y（65B）；KDF 输入用 C1 的 x||y（64B）
 //   C3 = HMAC-SM3(K2, C2)
 
-import { U256, nArr, addModN, mulModN, invModN } from './fp';
-import { G1, g1Generator, g1Mul, g1ToAffine, g1Add } from './point';
-import { G2, g2Generator, g2Mul, g2ToAffine, g2Add } from './point';
-import { Fp2 } from './fp2';
-import { Fp4 } from './fp4';
-import { Fp12, fp12one, fp12Pow, fp12Mul } from './fp12';
-import { sm9Pairing } from './pairing';
-import { sm3HashInto } from '../../sm3/assembly/sm3-core';
 import {
-  u256clone, u256fromU32, u256subRaw, u256addRaw, u256toBytes, u256eq, modSub, bytesMod,
+  bytesMod,
+  modSub,
+  u256addRaw,
+  u256clone,
+  u256eq,
+  u256fromU32,
+  u256subRaw,
+  u256toBytes,
 } from '../../common/assembly/field256';
+import { sm3HashInto } from '../../sm3/assembly/sm3-core';
+import { addModN, invModN, mulModN, nArr, type U256 } from './fp';
+import type { Fp2 } from './fp2';
+import type { Fp4 } from './fp4';
+import { type Fp12, fp12Mul, fp12one, fp12Pow } from './fp12';
+import { sm9Pairing } from './pairing';
+import {
+  G1,
+  type G2,
+  g1Add,
+  g1Generator,
+  g1Mul,
+  g1ToAffine,
+  g2Add,
+  g2Generator,
+  g2Mul,
+  g2ToAffine,
+} from './point';
 
 /** 签名私钥派生用的 hid。 */
 export const HID_SIGN: u8 = 0x01;
@@ -157,7 +174,9 @@ function u256FromBytesBE(b: StaticArray<u8>, off: i32): U256 {
   const x = new StaticArray<u32>(8);
   for (let i = 0; i < 8; i++) {
     const o = off + i * 4;
-    x[7 - i] = (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | (<u32>b[o + 3])) & 0xffffffff;
+    x[7 - i] =
+      (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3]) &
+      0xffffffff;
   }
   return x;
 }
@@ -236,7 +255,14 @@ export function signG(ppubs: G2): Fp12 {
 }
 
 /** SM9 签名。输出 h(32)||Sx(32)||Sy(32)，共 96 字节。 */
-export function sm9Sign(ds: G1, ppubs: G2, msgPtr: usize, msgLen: i32, r: U256, outPtr: usize): void {
+export function sm9Sign(
+  ds: G1,
+  ppubs: G2,
+  msgPtr: usize,
+  msgLen: i32,
+  r: U256,
+  outPtr: usize,
+): void {
   const g = signG(ppubs);
   const w = fp12Pow(g, r);
   const m = new StaticArray<u8>(msgLen);
@@ -251,7 +277,14 @@ export function sm9Sign(ds: G1, ppubs: G2, msgPtr: usize, msgLen: i32, r: U256, 
 }
 
 /** SM9 验签。签名 = h(32)||Sx(32)||Sy(32)。通过返回 1。 */
-export function sm9Verify(ppubs: G2, idPtr: usize, idLen: i32, msgPtr: usize, msgLen: i32, sigPtr: usize): i32 {
+export function sm9Verify(
+  ppubs: G2,
+  idPtr: usize,
+  idLen: i32,
+  msgPtr: usize,
+  msgLen: i32,
+  sigPtr: usize,
+): i32 {
   const h = readU256(sigPtr);
   const S = new G1();
   S.X = readU256(sigPtr + 32);
@@ -278,7 +311,15 @@ export function sm9Verify(ppubs: G2, idPtr: usize, idLen: i32, msgPtr: usize, ms
 // ---------- 加密 / 解密（GM/T 0044 第 6 章） ----------
 
 /** SM9 加密。输出 C1(65)||C3(32)||C2(msgLen)，返回总长度。 */
-export function sm9Encrypt(ppube: G1, idPtr: usize, idLen: i32, msgPtr: usize, msgLen: i32, r: U256, outPtr: usize): i32 {
+export function sm9Encrypt(
+  ppube: G1,
+  idPtr: usize,
+  idLen: i32,
+  msgPtr: usize,
+  msgLen: i32,
+  r: U256,
+  outPtr: usize,
+): i32 {
   const id = new StaticArray<u8>(idLen);
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
 
@@ -306,7 +347,14 @@ export function sm9Encrypt(ppube: G1, idPtr: usize, idLen: i32, msgPtr: usize, m
 }
 
 /** SM9 解密。输入 C1(65)||C3(32)||C2，返回明文长度；校验失败返回 -1。 */
-export function sm9Decrypt(de: G2, idPtr: usize, idLen: i32, ctPtr: usize, ctLen: i32, outPtr: usize): i32 {
+export function sm9Decrypt(
+  de: G2,
+  idPtr: usize,
+  idLen: i32,
+  ctPtr: usize,
+  ctLen: i32,
+  outPtr: usize,
+): i32 {
   if (ctLen < 97) return -1;
   const msgLen = ctLen - 97;
 
@@ -377,7 +425,13 @@ function isAllZero(b: StaticArray<u8>, n: i32): bool {
  * @returns 1 成功；0 表示 K 全 0（调用方需换 r 重试）。
  */
 export function sm9KemEncrypt(
-  ppube: G1, idPtr: usize, idLen: i32, r: U256, klen: i32, c1Ptr: usize, kPtr: usize,
+  ppube: G1,
+  idPtr: usize,
+  idLen: i32,
+  r: U256,
+  klen: i32,
+  c1Ptr: usize,
+  kPtr: usize,
 ): i32 {
   const id = new StaticArray<u8>(idLen);
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
@@ -406,7 +460,12 @@ export function sm9KemEncrypt(
  * @returns 1 成功；0 表示 C1 格式错或 K 全 0。
  */
 export function sm9KemDecrypt(
-  de: G2, idPtr: usize, idLen: i32, c1Ptr: usize, klen: i32, kPtr: usize,
+  de: G2,
+  idPtr: usize,
+  idLen: i32,
+  c1Ptr: usize,
+  klen: i32,
+  kPtr: usize,
 ): i32 {
   const id = new StaticArray<u8>(idLen);
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
@@ -430,7 +489,9 @@ export function sm9KemDecrypt(
   return 1;
 }
 
-void fp12one; void g1Add; void g2Add;
+void fp12one;
+void g1Add;
+void g2Add;
 
 // ---------- 密钥交换（GM/T 0044.3，对齐 GmSSL sm9_exch.c） ----------
 //
@@ -467,8 +528,14 @@ function readG1Bytes(ptr: usize): G1 {
 
 /** 计算 G1/G2/G3 的字节（各 384B），对齐 GmSSL compute_g。 */
 function exchComputeG(
-  de: G2, ppube: G1, isInitiator: bool, r: U256, peerR: G1,
-  g1b: StaticArray<u8>, g2b: StaticArray<u8>, g3b: StaticArray<u8>,
+  de: G2,
+  ppube: G1,
+  isInitiator: bool,
+  r: U256,
+  peerR: G1,
+  g1b: StaticArray<u8>,
+  g2b: StaticArray<u8>,
+  g3b: StaticArray<u8>,
 ): void {
   const E1 = fp12Pow(sm9Pairing(g2Generator(), g1ToAffine(ppube)), r);
   const E2 = sm9Pairing(g2ToAffine(de), g1ToAffine(peerR));
@@ -486,7 +553,13 @@ function exchComputeG(
 }
 
 /** 生成本端临时点 R = [r](H1(ID_peer||hid,N)·P1 + Ppube)，输出 65B。 */
-export function sm9ExchEphemeral(ppube: G1, peerIdPtr: usize, peerIdLen: i32, r: U256, outPtr: usize): void {
+export function sm9ExchEphemeral(
+  ppube: G1,
+  peerIdPtr: usize,
+  peerIdLen: i32,
+  r: U256,
+  outPtr: usize,
+): void {
   const peerId = ldBytes(peerIdPtr, peerIdLen);
   const h1 = hash1(peerId, peerIdLen, HID_EXCH);
   const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
@@ -496,9 +569,18 @@ export function sm9ExchEphemeral(ppube: G1, peerIdPtr: usize, peerIdLen: i32, r:
 
 /** 密钥交换共享密钥 K = KDF(...)。@returns 1 成功；0 K 全 0。 */
 export function sm9ExchKey(
-  de: G2, ppube: G1, isInitiator: i32,
-  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
-  r: U256, selfRPtr: usize, peerRPtr: usize, klen: i32, outPtr: usize,
+  de: G2,
+  ppube: G1,
+  isInitiator: i32,
+  selfIdPtr: usize,
+  selfIdLen: i32,
+  peerIdPtr: usize,
+  peerIdLen: i32,
+  r: U256,
+  selfRPtr: usize,
+  peerRPtr: usize,
+  klen: i32,
+  outPtr: usize,
 ): i32 {
   const selfId = ldBytes(selfIdPtr, selfIdLen);
   const peerId = ldBytes(peerIdPtr, peerIdLen);
@@ -525,9 +607,18 @@ export function sm9ExchKey(
 
 /** 密钥交换确认值 S = SM3(prefix || G1 || SM3(G2||G3||IDA||IDB||RA||RB))。prefix: 0x83 发起方 / 0x82 响应方。 */
 export function sm9ExchConfirm(
-  de: G2, ppube: G1, isInitiator: i32,
-  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
-  r: U256, selfRPtr: usize, peerRPtr: usize, prefix: i32, outPtr: usize,
+  de: G2,
+  ppube: G1,
+  isInitiator: i32,
+  selfIdPtr: usize,
+  selfIdLen: i32,
+  peerIdPtr: usize,
+  peerIdLen: i32,
+  r: U256,
+  selfRPtr: usize,
+  peerRPtr: usize,
+  prefix: i32,
+  outPtr: usize,
 ): void {
   const selfId = ldBytes(selfIdPtr, selfIdLen);
   const peerId = ldBytes(peerIdPtr, peerIdLen);
@@ -560,10 +651,20 @@ export function sm9ExchConfirm(
  * @returns 1 成功；0 K 全 0。
  */
 export function sm9ExchAll(
-  de: G2, ppube: G1, isInitiator: i32,
-  selfIdPtr: usize, selfIdLen: i32, peerIdPtr: usize, peerIdLen: i32,
-  r: U256, selfRPtr: usize, peerRPtr: usize, klen: i32,
-  saPtr: usize, sbPtr: usize, kPtr: usize,
+  de: G2,
+  ppube: G1,
+  isInitiator: i32,
+  selfIdPtr: usize,
+  selfIdLen: i32,
+  peerIdPtr: usize,
+  peerIdLen: i32,
+  r: U256,
+  selfRPtr: usize,
+  peerRPtr: usize,
+  klen: i32,
+  saPtr: usize,
+  sbPtr: usize,
+  kPtr: usize,
 ): i32 {
   const selfId = ldBytes(selfIdPtr, selfIdLen);
   const peerId = ldBytes(peerIdPtr, peerIdLen);

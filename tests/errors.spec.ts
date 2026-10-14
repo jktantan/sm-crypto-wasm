@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import * as sm2 from '@/sm2';
-import * as sm4 from '@/sm4';
-import * as sm9 from '@/sm9';
-import * as zuc from '@/zuc';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
   CiphertextError,
   DecryptionError,
   InvalidCiphertextError,
   InvalidKeyError,
   InvalidPublicKeyError,
-  SmCryptoError,
   isSmCryptoError,
+  SmCryptoError,
 } from '@/runtime';
+import * as sm2 from '@/sm2';
+import * as sm4 from '@/sm4';
+import * as sm9 from '@/sm9';
+import * as zuc from '@/zuc';
 
 /**
  * "校验失败"类错误的类型契约（spec §9 安全姿态、plan Review Focus #4）。
@@ -62,18 +62,14 @@ describe('解密失败抛 DecryptionError', () => {
     const iv = new Uint8Array(12).fill(2);
     const aad = new Uint8Array([4, 5]);
     const r = sm4.encryptGCM(key, iv, new Uint8Array([1, 2, 3]), aad);
-    expect(() => sm4.decryptGCM(key, iv, r.ct, flipHex(r.tag, 0), aad)).toThrow(
-      DecryptionError,
-    );
+    expect(() => sm4.decryptGCM(key, iv, r.ct, flipHex(r.tag, 0), aad)).toThrow(DecryptionError);
   });
 
   it('sm9.decrypt — tampered ciphertext', async () => {
     const kp = await sm9.generateKeyPair({ id: 'eve@example.com', purpose: 'enc' });
     const ct = sm9.encrypt(kp.masterPrivatePem, 'eve@example.com', new Uint8Array([1, 2, 3]));
     const bad = flipHex(ct, 0);
-    expect(() => sm9.decrypt(kp.masterPrivatePem, 'eve@example.com', bad)).toThrow(
-      DecryptionError,
-    );
+    expect(() => sm9.decrypt(kp.masterPrivatePem, 'eve@example.com', bad)).toThrow(DecryptionError);
   });
 
   it('facade re-exports DecryptionError for catch blocks', async () => {
@@ -123,9 +119,7 @@ describe('错误体系（统一为 SmCryptoError 子类）', () => {
   });
 
   it('sm4: key/iv 长度错 → InvalidKeyError；tag 长度错 → InvalidCiphertextError', () => {
-    expect(() => sm4.encryptECB(new Uint8Array(10), new Uint8Array(16))).toThrow(
-      InvalidKeyError,
-    );
+    expect(() => sm4.encryptECB(new Uint8Array(10), new Uint8Array(16))).toThrow(InvalidKeyError);
     expect(() =>
       sm4.decryptGCM(new Uint8Array(16), new Uint8Array(12), new Uint8Array(0), new Uint8Array(8)),
     ).toThrow(InvalidCiphertextError);
@@ -153,8 +147,8 @@ describe('错误体系（统一为 SmCryptoError 子类）', () => {
     expect(() => sm2.encrypt(sm2.getPublicKey(D), 'x', { outputFormat: 'nope' as never })).toThrow(
       RangeError,
     );
-    expect(() => zuc.zucMac(new Uint8Array(16), new Uint8Array(16), new Uint8Array([1]), 8, 64)).toThrow(
-      RangeError,
-    );
+    expect(() =>
+      zuc.zucMac(new Uint8Array(16), new Uint8Array(16), new Uint8Array([1]), 8, 64),
+    ).toThrow(RangeError);
   });
 });

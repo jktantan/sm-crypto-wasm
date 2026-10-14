@@ -9,9 +9,10 @@
  *
  * spec/plan 对应：plan Task 11；spec §3 算法清单、§6 API。
  */
-import { loadWasm } from '../runtime/loadWasm.js';
+
 import { bytesToHex, toBytes } from '../runtime/convert.js';
 import { InvalidKeyError } from '../runtime/errors.js';
+import { loadWasm } from '../runtime/loadWasm.js';
 
 interface ZucExports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -49,7 +50,10 @@ function getModule(): ZucModule {
 }
 
 /** 校验 16 字节 key / iv 并归一化为字节数组。 */
-function keyIv(key: string | Uint8Array, iv: string | Uint8Array): { k: Uint8Array; v: Uint8Array } {
+function keyIv(
+  key: string | Uint8Array,
+  iv: string | Uint8Array,
+): { k: Uint8Array; v: Uint8Array } {
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   if (k.length !== 16) throw new InvalidKeyError('zuc: key must be 16 bytes');
@@ -134,9 +138,7 @@ export function zucMac(
   const m = toBytes(msg, 'msg');
   const nbits = opts.bitLength ?? m.length * 8;
   if (!Number.isInteger(nbits) || nbits < 0 || nbits > m.length * 8) {
-    throw new RangeError(
-      `zuc EIA3: bitLength 必须是 [0, ${m.length * 8}] 内的整数，收到 ${nbits}`,
-    );
+    throw new RangeError(`zuc EIA3: bitLength 必须是 [0, ${m.length * 8}] 内的整数，收到 ${nbits}`);
   }
 
   const { exports, memory } = getModule();
@@ -331,8 +333,8 @@ export function zucDecrypt(
 // 现名 `zucEncrypt` / `zucDecrypt` / `zucKeystream` / `zucMac` 保留为主名；
 // 下面给出 spec §3/§6 与 plan Task 11 写的方法名，指向同一实现。
 export {
-  zucEncrypt as encrypt,
   zucDecrypt as decrypt,
+  zucEncrypt as encrypt,
   zucKeystream as generateKeystream,
   zucMac as mac,
   zucMac as eia3,

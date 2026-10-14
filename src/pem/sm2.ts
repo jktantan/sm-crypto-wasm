@@ -25,8 +25,11 @@
  * 编码函数接受/产出与解析一致的格式（私钥 PKCS#8、公钥 SPKI），供
  * 密钥生成与测试使用。
  */
+
+import { bytesToPem, hexToBytes, pemToBytes, toBytes } from '../runtime/convert.js';
+import { InvalidKeyError } from '../runtime/errors.js';
 import {
-  Asn1Node,
+  type Asn1Node,
   asn1Int,
   asn1Octets,
   asn1Oid,
@@ -34,8 +37,6 @@ import {
   decodeOid,
   parseDer,
 } from './asn1.js';
-import { bytesToPem, hexToBytes, pemToBytes, toBytes } from '../runtime/convert.js';
-import { InvalidKeyError } from '../runtime/errors.js';
 
 /** `id-ecPublicKey` OID。 */
 export const OID_ID_EC_PUBLIC_KEY = '1.2.840.10045.2.1';
@@ -77,7 +78,11 @@ export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
     // PKCS#8 PrivateKeyInfo
     assertSm2Curve(kids[1], 'parseSm2PrivateKeyPem');
     ec = parseOrThrow(kids[2].value, 'parseSm2PrivateKeyPem (ECPrivateKey)');
-  } else if (kids.length >= 2 && kids[0]?.tag === TAG_INTEGER && kids[1]?.tag === TAG_OCTET_STRING) {
+  } else if (
+    kids.length >= 2 &&
+    kids[0]?.tag === TAG_INTEGER &&
+    kids[1]?.tag === TAG_OCTET_STRING
+  ) {
     // SEC1 ECPrivateKey
     ec = top;
   } else {
@@ -85,7 +90,12 @@ export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
   }
 
   const ecKids = ec.children;
-  if (ec.tag !== TAG_SEQUENCE || !ecKids || ecKids.length < 2 || ecKids[1]?.tag !== TAG_OCTET_STRING) {
+  if (
+    ec.tag !== TAG_SEQUENCE ||
+    !ecKids ||
+    ecKids.length < 2 ||
+    ecKids[1]?.tag !== TAG_OCTET_STRING
+  ) {
     throw new InvalidKeyError('parseSm2PrivateKeyPem: missing EC private key OCTET STRING');
   }
   // 若带 [0] parameters，则其中的曲线 OID 必须是 SM2。
@@ -132,10 +142,7 @@ export function parseSm2PublicKeyPem(pem: string): Uint8Array {
  * @param d 32 字节私钥（hex / Uint8Array）。
  * @param pub 可选公钥（64 或 65 字节）；给出则内嵌到 ECPrivateKey 的 `[1]`。
  */
-export function encodeSm2PrivateKeyPem(
-  d: string | Uint8Array,
-  pub?: string | Uint8Array,
-): string {
+export function encodeSm2PrivateKeyPem(d: string | Uint8Array, pub?: string | Uint8Array): string {
   const scalar = normalizeScalar(d);
   const ecChildren: Asn1Node[] = [
     asn1Int(1),
@@ -252,11 +259,7 @@ function bitStringNode(value: Uint8Array): Asn1Node {
 
 /** 构造 [n] EXPLICIT 包装节点。 */
 function explicit(tagNum: number, inner: Asn1Node): Asn1Node {
-  const raw = concat([
-    new Uint8Array([0xa0 | tagNum]),
-    encodeLen(inner.raw.length),
-    inner.raw,
-  ]);
+  const raw = concat([new Uint8Array([0xa0 | tagNum]), encodeLen(inner.raw.length), inner.raw]);
   return {
     cls: CLS_CONTEXT,
     tag: tagNum,

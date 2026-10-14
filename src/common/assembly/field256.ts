@@ -34,7 +34,9 @@ export function u256fromBytes(b: Uint8Array, off: usize): U256 {
   const x = new StaticArray<u32>(8);
   for (let i = 0; i < 8; i++) {
     const o = off + i * 4;
-    x[7 - i] = (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | (<u32>b[o + 3])) & 0xffffffff;
+    x[7 - i] =
+      (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3]) &
+      0xffffffff;
   }
   return x;
 }
@@ -61,7 +63,8 @@ export function u256eqBytes(a: U256, b: Uint8Array, off: usize): bool {
   for (let i = 0; i < 8; i++) {
     const x = a[7 - i];
     const o = off + i * 4;
-    const y = ((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | (<u32>b[o + 3]);
+    const y =
+      ((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3];
     if (x !== (y & 0xffffffff)) return false;
   }
   return true;
@@ -118,7 +121,10 @@ export function u256fromHex(hex: string): U256 {
     const end = n - i * 8;
     const start = end - 8;
     for (let j = start; j < end; j++) {
-      if (j < 0) { v = (v << 4) & 0xffffffff; continue; }
+      if (j < 0) {
+        v = (v << 4) & 0xffffffff;
+        continue;
+      }
       v = ((v << 4) | hexNib(hex.charCodeAt(j))) & 0xffffffff;
     }
     x[i] = v;
@@ -369,7 +375,7 @@ export function modHalve(a: U256, m: U256): U256 {
     const half = u256clone(m);
     u256shr1(half);
     u256addRaw(half, u256fromU32(1)); // (m>>1) + 1 = (m+1)/2，不会溢出
-    u256addRaw(r, half);              // r + (m+1)/2 ≤ (a-1)/2 + (m+1)/2 < m，不会溢出
+    u256addRaw(r, half); // r + (m+1)/2 ≤ (a-1)/2 + (m+1)/2 < m，不会溢出
   }
   return r;
 }
@@ -398,20 +404,20 @@ export function modPow(a: U256, k: U256, m: U256): U256 {
 // 纯乘法 + 移位 + 加减，**无除法**——比通用多 limb 长除法快。
 
 const SM2_P_MU: StaticArray<u32> = [
-  0x00000003, 0x00000002, 0x00000002, 0x00000002,
-  0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+  0x00000003, 0x00000002, 0x00000002, 0x00000002, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+  0x00000001,
 ];
 const SM2_N_MU: StaticArray<u32> = [
-  0xf15149a0, 0x12ac6361, 0xfa323c01, 0x8dfc2096,
-  0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+  0xf15149a0, 0x12ac6361, 0xfa323c01, 0x8dfc2096, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+  0x00000001,
 ];
 const SM9_P_MU: StaticArray<u32> = [
-  0xd5c22146, 0x71188f90, 0x1e36081c, 0xf2665f6d,
-  0xdcd1312a, 0x55f73aeb, 0xeb5759a6, 0x67980e0b, 0x00000001,
+  0xd5c22146, 0x71188f90, 0x1e36081c, 0xf2665f6d, 0xdcd1312a, 0x55f73aeb, 0xeb5759a6, 0x67980e0b,
+  0x00000001,
 ];
 const SM9_N_MU: StaticArray<u32> = [
-  0xdfc97c2f, 0x74df4fd4, 0xc9c073b0, 0x9c95d85e,
-  0xdcd1312c, 0x55f73aeb, 0xeb5759a6, 0x67980e0b, 0x00000001,
+  0xdfc97c2f, 0x74df4fd4, 0xc9c073b0, 0x9c95d85e, 0xdcd1312c, 0x55f73aeb, 0xeb5759a6, 0x67980e0b,
+  0x00000001,
 ];
 
 /** 按模数取 Barrett 常数 μ；未知模数返回 null（回退长除法）。 */
@@ -428,7 +434,13 @@ function barrettMu(m: U256): StaticArray<u32> | null {
 }
 
 /** out(na+nb) = a(na) · b(nb)（schoolbook）。 */
-function mulLimbArrays(a: StaticArray<u32>, na: i32, b: StaticArray<u32>, nb: i32, out: StaticArray<u32>): void {
+function mulLimbArrays(
+  a: StaticArray<u32>,
+  na: i32,
+  b: StaticArray<u32>,
+  nb: i32,
+  out: StaticArray<u32>,
+): void {
   for (let i = 0; i < na + nb; i++) out[i] = 0;
   for (let i = 0; i < na; i++) {
     let carry: u64 = 0;

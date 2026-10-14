@@ -9,8 +9,9 @@
  * 供 `./index`（sign/verify/encrypt/decrypt/getPublicKey）与 `./exchange`
  * 共用，避免两处各写一份嗅探逻辑。
  */
-import { toBytes } from '../runtime/convert.js';
+
 import { parseSm2PrivateKeyPem, parseSm2PublicKeyPem } from '../pem/sm2.js';
+import { toBytes } from '../runtime/convert.js';
 import { InvalidKeyError } from '../runtime/errors.js';
 
 /** 是否为 PEM 文本（而非裸字节 / hex）。 */

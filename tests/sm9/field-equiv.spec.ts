@@ -12,14 +12,12 @@
  *   Fp4 128B  = a1(Fp2) || a0(Fp2)
  *   Fp12 384B = a2(Fp4) || a1(Fp4) || a0(Fp4)
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { loadWasm } from '@/runtime/loadWasm.js';
 
 // ---------- 参考实现（BigInt，按域定义） ----------
 
-const P = BigInt(
-  '0xb640000002a3a6f1d603ab4ff58ec74521f2934b1a7aeedbe56f9b27e351457d',
-);
+const P = BigInt('0xb640000002a3a6f1d603ab4ff58ec74521f2934b1a7aeedbe56f9b27e351457d');
 
 const fp = (x: bigint): bigint => ((x % P) + P) % P;
 const fadd = (a: bigint, b: bigint) => fp(a + b);
@@ -57,14 +55,8 @@ const f4sqr = (a: F4t): F4t => f4mul(a, a);
 
 /** 多项式乘后模 w³ = v。 */
 const f12mul = (a: F12t, b: F12t): F12t => [
-  f4add(
-    f4mul(a[0], b[0]),
-    f4add(f4mulV(f4mul(a[1], b[2])), f4mulV(f4mul(a[2], b[1]))),
-  ),
-  f4add(
-    f4add(f4mul(a[0], b[1]), f4mul(a[1], b[0])),
-    f4mulV(f4mul(a[2], b[2])),
-  ),
+  f4add(f4mul(a[0], b[0]), f4add(f4mulV(f4mul(a[1], b[2])), f4mulV(f4mul(a[2], b[1])))),
+  f4add(f4add(f4mul(a[0], b[1]), f4mul(a[1], b[0])), f4mulV(f4mul(a[2], b[2]))),
   f4add(f4add(f4mul(a[0], b[2]), f4mul(a[1], b[1])), f4mul(a[2], b[0])),
 ];
 const f12sqr = (a: F12t): F12t => f12mul(a, a);
@@ -92,20 +84,14 @@ const encF2 = (a: F2): Uint8Array => {
   out.set(u256(a[0]), 32);
   return out;
 };
-const decF2 = (b: Uint8Array, off: number): F2 => [
-  readU256(b, off + 32),
-  readU256(b, off),
-];
+const decF2 = (b: Uint8Array, off: number): F2 => [readU256(b, off + 32), readU256(b, off)];
 const encF4 = (a: F4t): Uint8Array => {
   const out = new Uint8Array(128);
   out.set(encF2(a[1]), 0);
   out.set(encF2(a[0]), 64);
   return out;
 };
-const decF4 = (b: Uint8Array, off: number): F4t => [
-  decF2(b, off + 64),
-  decF2(b, off),
-];
+const decF4 = (b: Uint8Array, off: number): F4t => [decF2(b, off + 64), decF2(b, off)];
 const encF12 = (a: F12t): Uint8Array => {
   const out = new Uint8Array(384);
   out.set(encF4(a[2]), 0);

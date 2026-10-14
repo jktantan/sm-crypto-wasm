@@ -9,56 +9,54 @@
 //   n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 
 import {
-  U256,
-  U512,
-  u256zero,
-  u256fromU32,
-  u256fromBytes,
-  u256toBytes,
-  u256cmp,
-  u256isZero,
-  u256copy,
-  u256bit,
-  u256clone,
-  u256fromLimbs,
-  u256addRaw,
-  u256subRaw,
   modAdd,
+  modInv,
+  modMul,
+  modSqr,
   modSub,
   mul512,
   reduce512,
-  modMul,
-  modSqr,
-  modInv,
+  U256,
+  U512,
+  u256addRaw,
+  u256bit,
+  u256clone,
+  u256cmp,
+  u256copy,
+  u256fromBytes,
+  u256fromLimbs,
+  u256fromU32,
+  u256isZero,
+  u256subRaw,
+  u256toBytes,
+  u256zero,
 } from '../../common/assembly/field256';
 
 // 重新导出通用工具，供 SM2 其它文件沿用。
 export {
   U256,
   U512,
-  u256zero,
-  u256fromU32,
-  u256fromBytes,
-  u256toBytes,
-  u256cmp,
-  u256isZero,
-  u256copy,
   u256bit,
   u256clone,
+  u256cmp,
+  u256copy,
+  u256fromBytes,
+  u256fromU32,
+  u256isZero,
+  u256toBytes,
+  u256zero,
 };
 
 // SM2 素域 p（小端 limb）。
 // p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
 export const P_LIMBS: StaticArray<u32> = [
-  0xffffffff, 0xffffffff, 0x00000000, 0xffffffff,
-  0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
+  0xffffffff, 0xffffffff, 0x00000000, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
 ];
 
 // SM2 子群阶 n（小端 limb）。
 // n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 export const N_LIMBS: StaticArray<u32> = [
-  0x39d54123, 0x53bbf409, 0x21c6052b, 0x7203df6b,
-  0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
+  0x39d54123, 0x53bbf409, 0x21c6052b, 0x7203df6b, 0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
 ];
 
 // p / n 的 U256 形式只构造一次。每次 fpAdd/fpSub/fpMul 都重建一份 U256 是最贵的固定开销

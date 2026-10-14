@@ -1,6 +1,6 @@
-import { describe, expect, it, beforeAll } from 'vitest';
 import { createHash, createHmac } from 'node:crypto';
-import { hash, hmac, ensureLoaded } from '@/sm3';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { ensureLoaded, hash, hmac } from '@/sm3';
 
 /**
  * SM3 与 Node crypto oracle 对比。

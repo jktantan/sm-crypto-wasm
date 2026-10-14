@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { sm2GetPublicKeyFromPrivateKey, sm2Encrypt } from 'gmkitx';
+import { sm2Encrypt, sm2GetPublicKeyFromPrivateKey } from 'gmkitx';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '@/pem';
 import { InvalidPublicKeyError } from '@/runtime';
 import * as sm2 from '@/sm2';
@@ -28,7 +28,7 @@ describe('SM2 vs gmkitx oracle', () => {
   it('tampered signature fails', () => {
     const pub = sm2.getPublicKey(D);
     const sig = sm2.sign(D, MSG);
-    const bad = (sig.slice(0, -2) + (sig.endsWith('ff') ? '00' : 'ff'));
+    const bad = sig.slice(0, -2) + (sig.endsWith('ff') ? '00' : 'ff');
     expect(sm2.verify(pub, MSG, bad)).toBe(false);
   });
 
@@ -151,9 +151,7 @@ describe('SM2 公钥合法性', () => {
   });
 
   it('encrypt rejects coordinates that exceed the field prime', () => {
-    expect(() => sm2.encrypt(new Uint8Array(64).fill(0xff), ONES)).toThrow(
-      InvalidPublicKeyError,
-    );
+    expect(() => sm2.encrypt(new Uint8Array(64).fill(0xff), ONES)).toThrow(InvalidPublicKeyError);
   });
 
   it('encrypt accepts a genuine public key', () => {

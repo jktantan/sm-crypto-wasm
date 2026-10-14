@@ -14,13 +14,14 @@
  *
  * SM9 的用户"公钥"是 `(id, 主公钥)` 的确定函数、不是独立持有物，因此不单独编码。
  */
+
+import { InvalidKeyError } from '../runtime/errors.js';
 import {
   encodePkcs8PrivateKey,
   encodeSpkiPublicKey,
   parsePkcs8PrivateKey,
   parseSpkiPublicKey,
 } from './pkcs8.js';
-import { InvalidKeyError } from '../runtime/errors.js';
 
 /** SM9 算法 OID（`1.2.156.10197.1.100`）。 */
 export const SM9_OID = '1.2.156.10197.1.100';

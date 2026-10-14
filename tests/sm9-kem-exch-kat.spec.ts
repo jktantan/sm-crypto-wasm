@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm9 from '@/sm9';
 import v from './vectors/sm9/kem-exch-gmssl.json';
 

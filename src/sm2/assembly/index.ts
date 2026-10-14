@@ -13,18 +13,28 @@
 // 所有 256-bit 操作数按 32 字节大端读写。
 
 import {
-  U256,
-  u256fromBytes,
-  u256toBytes,
+  computeZ,
+  computeZDefaultId,
+  decrypt,
+  encrypt,
+  kdf,
+  kexComputeU,
+  kexConfirm,
+  sign,
+  verify,
+} from './crypto';
+import {
   fpAdd,
-  fpSub,
-  fpMul,
   fpInv,
+  fpMul,
+  fpSub,
   mul512Debug,
   reduce512Debug,
+  type U256,
+  u256fromBytes,
+  u256toBytes,
 } from './field';
-import { JPoint, basePoint, scalarMulG, toAffine, scalarMul } from './point';
-import { computeZ, computeZDefaultId, sign, verify, kdf, encrypt, decrypt, kexComputeU, kexConfirm } from './crypto';
+import { basePoint, JPoint, scalarMul, scalarMulG, toAffine } from './point';
 
 const pinned: Array<StaticArray<u8>> = [];
 
@@ -116,9 +126,13 @@ export function computeZOut(pubXPtr: usize, pubYPtr: usize, outPtr: usize): void
 
 /** SM2 签名：out = r(32) || s(32)。返回 0 成功，1 需重试。 */
 export function signOut(
-  privPtr: usize, pubXPtr: usize, pubYPtr: usize,
-  msgPtr: usize, msgLen: usize,
-  kPtr: usize, outPtr: usize,
+  privPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  outPtr: usize,
 ): i32 {
   const z = new StaticArray<u8>(32);
   computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
@@ -127,16 +141,15 @@ export function signOut(
 
 /** SM2 验签。sigPtr = r || s。返回 1 有效，0 无效。 */
 export function verifyOut(
-  pubXPtr: usize, pubYPtr: usize,
-  msgPtr: usize, msgLen: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
   sigPtr: usize,
 ): i32 {
   const z = new StaticArray<u8>(32);
   computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
-  return verify(
-    pubXPtr, pubYPtr, changetype<usize>(z), msgPtr, msgLen,
-    sigPtr, sigPtr + 32,
-  );
+  return verify(pubXPtr, pubYPtr, changetype<usize>(z), msgPtr, msgLen, sigPtr, sigPtr + 32);
 }
 
 /** KDF。返回 1 成功，0 表示输出全 0。 */
@@ -154,8 +167,12 @@ export function publicKeyOut(dPtr: usize, outPtr: usize): void {
 
 /** SM2 加密：out = C1(65)||C3(32)||C2。返回 1 成功。 */
 export function encryptOut(
-  pubXPtr: usize, pubYPtr: usize, msgPtr: usize, msgLen: usize,
-  kPtr: usize, outPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  outPtr: usize,
 ): i32 {
   return encrypt(pubXPtr, pubYPtr, msgPtr, msgLen, kPtr, outPtr);
 }
@@ -169,7 +186,11 @@ export function decryptOut(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: u
 
 /** 计算 Z 值（自定义 ID）：out = Z(IDA ‖ P)。 */
 export function computeZIdOut(
-  pubXPtr: usize, pubYPtr: usize, idPtr: usize, idLen: usize, outPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  idPtr: usize,
+  idLen: usize,
+  outPtr: usize,
 ): void {
   computeZ(pubXPtr, pubYPtr, idPtr, idLen, outPtr);
 }
@@ -183,8 +204,11 @@ export function computeZIdOut(
  * @returns 1 成功；0 无穷远点。
  */
 export function kexComputeUOut(
-  privPtr: usize, rSelfPtr: usize,
-  rSelfXYPtr: usize, peerPubXYPtr: usize, peerRXYPtr: usize,
+  privPtr: usize,
+  rSelfPtr: usize,
+  rSelfXYPtr: usize,
+  peerPubXYPtr: usize,
+  peerRXYPtr: usize,
   outPtr: usize,
 ): i32 {
   return kexComputeU(privPtr, rSelfPtr, rSelfXYPtr, peerPubXYPtr, peerRXYPtr, outPtr);
@@ -192,8 +216,13 @@ export function kexComputeUOut(
 
 /** 密钥交换确认值 S（32 字节）。prefix：0x03 发起方 / 0x02 响应方。 */
 export function kexConfirmOut(
-  prefix: i32, uPtr: usize, zaPtr: usize, zbPtr: usize,
-  raXYPtr: usize, rbXYPtr: usize, outPtr: usize,
+  prefix: i32,
+  uPtr: usize,
+  zaPtr: usize,
+  zbPtr: usize,
+  raXYPtr: usize,
+  rbXYPtr: usize,
+  outPtr: usize,
 ): void {
   kexConfirm(prefix, uPtr, zaPtr, zbPtr, raXYPtr, rbXYPtr, outPtr);
 }

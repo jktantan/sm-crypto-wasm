@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { keyExchange } from 'gmkitx';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
 
 /**
@@ -50,28 +50,43 @@ async function runBoth(v: Vector, kLen: number) {
   const RB = sm2.getPublicKey(v.rB);
 
   const gA = keyExchange({
-    privateKey: v.dA, peerPublicKey: '04' + PB,
-    tempPrivateKey: v.rA, peerTempPublicKey: '04' + RB,
-    isInitiator: true, userId: v.idA, peerUserId: v.idB, keyLength: kLen,
+    privateKey: v.dA,
+    peerPublicKey: '04' + PB,
+    tempPrivateKey: v.rA,
+    peerTempPublicKey: '04' + RB,
+    isInitiator: true,
+    userId: v.idA,
+    peerUserId: v.idB,
+    keyLength: kLen,
   });
   const gB = keyExchange({
-    privateKey: v.dB, peerPublicKey: '04' + PA,
-    tempPrivateKey: v.rB, peerTempPublicKey: '04' + RA,
-    isInitiator: false, userId: v.idB, peerUserId: v.idA, keyLength: kLen,
+    privateKey: v.dB,
+    peerPublicKey: '04' + PA,
+    tempPrivateKey: v.rB,
+    peerTempPublicKey: '04' + RA,
+    isInitiator: false,
+    userId: v.idB,
+    peerUserId: v.idA,
+    keyLength: kLen,
   });
 
   const alice = await sm2.createExchangeInitiator(v.dA, PB, {
-    idSelf: v.idA, idPeer: v.idB, ephemeralPrivateKey: v.rA,
+    idSelf: v.idA,
+    idPeer: v.idB,
+    ephemeralPrivateKey: v.rA,
   });
   const bob = await sm2.createExchangeResponder(v.dB, PA, {
-    idSelf: v.idB, idPeer: v.idA, ephemeralPrivateKey: v.rB,
+    idSelf: v.idB,
+    idPeer: v.idA,
+    ephemeralPrivateKey: v.rB,
   });
   const m1 = alice.initiate();
   const m2 = bob.respond(m1);
   const m3 = alice.confirm(m2);
 
   return {
-    gA, gB,
+    gA,
+    gB,
     sA: m3.confirm,
     sB: m2.confirm,
     keyA: alice.getSharedKey(m3, kLen),

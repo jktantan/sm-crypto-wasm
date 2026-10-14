@@ -16,21 +16,21 @@
  *
  * spec/plan 对应：plan Task 12；spec §5 产物结构、§6 API。
  */
+
+export { bytesToHex, fromBytes, hexToBytes, toBytes } from './runtime/convert.js';
+// 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。
+export {
+  CiphertextError,
+  DecryptionError,
+  InvalidCiphertextError,
+  InvalidKeyError,
+  InvalidPublicKeyError,
+  isSmCryptoError,
+  SmCryptoError,
+} from './runtime/errors.js';
+export { loadWasm, loadWasmSync } from './runtime/loadWasm.js';
 export * as sm2 from './sm2/index.js';
 export * as sm3 from './sm3/index.js';
 export * as sm4 from './sm4/index.js';
 export * as sm9 from './sm9/index.js';
 export * as zuc from './zuc/index.js';
-
-// 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。
-export {
-  SmCryptoError,
-  CiphertextError,
-  InvalidKeyError,
-  InvalidPublicKeyError,
-  InvalidCiphertextError,
-  DecryptionError,
-  isSmCryptoError,
-} from './runtime/errors.js';
-export { toBytes, fromBytes, bytesToHex, hexToBytes } from './runtime/convert.js';
-export { loadWasm, loadWasmSync } from './runtime/loadWasm.js';

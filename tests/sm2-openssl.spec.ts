@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
 
 /**
@@ -41,10 +41,14 @@ describeMaybe('SM2 vs OpenSSL (authoritative oracle)', () => {
     pubPem = join(dir, 'pub.pem');
     execFileSync('openssl', ['genpkey', '-algorithm', 'SM2', '-out', privPem]);
     execFileSync('openssl', ['pkey', '-in', privPem, '-pubout', '-out', pubPem]);
-    const privText = execFileSync('openssl', ['pkey', '-in', privPem, '-text', '-noout'], { encoding: 'utf8' });
+    const privText = execFileSync('openssl', ['pkey', '-in', privPem, '-text', '-noout'], {
+      encoding: 'utf8',
+    });
     const privBlock = privText.replace(/[\s\S]*?priv:/, '').replace(/pub:[\s\S]*/, '');
     privHex = privBlock.replace(/[^0-9a-f]/gi, '').toLowerCase();
-    const pubText = execFileSync('openssl', ['pkey', '-pubin', '-in', pubPem, '-text', '-noout'], { encoding: 'utf8' });
+    const pubText = execFileSync('openssl', ['pkey', '-pubin', '-in', pubPem, '-text', '-noout'], {
+      encoding: 'utf8',
+    });
     const pubBlock = pubText.replace(/[\s\S]*?pub:/, '').replace(/ASN1[\s\S]*/, '');
     pubHex = pubBlock.replace(/[^0-9a-f]/gi, '').toLowerCase();
     // 去掉 04 未压缩前缀。
@@ -63,12 +67,26 @@ describeMaybe('SM2 vs OpenSSL (authoritative oracle)', () => {
     const sigPath = join(dir, 'sig.der');
     writeFileSync(sigPath, rawToDer(sig));
     // 不抛异常即验证通过。
-    const out = execFileSync('openssl', [
-      'pkeyutl', '-verify', '-rawin', '-digest', 'sm3',
-      '-pkeyopt', 'distid:1234567812345678',
-      '-pubin', '-inkey', pubPem,
-      '-in', msgPath, '-sigfile', sigPath,
-    ], { encoding: 'utf8' });
+    const out = execFileSync(
+      'openssl',
+      [
+        'pkeyutl',
+        '-verify',
+        '-rawin',
+        '-digest',
+        'sm3',
+        '-pkeyopt',
+        'distid:1234567812345678',
+        '-pubin',
+        '-inkey',
+        pubPem,
+        '-in',
+        msgPath,
+        '-sigfile',
+        sigPath,
+      ],
+      { encoding: 'utf8' },
+    );
     expect(out).toMatch(/Verified Successfully/i);
   });
 
@@ -78,9 +96,19 @@ describeMaybe('SM2 vs OpenSSL (authoritative oracle)', () => {
     writeFileSync(msgPath, msg);
     const osslSigPath = join(dir, 'ossl-sig.der');
     execFileSync('openssl', [
-      'pkeyutl', '-sign', '-rawin', '-digest', 'sm3',
-      '-pkeyopt', 'distid:1234567812345678',
-      '-inkey', privPem, '-in', msgPath, '-out', osslSigPath,
+      'pkeyutl',
+      '-sign',
+      '-rawin',
+      '-digest',
+      'sm3',
+      '-pkeyopt',
+      'distid:1234567812345678',
+      '-inkey',
+      privPem,
+      '-in',
+      msgPath,
+      '-out',
+      osslSigPath,
     ]);
     const der = readFileSync(osslSigPath);
     const sig = derToRaw(der);

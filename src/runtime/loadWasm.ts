@@ -34,8 +34,7 @@ export interface WasmModule {
 }
 
 /** 当前是否在 Node 进程内。CI / Vite SSR / 真浏览器都据此切换加载路径。 */
-const isNode =
-  typeof process !== 'undefined' && !!process.versions?.node;
+const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 
 /**
  * 计算 dist 子目录下的 wasm 路径。
@@ -71,10 +70,7 @@ function wasmPath(name: WasmAlgo): string {
  */
 async function nodeReadWasm(name: WasmAlgo): Promise<ArrayBuffer> {
   const buf = await readFileAsync(wasmPath(name));
-  return buf.buffer.slice(
-    buf.byteOffset,
-    buf.byteOffset + buf.byteLength,
-  ) as ArrayBuffer;
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
 /**
@@ -85,10 +81,7 @@ async function nodeReadWasm(name: WasmAlgo): Promise<ArrayBuffer> {
  */
 function nodeReadWasmSync(name: WasmAlgo): ArrayBuffer {
   const buf = readFileSync(wasmPath(name));
-  return buf.buffer.slice(
-    buf.byteOffset,
-    buf.byteOffset + buf.byteLength,
-  ) as ArrayBuffer;
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
 /**
@@ -103,9 +96,7 @@ async function loadArrayBuffer(name: WasmAlgo): Promise<ArrayBuffer> {
   const url = new URL(`../${name}/${name}.wasm`, import.meta.url);
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(
-      `loadWasm: failed to fetch ${url}: ${res.status} ${res.statusText}`,
-    );
+    throw new Error(`loadWasm: failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }
   return res.arrayBuffer();
 }
@@ -120,8 +111,7 @@ function instantiateFromBuffer(buf: ArrayBuffer): WasmModule {
   const inst = new WebAssembly.Instance(mod, {});
   const exports = inst.exports as WebAssembly.Exports;
   const memory =
-    (exports.memory as WebAssembly.Memory | undefined) ??
-    new WebAssembly.Memory({ initial: 1 });
+    (exports.memory as WebAssembly.Memory | undefined) ?? new WebAssembly.Memory({ initial: 1 });
   return Object.freeze({ exports, memory });
 }
 
@@ -145,9 +135,13 @@ export function loadWasm(name: WasmAlgo): Promise<WasmModule> {
       // 我们提供空 stub，AS 库函数都不会被调用所以足够。
       const imports: WebAssembly.Imports = {
         env: {
-          abort: () => { throw new Error('wasm: abort'); },
+          abort: () => {
+            throw new Error('wasm: abort');
+          },
           trace: () => {},
-          __assert_fail: () => { throw new Error('wasm: assert_fail'); },
+          __assert_fail: () => {
+            throw new Error('wasm: assert_fail');
+          },
         },
       };
       const { instance } = await WebAssembly.instantiate(buf, imports);

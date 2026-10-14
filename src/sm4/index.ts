@@ -6,9 +6,15 @@
  *
  * spec/plan 对应：plan Task 9；spec §6 API。
  */
-import { loadWasm } from '../runtime/loadWasm.js';
+
 import { fromBytes, toBytes } from '../runtime/convert.js';
-import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidKeyError } from '../runtime/errors.js';
+import {
+  CiphertextError,
+  DecryptionError,
+  InvalidCiphertextError,
+  InvalidKeyError,
+} from '../runtime/errors.js';
+import { loadWasm } from '../runtime/loadWasm.js';
 
 interface Sm4Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -153,7 +159,8 @@ export function encryptCBC(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const m = toBytes(msg, 'msg');
-  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16)
+    throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
   const padded = pkcs7Pad(m);
   const out = new Uint8Array(padded.length);
   let prev = v;
@@ -175,7 +182,8 @@ export function decryptCBC(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const c = toBytes(ct, 'ct');
-  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16)
+    throw new InvalidKeyError('sm4 CBC: key/iv must be 16 bytes');
   if (c.length % 16 !== 0) throw new InvalidCiphertextError('sm4 CBC: 密文长度必须是 16 的倍数');
   const out = new Uint8Array(c.length);
   let prev = v;
@@ -198,7 +206,8 @@ export function cryptCTR(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CTR: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16)
+    throw new InvalidKeyError('sm4 CTR: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   const counter: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -241,7 +250,8 @@ function cfb(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 CFB: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16)
+    throw new InvalidKeyError('sm4 CFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   let feedback: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -269,7 +279,8 @@ export function cryptOFB(
   const k = toBytes(key, 'key');
   const v = toBytes(iv, 'iv');
   const d = toBytes(data, 'data');
-  if (k.length !== 16 || v.length !== 16) throw new InvalidKeyError('sm4 OFB: key/iv must be 16 bytes');
+  if (k.length !== 16 || v.length !== 16)
+    throw new InvalidKeyError('sm4 OFB: key/iv must be 16 bytes');
   const out = new Uint8Array(d.length);
   let state: Uint8Array = new Uint8Array(v);
   for (let off = 0; off < d.length; off += 16) {
@@ -312,10 +323,7 @@ function pkcs7Unpad(m: Uint8Array): Uint8Array {
 /**
  * GCM 允许空明文 / 空 AAD，而 `toBytes` 对空输入抛错；这里做一层归一化。
  */
-function optionalBytes(
-  v: string | Uint8Array | undefined,
-  label: string,
-): Uint8Array {
+function optionalBytes(v: string | Uint8Array | undefined, label: string): Uint8Array {
   if (v === undefined) return new Uint8Array(0);
   if (v instanceof Uint8Array) return new Uint8Array(v);
   if (v.length === 0) return new Uint8Array(0);
@@ -362,7 +370,7 @@ function withGcmBuffers<T>(
   const outPtr = exports.alloc(data.length === 0 ? 1 : data.length);
   const tagPtr = exports.alloc(16);
   try {
-    let mem = new Uint8Array(memory.buffer);
+    const mem = new Uint8Array(memory.buffer);
     mem.set(k, keyPtr);
     mem.set(v, ivPtr);
     if (a.length !== 0) mem.set(a, aadPtr);

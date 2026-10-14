@@ -37,9 +37,7 @@ export function toBytes(input: Input, label: string): Uint8Array {
     return new Uint8Array(input);
   }
   if (typeof input !== 'string') {
-    throw new TypeError(
-      `toBytes(${label}): expected string or Uint8Array, got ${typeof input}`,
-    );
+    throw new TypeError(`toBytes(${label}): expected string or Uint8Array, got ${typeof input}`);
   }
   if (input.length === 0) {
     throw new TypeError(`toBytes(${label}): empty input`);
@@ -62,10 +60,7 @@ export function toBytes(input: Input, label: string): Uint8Array {
  * @param bytes 输入字节。
  * @param format 输出格式。`'raw` 默认 hex。`'raw`' 直接返回原引用（拷贝）。
  */
-export function fromBytes(
-  bytes: Uint8Array,
-  format: OutputFormat = 'hex',
-): string {
+export function fromBytes(bytes: Uint8Array, format: OutputFormat = 'hex'): string {
   switch (format) {
     case 'hex':
       return bytesToHex(bytes);
@@ -169,7 +164,7 @@ function looksLikeHex(s: string): boolean {
     const isHex =
       (c >= 0x30 && c <= 0x39) || // 0-9
       (c >= 0x41 && c <= 0x46) || // A-F
-      (c >= 0x61 && c <= 0x66);   // a-f
+      (c >= 0x61 && c <= 0x66); // a-f
     if (!isHex) return false;
   }
   return true;

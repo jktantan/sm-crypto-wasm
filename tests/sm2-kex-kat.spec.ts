@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
 import vectors from './vectors/sm2/keyexchange.json';
 
@@ -25,10 +25,14 @@ describe('SM2 key exchange KAT (GmSSL-generated vector)', () => {
     const pubB = sm2.getPublicKey(v.dB);
 
     const alice = await sm2.createExchangeInitiator(v.dA, pubB, {
-      idSelf: v.idA, idPeer: v.idB, ephemeralPrivateKey: v.rA,
+      idSelf: v.idA,
+      idPeer: v.idB,
+      ephemeralPrivateKey: v.rA,
     });
     const bob = await sm2.createExchangeResponder(v.dB, pubA, {
-      idSelf: v.idB, idPeer: v.idA, ephemeralPrivateKey: v.rB,
+      idSelf: v.idB,
+      idPeer: v.idA,
+      ephemeralPrivateKey: v.rB,
     });
 
     const m1 = alice.initiate();

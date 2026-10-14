@@ -5,30 +5,30 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { U256 } from './fp';
+import { u256zero } from '../../common/assembly/field256';
+import type { U256 } from './fp';
 import {
-  Fp2,
-  fp2zero,
-  fp2one,
-  fp2set,
-  fp2copy,
-  fp2isZero,
-  fp2isOne,
-  fp2eq,
+  type Fp2,
   fp2Add,
-  fp2Sub,
-  fp2Neg,
+  fp2Conjugate,
+  fp2copy,
   fp2Dbl,
+  fp2eq,
+  fp2Inv,
+  fp2isOne,
+  fp2isZero,
   fp2Mul,
+  fp2MulFp,
+  fp2MulU,
+  fp2Neg,
+  fp2one,
   fp2Sqr,
   fp2SqrU,
-  fp2Inv,
-  fp2Conjugate,
-  fp2MulU,
+  fp2Sub,
+  fp2set,
   fp2TimesU,
-  fp2MulFp,
+  fp2zero,
 } from './fp2';
-import { u256zero } from '../../common/assembly/field256';
 
 /** Fp4 元素：[a0, a1]，各为 Fp2。 */
 export type Fp4 = StaticArray<Fp2>;

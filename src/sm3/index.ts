@@ -9,8 +9,9 @@
  *
  * spec/plan 对应：plan Task 7；spec §6 API、§9 安全姿态。
  */
-import { loadWasm } from '../runtime/loadWasm.js';
+
 import { fromBytes, toBytes } from '../runtime/convert.js';
+import { loadWasm } from '../runtime/loadWasm.js';
 
 /** WASM 暴露的导出类型。 */
 interface Sm3Exports extends WebAssembly.Exports {
@@ -40,9 +41,7 @@ export async function ensureLoaded(): Promise<void> {
 function getModule(): Sm3Module {
   const mod = (globalThis as { __sm3Wasm?: Sm3Module }).__sm3Wasm;
   if (!mod) {
-    throw new Error(
-      'sm3: 未初始化，请先 `await ensureLoaded()`（或 await loadWasm("sm3")）。',
-    );
+    throw new Error('sm3: 未初始化，请先 `await ensureLoaded()`（或 await loadWasm("sm3")）。');
   }
   return mod;
 }

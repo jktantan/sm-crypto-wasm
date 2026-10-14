@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm4 from '@/sm4';
 import * as zuc from '@/zuc';
 

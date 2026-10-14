@@ -7,17 +7,17 @@
 // 通用 256-bit 模运算在 `src/common/assembly/field256.ts`；本文件固定 SM9 的 p/n。
 
 import {
-  U256,
   modAdd,
-  modSub,
-  modMul,
-  modSqr,
-  modInv,
-  modPow,
   modHalve,
-  u256fromLimbs,
+  modInv,
+  modMul,
+  modPow,
+  modSqr,
+  modSub,
+  U256,
   u256clone,
   u256fromHex,
+  u256fromLimbs,
   u256isZero,
 } from '../../common/assembly/field256';
 
@@ -26,15 +26,13 @@ export { U256 };
 // p 的小端 limb。
 // p = b6400000 02a3a6f1 d603ab4f f58ec745 21f2934b 1a7aeedb e56f9b27 e351457d
 export const SM9_P_LIMBS: StaticArray<u32> = [
-  0xe351457d, 0xe56f9b27, 0x1a7aeedb, 0x21f2934b,
-  0xf58ec745, 0xd603ab4f, 0x02a3a6f1, 0xb6400000,
+  0xe351457d, 0xe56f9b27, 0x1a7aeedb, 0x21f2934b, 0xf58ec745, 0xd603ab4f, 0x02a3a6f1, 0xb6400000,
 ];
 
 // n 的小端 limb。
 // n = b6400000 02a3a6f1 d603ab4f f58ec744 49f2934b 18ea8bee e56ee19c d69ecf25
 export const SM9_N_LIMBS: StaticArray<u32> = [
-  0xd69ecf25, 0xe56ee19c, 0x18ea8bee, 0x49f2934b,
-  0xf58ec744, 0xd603ab4f, 0x02a3a6f1, 0xb6400000,
+  0xd69ecf25, 0xe56ee19c, 0x18ea8bee, 0x49f2934b, 0xf58ec744, 0xd603ab4f, 0x02a3a6f1, 0xb6400000,
 ];
 
 // p / n 的 U256 形式只构造一次。每次 fpAdd/fpSub/fpMul 都重建一份 U256 是这里最贵的

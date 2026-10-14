@@ -15,26 +15,46 @@
  *
  * spec/plan 对应：plan Task 6/8；spec §6 API、§12.1 Q1（默认 C1C3C2）。
  */
-import { loadWasm } from '../runtime/loadWasm.js';
+
+import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
 import { fromBytes, toBytes } from '../runtime/convert.js';
+import {
+  CiphertextError,
+  DecryptionError,
+  InvalidCiphertextError,
+  InvalidPublicKeyError,
+} from '../runtime/errors.js';
+import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
-import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
-import { CiphertextError, DecryptionError, InvalidCiphertextError, InvalidPublicKeyError } from '../runtime/errors.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
   readonly freeAll: () => void;
   readonly publicKeyOut: (dPtr: number, outPtr: number) => void;
   readonly signOut: (
-    privPtr: number, pubXPtr: number, pubYPtr: number,
-    msgPtr: number, msgLen: number, kPtr: number, outPtr: number,
+    privPtr: number,
+    pubXPtr: number,
+    pubYPtr: number,
+    msgPtr: number,
+    msgLen: number,
+    kPtr: number,
+    outPtr: number,
   ) => number;
   readonly verifyOut: (
-    pubXPtr: number, pubYPtr: number, msgPtr: number, msgLen: number, sigPtr: number,
+    pubXPtr: number,
+    pubYPtr: number,
+    msgPtr: number,
+    msgLen: number,
+    sigPtr: number,
   ) => number;
   readonly encryptOut: (
-    pubXPtr: number, pubYPtr: number, msgPtr: number, msgLen: number, kPtr: number, outPtr: number,
+    pubXPtr: number,
+    pubYPtr: number,
+    msgPtr: number,
+    msgLen: number,
+    kPtr: number,
+    outPtr: number,
   ) => number;
   readonly decryptOut: (privPtr: number, ctPtr: number, ctLen: number, outPtr: number) => number;
   readonly memory: WebAssembly.Memory;

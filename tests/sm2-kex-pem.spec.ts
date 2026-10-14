@@ -1,9 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as sm2 from '@/sm2';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
   encodeSm2PrivateKeyPem,
   encodeSm2PublicKeyPem,
@@ -11,6 +10,7 @@ import {
   parseSm2PublicKeyPem,
 } from '@/pem';
 import { InvalidKeyError } from '@/runtime';
+import * as sm2 from '@/sm2';
 
 /**
  * SM2 密钥交换的 PEM 输入路径。
@@ -37,10 +37,14 @@ async function runExchange(
   pubA: string | Uint8Array,
 ): Promise<{ kA: string; kB: string }> {
   const alice = await sm2.createExchangeInitiator(privA, pubB, {
-    idSelf: 'Alice', idPeer: 'Bob', ephemeralPrivateKey: R_A,
+    idSelf: 'Alice',
+    idPeer: 'Bob',
+    ephemeralPrivateKey: R_A,
   });
   const bob = await sm2.createExchangeResponder(privB, pubA, {
-    idSelf: 'Bob', idPeer: 'Alice', ephemeralPrivateKey: R_B,
+    idSelf: 'Bob',
+    idPeer: 'Alice',
+    ephemeralPrivateKey: R_B,
   });
   const m1 = alice.initiate();
   const m2 = bob.respond(m1);
@@ -175,10 +179,12 @@ describeMaybe('SM2 PEM parsing vs OpenSSL (authoritative oracle)', () => {
 
   it('runs a full key exchange on OpenSSL-generated PEMs', async () => {
     const alice = await sm2.createExchangeInitiator(A.privPem, B.pubPem, {
-      idSelf: 'Alice', idPeer: 'Bob',
+      idSelf: 'Alice',
+      idPeer: 'Bob',
     });
     const bob = await sm2.createExchangeResponder(B.privPem, A.pubPem, {
-      idSelf: 'Bob', idPeer: 'Alice',
+      idSelf: 'Bob',
+      idPeer: 'Alice',
     });
     const m1 = alice.initiate();
     const m2 = bob.respond(m1);
@@ -193,7 +199,13 @@ describeMaybe('SM2 PEM parsing vs OpenSSL (authoritative oracle)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sm2-bad-curve-'));
     const p256 = join(dir, 'p256.pem');
     execFileSync('openssl', [
-      'genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256', '-out', p256,
+      'genpkey',
+      '-algorithm',
+      'EC',
+      '-pkeyopt',
+      'ec_paramgen_curve:P-256',
+      '-out',
+      p256,
     ]);
     expect(() => parseSm2PrivateKeyPem(readFileSync(p256, 'utf8'))).toThrow(InvalidKeyError);
   });

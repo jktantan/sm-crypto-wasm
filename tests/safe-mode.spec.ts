@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { DecryptionError } from '@/runtime';
 import * as sm2 from '@/sm2';
 import * as sm4 from '@/sm4';
 import * as sm9 from '@/sm9';
-import { DecryptionError } from '@/runtime';
 
 /**
  * `safeMode`（plan Review Focus #4）：解密失败时返回 `null` 而不是抛错。
@@ -54,7 +54,9 @@ describe('sm9.decrypt safeMode', () => {
     const kp = await sm9.generateKeyPair({ id: 'safe@x.io', purpose: 'enc' });
     const ct = sm9.encrypt(kp.masterPrivatePem, 'safe@x.io', new Uint8Array([1, 2, 3]));
 
-    expect(sm9.decrypt(kp.masterPrivatePem, 'safe@x.io', flipHex(ct, 0), { safeMode: true })).toBeNull();
+    expect(
+      sm9.decrypt(kp.masterPrivatePem, 'safe@x.io', flipHex(ct, 0), { safeMode: true }),
+    ).toBeNull();
     expect(sm9.decrypt(kp.masterPrivatePem, 'safe@x.io', ct, { safeMode: true })).toBe('010203');
   });
 });
@@ -79,6 +81,8 @@ describe('sm4.decryptGCM safeMode', () => {
     const aad = new Uint8Array([4, 5]);
     const r = sm4.encryptGCM(key, iv, new Uint8Array([1, 2, 3]), aad);
     expect(sm4.decryptGCM(key, iv, r.ct, r.tag, { aad, safeMode: true })).toBe('010203');
-    expect(sm4.decryptGCM(key, iv, r.ct, r.tag, { aad: new Uint8Array([9]), safeMode: true })).toBeNull();
+    expect(
+      sm4.decryptGCM(key, iv, r.ct, r.tag, { aad: new Uint8Array([9]), safeMode: true }),
+    ).toBeNull();
   });
 });

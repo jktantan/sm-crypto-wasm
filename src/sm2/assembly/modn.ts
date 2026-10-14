@@ -5,19 +5,12 @@
 //
 // n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 
-import {
-  U256,
-  modAdd,
-  modSub,
-  modMul,
-  modInv,
-} from '../../common/assembly/field256';
+import { modAdd, modInv, modMul, modSub, U256 } from '../../common/assembly/field256';
 import { nArr } from './field';
-
-export { U256 };
 
 // 保持 nArr 可从本模块取（部分调用方习惯）。
 export { nArr } from './field';
+export { U256 };
 
 /** (a + b) mod n。 */
 export function addModN(a: U256, b: U256): U256 {

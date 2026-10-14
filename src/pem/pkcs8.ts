@@ -10,15 +10,9 @@
  *
  * 本仓库只支持"parameters = NULL"这一类算法（SM2 / SM9 都符合）。
  */
-import {
-  asn1Int,
-  asn1Null,
-  asn1Octets,
-  asn1Oid,
-  asn1Seq,
-  parseDer,
-} from './asn1.js';
+
 import { InvalidKeyError } from '../runtime/errors.js';
+import { asn1Int, asn1Null, asn1Octets, asn1Oid, asn1Seq, parseDer } from './asn1.js';
 
 /**
  * PrivateKeyInfo 的最小化解析结果。
@@ -31,10 +25,7 @@ export interface ParsedPrivateKey {
 }
 
 /** 编码 PrivateKeyInfo PEM。 */
-export function encodePkcs8PrivateKey(
-  algorithmOid: string,
-  privateKey: Uint8Array,
-): string {
+export function encodePkcs8PrivateKey(algorithmOid: string, privateKey: Uint8Array): string {
   const seq = asn1Seq([
     asn1Int(0),
     asn1Seq([asn1Oid(algorithmOid), asn1Null()]),
@@ -52,18 +43,14 @@ export function parsePkcs8PrivateKey(pem: string): ParsedPrivateKey {
     throw new InvalidKeyError('parsePkcs8PrivateKey: top-level is not SEQUENCE');
   }
   if (!seq.children || seq.children.length < 3) {
-    throw new InvalidKeyError(
-      'parsePkcs8PrivateKey: PrivateKeyInfo needs at least 3 elements',
-    );
+    throw new InvalidKeyError('parsePkcs8PrivateKey: PrivateKeyInfo needs at least 3 elements');
   }
   const [version, algId, privateKeyOctets] = seq.children;
   if (!version || version.tag !== 0x02) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing version INTEGER');
   }
   if (version.value[0] !== 0) {
-    throw new InvalidKeyError(
-      `parsePkcs8PrivateKey: unsupported version ${version.value[0]}`,
-    );
+    throw new InvalidKeyError(`parsePkcs8PrivateKey: unsupported version ${version.value[0]}`);
   }
   if (!algId || !algId.children || algId.children.length < 1) {
     throw new InvalidKeyError('parsePkcs8PrivateKey: missing AlgorithmIdentifier');
@@ -89,10 +76,7 @@ export interface ParsedPublicKey {
 }
 
 /** 编码 SPKI PEM（算法 OID + 公钥 BIT STRING）。 */
-export function encodeSpkiPublicKey(
-  algorithmOid: string,
-  publicKey: Uint8Array,
-): string {
+export function encodeSpkiPublicKey(algorithmOid: string, publicKey: Uint8Array): string {
   // BIT STRING：未使用位 = 0，前缀一字节 0x00。
   const bitStringValue = new Uint8Array(publicKey.length + 1);
   bitStringValue.set(publicKey, 1);
@@ -185,7 +169,13 @@ function derToPem(der: Uint8Array, kind: string): string {
   return `-----BEGIN ${kind}-----\n${lines.join('\n')}\n-----END ${kind}-----\n`;
 }
 
-function bitStringNode(value: Uint8Array): { tag: number; length: number; value: Uint8Array; raw: Uint8Array; cls: number } {
+function bitStringNode(value: Uint8Array): {
+  tag: number;
+  length: number;
+  value: Uint8Array;
+  raw: Uint8Array;
+  cls: number;
+} {
   const lengthBytes = encodeLen(value.length);
   const raw = new Uint8Array(1 + lengthBytes.length + value.length);
   raw[0] = 0x03;

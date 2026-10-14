@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
 import v from './vectors/sm2/keyexchange-official.json';
 
@@ -20,8 +20,13 @@ interface WasmExports {
   alloc(n: number): number;
   freeAll(): void;
   kexConfirmOut(
-    prefix: number, uPtr: number, zaPtr: number, zbPtr: number,
-    raPtr: number, rbPtr: number, outPtr: number,
+    prefix: number,
+    uPtr: number,
+    zaPtr: number,
+    zbPtr: number,
+    raPtr: number,
+    rbPtr: number,
+    outPtr: number,
   ): void;
   kdfOut(zPtr: number, zLen: number, outPtr: number, klen: number): number;
 }
@@ -40,7 +45,14 @@ const hx = (s: string): Buffer => Buffer.from(s, 'hex');
 const h2b = (arr: Uint8Array): Buffer => Buffer.from(arr);
 
 /** 用库原语算确认值（hex）。 */
-function libConfirm(prefix: number, u65: Buffer, za: Buffer, zb: Buffer, ra: Buffer, rb: Buffer): string {
+function libConfirm(
+  prefix: number,
+  u65: Buffer,
+  za: Buffer,
+  zb: Buffer,
+  ra: Buffer,
+  rb: Buffer,
+): string {
   const { exports, memory } = wasm();
   const up = exports.alloc(65);
   const zap = exports.alloc(32);
@@ -158,7 +170,16 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
       return Buffer.from([(bits >> 8) & 0xff, bits & 0xff]);
     };
     const zOf = (id: string, pub: NonNullable<Pt>): Buffer =>
-      sm3(entla(id), Buffer.from(id, 'latin1'), b32(A), b32(BigInt('0x' + b)), b32(G.x), b32(G.y), b32(pub.x), b32(pub.y));
+      sm3(
+        entla(id),
+        Buffer.from(id, 'latin1'),
+        b32(A),
+        b32(BigInt('0x' + b)),
+        b32(G.x),
+        b32(G.y),
+        b32(pub.x),
+        b32(pub.y),
+      );
 
     // PA = [dA]G, PB = [dB]G
     const PA = mul(BigInt('0x' + v.dA), G)!;
@@ -193,7 +214,10 @@ describe('SM2 key exchange official KAT (GB/T 32918.3-2016 A.2 示例1)', () => 
       let written = 0;
       let ct = 1;
       while (written < klen) {
-        const hh = sm3(z, Buffer.from([(ct >>> 24) & 0xff, (ct >>> 16) & 0xff, (ct >>> 8) & 0xff, ct & 0xff]));
+        const hh = sm3(
+          z,
+          Buffer.from([(ct >>> 24) & 0xff, (ct >>> 16) & 0xff, (ct >>> 8) & 0xff, ct & 0xff]),
+        );
         const take = Math.min(32, klen - written);
         hh.copy(out, written, 0, take);
         written += take;

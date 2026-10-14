@@ -8,15 +8,14 @@
 // 参考：GM/T 0044-2016。
 
 import {
-  U256,
-  fpAdd,
-  fpSub,
-  fpMul,
-  fpSqr,
-  fpInv,
-  fpDiv2,
-} from './fp';
-import { u256zero, u256clone, u256isZero, u256eq, u256fromBytes as u256fromBytesShared, u256copy } from '../../common/assembly/field256';
+  u256clone,
+  u256copy,
+  u256eq,
+  u256fromBytes as u256fromBytesShared,
+  u256isZero,
+  u256zero,
+} from '../../common/assembly/field256';
+import { fpAdd, fpDiv2, fpInv, fpMul, fpSqr, fpSub, type U256 } from './fp';
 
 /** Fp2 元素：[a0, a1]。 */
 export type Fp2 = StaticArray<U256>;

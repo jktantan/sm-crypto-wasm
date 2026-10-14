@@ -31,8 +31,9 @@
  *
  * spec/plan 对应：plan Task 8；spec §6 API、§12.1 Q2（协议流为 async）。
  */
-import { loadWasm } from '../runtime/loadWasm.js';
+
 import { bytesToHex, hexToBytes } from '../runtime/convert.js';
+import { loadWasm } from '../runtime/loadWasm.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes as prepPriv, toPublicKeyBytes as prepPub } from './keyInput.js';
 
@@ -52,17 +53,29 @@ interface KexExports extends WebAssembly.Exports {
   readonly freeAll: () => void;
   readonly publicKeyOut: (dPtr: number, outPtr: number) => void;
   readonly computeZIdOut: (
-    pubXPtr: number, pubYPtr: number, idPtr: number, idLen: number, outPtr: number,
+    pubXPtr: number,
+    pubYPtr: number,
+    idPtr: number,
+    idLen: number,
+    outPtr: number,
   ) => void;
   readonly kdfOut: (zPtr: number, zLen: number, outPtr: number, klen: number) => number;
   readonly kexComputeUOut: (
-    privPtr: number, rSelfPtr: number,
-    rSelfXYPtr: number, peerPubXYPtr: number, peerRXYPtr: number,
+    privPtr: number,
+    rSelfPtr: number,
+    rSelfXYPtr: number,
+    peerPubXYPtr: number,
+    peerRXYPtr: number,
     outPtr: number,
   ) => number;
   readonly kexConfirmOut: (
-    prefix: number, uPtr: number, zaPtr: number, zbPtr: number,
-    raXYPtr: number, rbXYPtr: number, outPtr: number,
+    prefix: number,
+    uPtr: number,
+    zaPtr: number,
+    zbPtr: number,
+    raXYPtr: number,
+    rbXYPtr: number,
+    outPtr: number,
   ) => void;
 }
 
@@ -148,8 +161,11 @@ function computeZ(pub64: Uint8Array, id: string): Uint8Array {
 
 /** 共享点 U（65 字节：04 || x || y）。 */
 function computeU(
-  d: Uint8Array, r: Uint8Array,
-  rSelf: Uint8Array, peerPub: Uint8Array, peerR: Uint8Array,
+  d: Uint8Array,
+  r: Uint8Array,
+  rSelf: Uint8Array,
+  peerPub: Uint8Array,
+  peerR: Uint8Array,
 ): Uint8Array {
   const { exports, memory } = getModule();
   const dp = exports.alloc(32);
@@ -175,8 +191,12 @@ function computeU(
 
 /** 确认值 S（32 字节）。 */
 function computeConfirm(
-  prefix: number, u: Uint8Array, za: Uint8Array, zb: Uint8Array,
-  ra: Uint8Array, rb: Uint8Array,
+  prefix: number,
+  u: Uint8Array,
+  za: Uint8Array,
+  zb: Uint8Array,
+  ra: Uint8Array,
+  rb: Uint8Array,
 ): Uint8Array {
   const { exports, memory } = getModule();
   const up = exports.alloc(65);
@@ -200,9 +220,7 @@ function computeConfirm(
 }
 
 /** 派生共享密钥：K = KDF(Ux || Uy || ZA || ZB, kLen)。 */
-function deriveSharedKey(
-  u: Uint8Array, za: Uint8Array, zb: Uint8Array, kLen: number,
-): Uint8Array {
+function deriveSharedKey(u: Uint8Array, za: Uint8Array, zb: Uint8Array, kLen: number): Uint8Array {
   const { exports, memory } = getModule();
   const zp = exports.alloc(128);
   const op = exports.alloc(kLen);

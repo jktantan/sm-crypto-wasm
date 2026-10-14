@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { randomBytes } from '@/runtime/random';
 import {
-  zucKeystream,
-  zucEncrypt,
-  zucDecrypt,
-  zucMac,
-  zucEia3Iv,
   configureReuseGuard,
   ensureLoaded,
+  zucDecrypt,
+  zucEia3Iv,
+  zucEncrypt,
+  zucKeystream,
+  zucMac,
 } from '@/zuc';
-import { randomBytes } from '@/runtime/random';
 import eia3Vectors from './vectors/zuc/eia3.json';
 
 /**
@@ -31,9 +31,7 @@ describe('ZUC vs reference (gmkitx)', () => {
 
   it('keystream first 16 bytes matches GM/T 0001 vector', () => {
     const ks = zucKeystream(KEY, IV, 16);
-    expect(Buffer.from(ks).toString('hex')).toBe(
-      '27bede74018082da87d4e5b69f18bf66',
-    );
+    expect(Buffer.from(ks).toString('hex')).toBe('27bede74018082da87d4e5b69f18bf66');
   });
 
   it('keystream 32 bytes matches reference', async () => {

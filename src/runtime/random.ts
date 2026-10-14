@@ -13,8 +13,7 @@
 import { webcrypto } from 'node:crypto';
 
 /** 宿主 CSPRNG 引用；优先 `globalThis.crypto`（浏览器 / Node 19+）。 */
-const c: Crypto =
-  (globalThis as { crypto?: Crypto }).crypto ?? (webcrypto as unknown as Crypto);
+const c: Crypto = (globalThis as { crypto?: Crypto }).crypto ?? (webcrypto as unknown as Crypto);
 
 /**
  * 取 `n` 字节 CSPRNG 随机数。
@@ -25,9 +24,7 @@ const c: Crypto =
  */
 export function randomBytes(n: number): Uint8Array {
   if (!Number.isInteger(n) || n < 0 || n > 65536) {
-    throw new RangeError(
-      `randomBytes: length must be integer in [0, 65536], got ${n}`,
-    );
+    throw new RangeError(`randomBytes: length must be integer in [0, 65536], got ${n}`);
   }
   const out = new Uint8Array(n);
   if (n > 0) c.getRandomValues(out);

@@ -51,9 +51,7 @@ export function parseDer(buf: Uint8Array): Asn1Node {
   const node = reader.readNode();
   // 允许根节点之后留 0 字节尾巴；多余字节视为错误。
   if (reader.remaining() !== 0) {
-    throw new Asn1Error(
-      `parseDer: ${reader.remaining()} trailing bytes after root node`,
-    );
+    throw new Asn1Error(`parseDer: ${reader.remaining()} trailing bytes after root node`);
   }
   return node;
 }
@@ -70,9 +68,7 @@ export function encodeDer(node: Asn1Node): Uint8Array {
   if (node.children) {
     for (const child of node.children) parts.push(encodeDer(child));
   }
-  const value = node.children
-    ? concat(parts)
-    : node.value;
+  const value = node.children ? concat(parts) : node.value;
   const lengthBytes = encodeLength(value.length);
   const tagByte = node.tag & 0xff;
   const out = new Uint8Array(1 + lengthBytes.length + value.length);
@@ -91,11 +87,7 @@ export function encodeDer(node: Asn1Node): Uint8Array {
  */
 export function asn1Int(value: bigint | number): Asn1Node {
   const bytes = bigintToBytes(BigInt(value));
-  const raw = concat([
-    new Uint8Array([TAG_INTEGER]),
-    encodeLength(bytes.length),
-    bytes,
-  ]);
+  const raw = concat([new Uint8Array([TAG_INTEGER]), encodeLength(bytes.length), bytes]);
   return {
     cls: 0,
     tag: TAG_INTEGER,
@@ -107,11 +99,7 @@ export function asn1Int(value: bigint | number): Asn1Node {
 
 /** 便捷构造函数：构造一个 OCTET STRING 节点。 */
 export function asn1Octets(value: Uint8Array): Asn1Node {
-  const raw = concat([
-    new Uint8Array([TAG_OCTET_STRING]),
-    encodeLength(value.length),
-    value,
-  ]);
+  const raw = concat([new Uint8Array([TAG_OCTET_STRING]), encodeLength(value.length), value]);
   return {
     cls: 0,
     tag: TAG_OCTET_STRING,
@@ -138,11 +126,7 @@ export function asn1Null(): Asn1Node {
 export function asn1Seq(children: Asn1Node[]): Asn1Node {
   const parts = children.map((c) => c.raw);
   const value = concat(parts);
-  const raw = concat([
-    new Uint8Array([TAG_SEQUENCE]),
-    encodeLength(value.length),
-    value,
-  ]);
+  const raw = concat([new Uint8Array([TAG_SEQUENCE]), encodeLength(value.length), value]);
   // tag 字段统一存 UNIVERSAL 编号 16（0x10），与 Reader 输出一致；
   // raw 首字节保留完整 0x30 以便序列化。
   return {
@@ -277,9 +261,7 @@ class Reader {
   }
   private take(n: number): Uint8Array {
     if (this.pos + n > this.buf.length) {
-      throw new Asn1Error(
-        `Reader: truncated, need ${n} bytes at pos ${this.pos}`,
-      );
+      throw new Asn1Error(`Reader: truncated, need ${n} bytes at pos ${this.pos}`);
     }
     const out = this.buf.subarray(this.pos, this.pos + n);
     this.pos += n;
