@@ -33,7 +33,7 @@ export function u256fromU32(v: u32): U256 {
 export function u256fromBytes(b: Uint8Array, off: usize): U256 {
   const x = new StaticArray<u32>(8);
   for (let i = 0; i < 8; i++) {
-    const o = off + i * 4;
+    const o = <i32>off + i * 4;
     x[7 - i] =
       (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3]) &
       0xffffffff;

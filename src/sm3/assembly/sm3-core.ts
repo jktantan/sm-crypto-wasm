@@ -92,8 +92,8 @@ function compress(statePtr: usize, blockPtr: usize): void {
     const A12 = rotl(A, 12);
     const SS1 = rotl((A12 + E + Tj) & 0xffffffff, 7);
     const SS2 = SS1 ^ A12;
-    const TT1 = ((j < 16 ? ff0(A, B, C) : ff1(A, B, C)) + D + SS2 + Wp[j]) & 0xffffffff;
-    const TT2 = ((j < 16 ? gg0(E, F, G) : gg1(E, F, G)) + H + SS1 + W[j]) & 0xffffffff;
+    const TT1 = ((j < 16 ? ff0(A, B, C) : ff1(A, B, C)) + D + SS2 + Wp[<i32>j]) & 0xffffffff;
+    const TT2 = ((j < 16 ? gg0(E, F, G) : gg1(E, F, G)) + H + SS1 + W[<i32>j]) & 0xffffffff;
     D = C;
     C = rotl(B, 9);
     B = A;
@@ -129,7 +129,7 @@ function compress(statePtr: usize, blockPtr: usize): void {
  */
 export function sm3HashInto(inputPtr: usize, inputLen: usize, outPtr: usize): void {
   const state = new StaticArray<u8>(32);
-  for (let i: usize = 0; i < 8; i++) {
+  for (let i = 0; i < 8; i++) {
     const v: u32 = IV[i];
     state[i * 4] = <u8>(v >>> 24);
     state[i * 4 + 1] = <u8>(v >>> 16);
@@ -139,17 +139,17 @@ export function sm3HashInto(inputPtr: usize, inputLen: usize, outPtr: usize): vo
   const lenWithPad: usize = inputLen + 9;
   const padding: usize = (64 - (lenWithPad % 64)) % 64;
   const totalLen: usize = inputLen + 1 + padding + 8;
-  const buf = new StaticArray<u8>(totalLen);
-  for (let i: usize = 0; i < inputLen; i++) buf[i] = load<u8>(inputPtr + i);
-  buf[inputLen] = 0x80;
+  const buf = new StaticArray<u8>(<i32>totalLen);
+  for (let i: usize = 0; i < inputLen; i++) buf[<i32>i] = load<u8>(inputPtr + i);
+  buf[<i32>inputLen] = 0x80;
   const bitLen: u64 = <u64>inputLen * 8;
   for (let i: usize = 0; i < 8; i++) {
-    buf[totalLen - 8 + i] = <u8>((bitLen >> ((7 - i) * 8)) & 0xff);
+    buf[<i32>totalLen - 8 + <i32>i] = <u8>((bitLen >> ((7 - i) * 8)) & 0xff);
   }
   for (let off: usize = 0; off < totalLen; off += 64) {
     compress(changetype<usize>(state), changetype<usize>(buf) + off);
   }
-  for (let i: usize = 0; i < 32; i++) store<u8>(outPtr + i, state[i]);
+  for (let i: usize = 0; i < 32; i++) store<u8>(outPtr + i, state[<i32>i]);
 }
 
 /** 计算 SM3 摘要并返回新的 32 字节 StaticArray。 */

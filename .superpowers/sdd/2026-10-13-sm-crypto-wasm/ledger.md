@@ -560,6 +560,32 @@ GREEN；全量套件 112/112。
 
 ---
 
+## AS201 警告清零（2026-10-14）
+
+用户报告 `asc` 输出大量 `WARNING AS201: Conversion from type 'usize' to 'i32' ...`。
+
+**是什么**：前瞻性警告。`usize` 的宽度随目标变化（32-bit wasm → 32 位，wasm64 → 64 位）；
+把 `usize` 用在要求 `i32` 的位置（数组下标、`StaticArray<T>(len)` 的长度）时，AS 现在隐式
+转换，并提醒"切 64-bit 目标时这里需要显式 cast"。当前目标是 32-bit，隐式转换无损 ——
+所以 build 一直是成功的、182 个测试一直全绿。
+
+用户裁决：**加显式 `<i32>` cast**（而不是用 `asc --disableWarning 201` 抑制，也不是放着不管）。
+规模：56 条警告 = **28 个唯一位置**（多个 wasm 都会编译同一文件），分布在 3 个文件。
+
+做法（先做最小实验定规则，再动手）：
+
+- 实验证明 `arr[<i32>i]` 与 `new StaticArray<u8>(<i32>len)` 都无警告，且 **i32 循环变量参与
+  `ptr + i`（usize 指针运算）不会引入新警告**；
+- **踩到的坑**：`buf[<i32>(32 + i)]` **仍会警告** —— cast 包住整个表达式，而表达式内部
+  （`i32 + usize`）已经发生类型提升。正确写法是把 cast 放到**最内层**：`buf[32 + <i32>i]`；
+- 落地：`field256.ts`（改 `o` 的声明类型，一次消掉 4 个下标警告）、
+  `sm2/assembly/crypto.ts`（12 处）、`sm3/assembly/sm3-core.ts`（12 处）。
+
+验证：`pnpm run build:wasm:all` 的 AS201 计数 = **0**；用重建后的产物跑
+`npx tsc --noEmit` + 全量测试 **182/182**（KAT 全绿，说明 cast 未改变语义）。
+
+---
+
 ## AS 源与 TS 的 IDE 冲突（2026-10-14）
 
 用户报告 `TS2304: Cannot find name 'usize'`。排查结论：**命令行一直是干净的**（根

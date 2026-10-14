@@ -98,12 +98,12 @@ export function computeZ(
 ): void {
   // Z 输入：ENTLA(2) || IDA(idLen) || a(32) || b(32) || Gx(32) || Gy(32) || Px(32) || Py(32)
   const entla = idLen * 8;
-  const total = 2 + idLen + 32 * 6;
+  const total = 2 + <i32>idLen + 32 * 6;
   const buf = new StaticArray<u8>(total);
   buf[0] = <u8>((entla >> 8) & 0xff);
   buf[1] = <u8>(entla & 0xff);
-  for (let i: usize = 0; i < idLen; i++) buf[2 + i] = load<u8>(idPtr + i);
-  let off = 2 + idLen;
+  for (let i: usize = 0; i < idLen; i++) buf[2 + <i32>i] = load<u8>(idPtr + i);
+  let off = 2 + <i32>idLen;
   for (let w = 0; w < 4; w++) {
     const cp = curveParamBytes(w);
     for (let i = 0; i < 32; i++) buf[off + i] = cp[i];
@@ -226,10 +226,10 @@ export function verify(
 
 /** 内部：SM3(Z || M)。 */
 function hashZMsg(zPtr: usize, msgPtr: usize, msgLen: usize): U256 {
-  const total = 32 + msgLen;
-  const buf = new StaticArray<u8>(<i32>total);
+  const total = 32 + <i32>msgLen;
+  const buf = new StaticArray<u8>(total);
   for (let i = 0; i < 32; i++) buf[i] = load<u8>(zPtr + i);
-  for (let i: usize = 0; i < msgLen; i++) buf[<i32>(32 + i)] = load<u8>(msgPtr + i);
+  for (let i: usize = 0; i < msgLen; i++) buf[32 + <i32>i] = load<u8>(msgPtr + i);
   const out = new StaticArray<u8>(32);
   sm3HashInto(changetype<usize>(buf), total, changetype<usize>(out));
   const tmp = new Uint8Array(32);
@@ -297,10 +297,10 @@ export function encrypt(
   }
 
   // C3 = SM3(x2 || M || y2)
-  const c3In = new StaticArray<u8>(<i32>(32 + msgLen + 32));
+  const c3In = new StaticArray<u8>(32 + <i32>msgLen + 32);
   bytesInto(c1Buffer(kp.x), 0, c3In, 0, 32);
-  for (let i: usize = 0; i < msgLen; i++) c3In[<i32>(32 + i)] = load<u8>(msgPtr + i);
-  bytesInto(c1Buffer(kp.y), 0, c3In, <i32>(32 + msgLen), 32);
+  for (let i: usize = 0; i < msgLen; i++) c3In[32 + <i32>i] = load<u8>(msgPtr + i);
+  bytesInto(c1Buffer(kp.y), 0, c3In, 32 + <i32>msgLen, 32);
   sm3HashInto(changetype<usize>(c3In), 32 + msgLen + 32, outPtr + 65);
   return 1;
 }
@@ -319,7 +319,7 @@ function bytesInto(
   dstOff: i32,
   n: i32,
 ): void {
-  for (let i: usize = 0; i < <usize>n; i++) dst[dstOff + <i32>i] = src[srcOff + i];
+  for (let i: usize = 0; i < <usize>n; i++) dst[dstOff + <i32>i] = src[<i32>srcOff + <i32>i];
 }
 
 /**
@@ -355,10 +355,10 @@ export function decrypt(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usiz
   }
 
   // 校验 C3 = SM3(x2 || M || y2)
-  const c3In = new StaticArray<u8>(<i32>(32 + msgLen + 32));
+  const c3In = new StaticArray<u8>(32 + <i32>msgLen + 32);
   bytesInto(c1Buffer(dp.x), 0, c3In, 0, 32);
-  for (let i: usize = 0; i < msgLen; i++) c3In[<i32>(32 + i)] = load<u8>(outPtr + i);
-  bytesInto(c1Buffer(dp.y), 0, c3In, <i32>(32 + msgLen), 32);
+  for (let i: usize = 0; i < msgLen; i++) c3In[32 + <i32>i] = load<u8>(outPtr + i);
+  bytesInto(c1Buffer(dp.y), 0, c3In, 32 + <i32>msgLen, 32);
   const expect = new StaticArray<u8>(32);
   sm3HashInto(changetype<usize>(c3In), 32 + msgLen + 32, changetype<usize>(expect));
   for (let i = 0; i < 32; i++) {
