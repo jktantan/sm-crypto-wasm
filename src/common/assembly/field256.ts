@@ -702,93 +702,227 @@ function sqr512Into(a: U256, out: usize): void {
 }
 
 /**
- * a^{-1} mod m：**二进制扩展欧几里得**（加/减/移位，无乘法）。
+ * a^{-1} mod m：**二进制扩展欧几里得**，状态全部放在**局部 4×u64（小端）变量**里。
  *
- * 原实现走费马小定理 a^{m-2}（~380 次 modMul/modSqr），是 fp12Inv / 点归一化
- * 等所有求逆路径的大头。二进制 EE 算法每轮一次加减 + 一次移位，~256 轮即可，
- * 单次求逆从毫秒级降到微秒级。
+ * 旧实现把 u/v/x1/x2 放在内存（每数 8×u32），每轮、每次 halveMod/subMod 都要跑若干
+ * 完整的 8-limb load/store 循环（单次求逆数万次 limb 访问）。256 位恰好 4 个 u64 装得下，
+ * 这里改用 wasm 局部变量：循环体内零内存往返，内层消因子 2 时只做 4 次 u64 移位。
+ *
+ * 每轮：u、v 各消去因子 2（同时对 Bezout 系数 x、y 做 halveMod），再各减一次。
+ * x/2 mod m 仍用无溢出分解（x、m 均奇时 (x+m)/2 = (x>>1) + (m>>1) + 1）——SM2/SM9 的
+ * 模数 ≈ 0.7·2^256，x + m 会溢出 256 位。
  *
  * 要求 gcd(a, m) = 1（m 为素数且 a != 0 时恒成立）。a == 0 时返回 0（与原语义一致）。
  */
 export function modInv(a: U256, m: U256): U256 {
   if (u256isZero(a)) return u256zero();
-  // u, v 为剩余；x1, x2 为 x 系数（u 的 Bezout 系数在 x1，v 的在 x2，均为 mod m 非负）
-  const u = u256clone(a);
-  const v = u256clone(m);
-  const x1 = u256fromU32(1);
-  const x2 = u256zero();
-  while (!u256isZero(u) && !u256isZero(v)) {
-    while (u256isEven(u)) {
-      u256shr1(u);
-      halveMod(x1, m);
+
+  let u0 = load<u64>(a);
+  let u1 = load<u64>(a + 8);
+  let u2 = load<u64>(a + 16);
+  let u3 = load<u64>(a + 24);
+  let v0 = load<u64>(m);
+  let v1 = load<u64>(m + 8);
+  let v2 = load<u64>(m + 16);
+  let v3 = load<u64>(m + 24);
+  // 模数副本与 (m >> 1)：后者是 halveMod 的常数部分
+  const m0 = v0;
+  const m1 = v1;
+  const m2 = v2;
+  const m3 = v3;
+  const hm0 = (m0 >> 1) | (m1 << 63);
+  const hm1 = (m1 >> 1) | (m2 << 63);
+  const hm2 = (m2 >> 1) | (m3 << 63);
+  const hm3 = m3 >> 1;
+
+  // x = u 的 Bezout 系数（初值 1），y = v 的（初值 0），均保持 mod m 非负
+  let x0: u64 = 1;
+  let x1: u64 = 0;
+  let x2: u64 = 0;
+  let x3: u64 = 0;
+  let y0: u64 = 0;
+  let y1: u64 = 0;
+  let y2: u64 = 0;
+  let y3: u64 = 0;
+
+  while ((u0 | u1 | u2 | u3) !== 0 && (v0 | v1 | v2 | v3) !== 0) {
+    // ---- 消去 u 的因子 2：u >>= 1，x = x/2 mod m ----
+    while ((u0 & 1) === 0) {
+      u0 = (u0 >> 1) | (u1 << 63);
+      u1 = (u1 >> 1) | (u2 << 63);
+      u2 = (u2 >> 1) | (u3 << 63);
+      u3 >>= 1;
+      if ((x0 & 1) === 1) {
+        const p0 = (x0 >> 1) | (x1 << 63);
+        const p1 = (x1 >> 1) | (x2 << 63);
+        const p2 = (x2 >> 1) | (x3 << 63);
+        const p3 = x3 >> 1;
+        let t = p0 + hm0;
+        let c: u64 = t < p0 ? 1 : 0;
+        const r0 = t + 1;
+        if (r0 === 0) c = 1; // p0 + hm0 == 2^64-1 时再加 1 才溢出
+        t = p1 + hm1;
+        let c1: u64 = t < p1 ? 1 : 0;
+        const r1 = t + c;
+        if (r1 < c) c1 = 1;
+        t = p2 + hm2;
+        let c2: u64 = t < p2 ? 1 : 0;
+        const r2 = t + c1;
+        if (r2 < c1) c2 = 1;
+        t = p3 + hm3;
+        x0 = r0;
+        x1 = r1;
+        x2 = r2;
+        x3 = t + c2;
+      } else {
+        x0 = (x0 >> 1) | (x1 << 63);
+        x1 = (x1 >> 1) | (x2 << 63);
+        x2 = (x2 >> 1) | (x3 << 63);
+        x3 >>= 1;
+      }
     }
-    while (u256isEven(v)) {
-      u256shr1(v);
-      halveMod(x2, m);
+
+    // ---- 消去 v 的因子 2：v >>= 1，y = y/2 mod m ----
+    while ((v0 & 1) === 0) {
+      v0 = (v0 >> 1) | (v1 << 63);
+      v1 = (v1 >> 1) | (v2 << 63);
+      v2 = (v2 >> 1) | (v3 << 63);
+      v3 >>= 1;
+      if ((y0 & 1) === 1) {
+        const p0 = (y0 >> 1) | (y1 << 63);
+        const p1 = (y1 >> 1) | (y2 << 63);
+        const p2 = (y2 >> 1) | (y3 << 63);
+        const p3 = y3 >> 1;
+        let t = p0 + hm0;
+        let c: u64 = t < p0 ? 1 : 0;
+        const r0 = t + 1;
+        if (r0 === 0) c = 1;
+        t = p1 + hm1;
+        let c1: u64 = t < p1 ? 1 : 0;
+        const r1 = t + c;
+        if (r1 < c) c1 = 1;
+        t = p2 + hm2;
+        let c2: u64 = t < p2 ? 1 : 0;
+        const r2 = t + c1;
+        if (r2 < c1) c2 = 1;
+        t = p3 + hm3;
+        y0 = r0;
+        y1 = r1;
+        y2 = r2;
+        y3 = t + c2;
+      } else {
+        y0 = (y0 >> 1) | (y1 << 63);
+        y1 = (y1 >> 1) | (y2 << 63);
+        y2 = (y2 >> 1) | (y3 << 63);
+        y3 >>= 1;
+      }
     }
-    // u >= v → u -= v, x1 -= x2（mod m）；否则 v -= u, x2 -= x1
-    if (u256cmp(u, v) >= 0) {
-      u256subRaw(u, v);
-      subMod(x1, x2, m);
+
+    // ---- 统一成 u >= v：否则交换 (u, v) 与 (x, y) ----
+    let uge: bool;
+    if (u3 !== v3) uge = u3 > v3;
+    else if (u2 !== v2) uge = u2 > v2;
+    else if (u1 !== v1) uge = u1 > v1;
+    else uge = u0 >= v0;
+    if (!uge) {
+      const s0 = u0;
+      const s1 = u1;
+      const s2 = u2;
+      const s3 = u3;
+      u0 = v0;
+      u1 = v1;
+      u2 = v2;
+      u3 = v3;
+      v0 = s0;
+      v1 = s1;
+      v2 = s2;
+      v3 = s3;
+      const t0 = x0;
+      const t1 = x1;
+      const t2 = x2;
+      const t3 = x3;
+      x0 = y0;
+      x1 = y1;
+      x2 = y2;
+      x3 = y3;
+      y0 = t0;
+      y1 = t1;
+      y2 = t2;
+      y3 = t3;
+    }
+
+    // ---- u -= v ----
+    const e1 = u1 - v1;
+    const d1 = e1 - (u0 < v0 ? 1 : 0);
+    let b1: u64 = u1 < v1 ? 1 : 0;
+    if (e1 < (u0 < v0 ? 1 : 0)) b1 = 1;
+    const e2 = u2 - v2;
+    const d2 = e2 - b1;
+    let b2: u64 = u2 < v2 ? 1 : 0;
+    if (e2 < b1) b2 = 1;
+    u0 = u0 - v0;
+    u1 = d1;
+    u2 = d2;
+    u3 = u3 - v3 - b2;
+
+    // ---- x = (x - y) mod m ----
+    const f0 = x0 - y0;
+    const g0: u64 = x0 < y0 ? 1 : 0;
+    const h1 = x1 - y1;
+    const f1 = h1 - g0;
+    let g1: u64 = x1 < y1 ? 1 : 0;
+    if (h1 < g0) g1 = 1;
+    const h2 = x2 - y2;
+    const f2 = h2 - g1;
+    let g2: u64 = x2 < y2 ? 1 : 0;
+    if (h2 < g1) g2 = 1;
+    const h3 = x3 - y3;
+    const f3 = h3 - g2;
+    if (x3 < y3 || h3 < g2) {
+      // 借位：结果 + m
+      const j0 = f0 + m0;
+      const k0: u64 = j0 < f0 ? 1 : 0;
+      const j1 = f1 + m1;
+      const s1 = j1 + k0;
+      let k1: u64 = j1 < f1 ? 1 : 0;
+      if (s1 < k0) k1 = 1;
+      const j2 = f2 + m2;
+      const s2 = j2 + k1;
+      let k2: u64 = j2 < f2 ? 1 : 0;
+      if (s2 < k1) k2 = 1;
+      const j3 = f3 + m3;
+      x0 = j0;
+      x1 = s1;
+      x2 = s2;
+      x3 = j3 + k2;
     } else {
-      u256subRaw(v, u);
-      subMod(x2, x1, m);
+      x0 = f0;
+      x1 = f1;
+      x2 = f2;
+      x3 = f3;
     }
   }
-  // 退出时非零者为 gcd；素模数下 gcd == 1，对应 x 系数即逆元
-  if (!u256isZero(u)) {
-    return x1; // u == 1：a·x1 ≡ u ≡ 1
+
+  // 退出时非零者为 gcd；素模数下 gcd == 1，对应 Bezout 系数即逆元
+  const out = arenaAlloc(U256_BYTES);
+  if ((u0 | u1 | u2 | u3) !== 0) {
+    store<u64>(out, x0); // u == 1：a·x ≡ u ≡ 1
+    store<u64>(out + 8, x1);
+    store<u64>(out + 16, x2);
+    store<u64>(out + 24, x3);
+  } else {
+    store<u64>(out, y0); // v == 1：a·y ≡ v ≡ 1
+    store<u64>(out + 8, y1);
+    store<u64>(out + 16, y2);
+    store<u64>(out + 24, y3);
   }
-  return x2; // v == 1：a·x2 ≡ v ≡ 1
+  return out;
 }
 
-/** modInv 内部临时量（模块级 scratch，避免每轮 3 次分配）。 */
-const HLV_T: usize = heap.alloc(32); // floor(x/2)
-const HLV_S: usize = heap.alloc(32); // floor(m/2)
-const HLV_ONE: usize = heap.alloc(32); // 常量 1
+/** modHalve 用的常量 1（(m>>1) + 1 = (m+1)/2）。 */
+const HLV_ONE: usize = heap.alloc(32);
 memory.fill(HLV_ONE, 0, 32);
 store<u32>(HLV_ONE, 1);
-
-/**
- * x = x/2 mod m（要求 x < m）。
- *
- * 不能先 x += m 再右移：SM2/SM9 的模数 ≈ 0.7·2^256，x + m 会溢出 256-bit。
- * 用无溢出分解：x、m 均奇时 (x+m)/2 = (x>>1) + (m>>1) + 1，各步 < m。
- */
-function halveMod(x: U256, m: U256): void {
-  if (u256isOdd(x)) {
-    memory.copy(HLV_T, x, 32);
-    u256shr1(HLV_T); // floor(x/2)
-    memory.copy(HLV_S, m, 32);
-    u256shr1(HLV_S); // floor(m/2)
-    memory.copy(x, HLV_T, 32);
-    const carry = u256addRaw(x, HLV_S); // < m，无溢出
-    if (carry !== 0) {
-      // 不应发生（x>>1 + m>>1 < m），安全兜底
-      u256subRaw(x, m);
-    }
-    u256addRaw(x, HLV_ONE);
-    // x + 1 仍 < m（(x+m)/2 ≤ m-1），无溢出
-  } else {
-    u256shr1(x);
-  }
-}
-
-/** x1 = (x1 - x2) mod m（要求 x1, x2 < m）。 */
-function subMod(x1: U256, x2: U256, m: U256): void {
-  if (u256cmp(x1, x2) >= 0) {
-    u256subRaw(x1, x2);
-  } else {
-    // x1 < x2：x1 - x2 + m
-    u256addRaw(x1, m);
-    u256subRaw(x1, x2);
-  }
-}
-
-/** a 是否为偶数。 */
-function u256isEven(a: U256): bool {
-  return (limb(a, 0) & 1) === 0;
-}
 
 /** a 是否为奇数。 */
 export function u256isOdd(a: U256): bool {
