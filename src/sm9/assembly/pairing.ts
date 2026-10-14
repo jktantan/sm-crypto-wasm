@@ -11,6 +11,7 @@
 
 import { U256, u256 } from './fp';
 import {
+  Fp2,
   fp2Conjugate,
   fp2copy,
   fp2Div2,
@@ -21,6 +22,7 @@ import {
   fp2Sqr,
   fp2Sub,
   fp2Tri,
+  fp2zero,
 } from './fp2';
 import {
   Fp12,
@@ -30,6 +32,7 @@ import {
   fp12Frobenius6,
   fp12Inv,
   fp12Mul,
+  fp12MulLine,
   fp12one,
   fp12Pow,
   fp12PowSmall,
@@ -72,6 +75,96 @@ export function twistNegPi2(Q: G2): G2 {
 }
 
 // ---------- line function ----------
+
+// line 分子系数 scratch：evalG*Into 写入，millerLoop 读走喂 fp12MulLine。
+// 免掉每轮构造两个完整 Fp12（fp12zero×2 共 24 个 U256）再拆开的浪费。
+const L_A0: Fp2 = fp2zero();
+const L_A1: Fp2 = fp2zero();
+const L_A4: Fp2 = fp2zero();
+
+/**
+ * 切线（tangent）系数版：把分子的三个非零 Fp2 系数写入 L_A0/L_A1/L_A4。
+ *   num = L_A0 + L_A1·v + L_A4·w²（den 恒被 final exponent 消掉，不产出）
+ */
+export function evalGTangentInto(T: G2, Q: G1): void {
+  const XP = T.X,
+    YP = T.Y,
+    ZP = T.Z;
+  const xQ = Q.X,
+    yQ = Q.Y;
+
+  let t0 = fp2Sqr(ZP);
+  let t1 = fp2Mul(t0, ZP);
+  const b1v = fp2Mul(t1, YP);
+  const a1v = fp2Neg(fp2MulFp(b1v, yQ));
+
+  t1 = fp2Sqr(XP);
+  t0 = fp2Mul(t0, t1);
+  t0 = fp2MulFp(t0, xQ);
+  t0 = fp2Tri(t0);
+  const a4v = fp2Div2(t0);
+
+  t1 = fp2Mul(t1, XP);
+  t1 = fp2Tri(t1);
+  t1 = fp2Div2(t1);
+  t0 = fp2Sqr(YP);
+  const a0v = fp2Sub(t0, t1);
+
+  fp2Put(L_A0, a0v);
+  fp2Put(L_A1, a1v);
+  fp2Put(L_A4, a4v);
+}
+
+/**
+ * 割线（line）系数版：把分子的三个非零 Fp2 系数写入 L_A0/L_A1/L_A4。
+ */
+export function evalGLineInto(T: G2, P: G2, Q: G1): void {
+  const XT = T.X,
+    YT = T.Y,
+    ZT = T.Z;
+  const XP = P.X,
+    YP = P.Y,
+    ZP = P.Z;
+  const xQ = Q.X,
+    yQ = Q.Y;
+
+  let T0 = fp2Sqr(ZP);
+  let T1 = fp2Mul(T0, XT);
+  T0 = fp2Mul(T0, ZP);
+  let T2 = fp2Sqr(ZT);
+  let T3 = fp2Mul(T2, XP);
+  T2 = fp2Mul(T2, ZT);
+  T2 = fp2Mul(T2, YP);
+  T1 = fp2Sub(T1, T3);
+  T1 = fp2Mul(T1, ZT);
+  T1 = fp2Mul(T1, ZP);
+  const T4 = fp2Mul(T1, T0);
+
+  T1 = fp2Mul(T1, YP);
+  T3 = fp2Mul(T0, YT);
+  T3 = fp2Sub(T3, T2);
+  T0 = fp2Mul(T0, T3);
+  T0 = fp2MulFp(T0, xQ);
+  const a4v = fp2copy(T0);
+
+  T3 = fp2Mul(T3, XP);
+  T3 = fp2Mul(T3, ZP);
+  T1 = fp2Sub(T1, T3);
+  const a0v = fp2copy(T1);
+
+  T2 = fp2MulFp(T4, yQ);
+  const a1v = fp2Neg(T2);
+
+  fp2Put(L_A0, a0v);
+  fp2Put(L_A1, a1v);
+  fp2Put(L_A4, a4v);
+}
+
+/**
+ * 切线（tangent）的分子/分母，对应 GmSSL 的 eval_g_tangent(num, den, T, Q)：
+ *   T 为 twist 点（G2），Q 为 base 点（G1）。
+ * 返回 [num, den]。
+ */
 
 /**
  * 切线（tangent）的分子/分母，对应 GmSSL 的 eval_g_tangent(num, den, T, Q)：
@@ -258,14 +351,14 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
 
   for (let i = 0; i < ABITS_LEN; i++) {
     f = fp12Sqr(f);
-    const g1 = evalGTangent(T, P);
-    f = fp12Mul(f, g1[0]);
+    evalGTangentInto(T, P);
+    f = fp12MulLine(f, L_A0, L_A1, L_A4);
 
     T = g2Double(T);
 
     if (ABITS_BITS[i] === 1) {
-      const g2 = evalGLine(T, Q, P);
-      f = fp12Mul(f, g2[0]);
+      evalGLineInto(T, Q, P);
+      f = fp12MulLine(f, L_A0, L_A1, L_A4);
       T = g2Add(T, Q);
     }
   }
@@ -273,12 +366,12 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
   const Q1 = twistPi1(Q);
   const Q2 = twistNegPi2(Q);
 
-  const g3 = evalGLine(T, Q1, P);
-  f = fp12Mul(f, g3[0]);
+  evalGLineInto(T, Q1, P);
+  f = fp12MulLine(f, L_A0, L_A1, L_A4);
   T = g2AddFull(T, Q1);
 
-  const g4 = evalGLine(T, Q2, P);
-  f = fp12Mul(f, g4[0]);
+  evalGLineInto(T, Q2, P);
+  f = fp12MulLine(f, L_A0, L_A1, L_A4);
   T = g2AddFull(T, Q2);
 
   return f;

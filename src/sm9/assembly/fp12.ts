@@ -9,13 +9,17 @@ import { u256zero } from '../../common/assembly/field256';
 import { U256 } from './fp';
 import {
   Fp2,
+  fp2Add,
   fp2Conjugate,
   fp2copy,
   fp2eq,
+  fp2Mul,
   fp2MulFp,
   fp2Neg,
   fp2one,
   fp2set,
+  fp2Sub,
+  fp2TimesU,
   fp2zero,
 } from './fp2';
 import {
@@ -179,6 +183,61 @@ export function fp12Inv(a: Fp12): Fp12 {
   const r0 = fp4Mul(t2, t3);
   const r1 = fp4Neg(fp4Mul(t1, t3));
   const r2 = fp4Mul(t0, t3);
+  return fp12set(r0, r1, r2);
+}
+
+/**
+ * 稀疏乘：f × line。Miller loop 里 line 的分子只有三个非零 Fp2 分量：
+ *   L[0][0] = a0, L[0][1] = a1, L[2][0] = a4（其余为 0）
+ *
+ * 直接按稀疏展开（Fp4 视角 L0 = a0+a1·v, L1 = 0, L2 = a4）：
+ *   r0 = f0·L0 + v·(f1·L2)
+ *   r1 = f1·L0 + v·(f2·L2)
+ *   r2 = f2·L0 + f0·L2
+ *
+ * f_i·L0 为稠密×稠密（3 次 fp2Mul），f_i·L2 为稠密×稀疏（2 次 fp2Mul），
+ * 共 15 次 fp2Mul，而通用 fp12Mul 是 18 次加一堆 fp4Add/fp4Sub。
+ * 省下的还有：调用方不再构造整个 Fp12（12 个 Fp2）只为喂给乘法。
+ */
+export function fp12MulLine(f: Fp12, a0: Fp2, a1: Fp2, a4: Fp2): Fp12 {
+  // f0·L0 = [x,y]·[a0,a1]：Karatsuba
+  const f0 = f[0],
+    f1 = f[1],
+    f2 = f[2];
+  const t00 = fp2Mul(f0[0], a0);
+  const t01 = fp2Mul(f0[1], a1);
+  const s0 = fp2Mul(fp2Add(f0[0], f0[1]), fp2Add(a0, a1));
+  const p0 = fp2Add(t00, fp2TimesU(t01)); // f0·L0 的实部
+  const q0 = fp2Sub(fp2Sub(s0, t00), t01); // f0·L0 的 v 部
+
+  // f1·L0
+  const t10 = fp2Mul(f1[0], a0);
+  const t11 = fp2Mul(f1[1], a1);
+  const s1 = fp2Mul(fp2Add(f1[0], f1[1]), fp2Add(a0, a1));
+  const p1 = fp2Add(t10, fp2TimesU(t11));
+  const q1 = fp2Sub(fp2Sub(s1, t10), t11);
+
+  // f2·L0
+  const t20 = fp2Mul(f2[0], a0);
+  const t21 = fp2Mul(f2[1], a1);
+  const s2 = fp2Mul(fp2Add(f2[0], f2[1]), fp2Add(a0, a1));
+  const p2 = fp2Add(t20, fp2TimesU(t21));
+  const q2 = fp2Sub(fp2Sub(s2, t20), t21);
+
+  // f0·L2 = [x,y]·[a4,0] = [x·a4, y·a4]
+  const u0 = fp2Mul(f0[0], a4);
+  const v0 = fp2Mul(f0[1], a4);
+  // f1·L2
+  const u1 = fp2Mul(f1[0], a4);
+  const v1 = fp2Mul(f1[1], a4);
+  // f2·L2
+  const u2 = fp2Mul(f2[0], a4);
+  const v2 = fp2Mul(f2[1], a4);
+
+  // v·(x + y·v) = u·y + x·v → [u·y, x]
+  const r0 = fp4Add(fp4set(p0, q0), fp4set(fp2TimesU(v1), u1));
+  const r1 = fp4Add(fp4set(p1, q1), fp4set(fp2TimesU(v2), u2));
+  const r2 = fp4Add(fp4set(p2, q2), fp4set(u0, v0));
   return fp12set(r0, r1, r2);
 }
 

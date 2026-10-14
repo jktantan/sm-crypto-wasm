@@ -220,8 +220,16 @@ export function mul512(a: U256, b: U256): U512 {
  * 假定 m 的最高 limb ≥ 2^31（SM2/SM9 的 p、n 均满足），此时估商高估 ≤ 2。
  */
 export function reduce512(x: U512, m: U256): U256 {
-  const r = new StaticArray<u32>(9); // 余数（< m · 2^32，故 9 limb 足够）
-  const t = new StaticArray<u32>(9); // q · m
+  const out = new StaticArray<u32>(8);
+  reduce512Into(x, m, out);
+  return out;
+}
+
+/** reduce512 的 scratch 版（modMul 长除回退路径用，无逐次分配）。 */
+function reduce512Into(x: U512, m: U256, out: StaticArray<u32>): void {
+  const r = RD_R; // 余数（< m · 2^32，故 9 limb 足够）
+  const t = RD_T; // q · m
+  for (let k = 0; k < 9; k++) r[k] = 0;
   const mhi = m[7];
   for (let i = 15; i >= 0; i--) {
     // r = r * 2^32 + x[i]
@@ -274,9 +282,7 @@ export function reduce512(x: U512, m: U256): U256 {
       sub9(r, m);
     }
   }
-  const out = new StaticArray<u32>(8);
   for (let i = 0; i < 8; i++) out[i] = r[i];
-  return out;
 }
 
 /** 大端字节串（任意长度）mod m：Horner 法 acc = acc*256 + b[i]。用于 SM9 的 40 字节哈希取模。 */
@@ -317,17 +323,107 @@ function sub9(a: StaticArray<u32>, b: U256): void {
   }
 }
 
-/** (a * b) mod m。已知模数（SM2/SM9 的 p、n）走 Barrett 归约，否则回退多 limb 长除法。 */
-export function modMul(a: U256, b: U256, m: U256): U256 {
-  const x = mul512(a, b);
-  const mu = barrettMu(m);
-  if (mu !== null) return barrettReduce(x, m, mu);
-  return reduce512(x, m);
+/**
+ * (a * b) mod m。已知模数（SM2/SM9 的 p、n）走 Barrett 归约，否则回退多 limb 长除法。
+ *
+ * 内部工作数组（512-bit 积、Barrett 的 q1/q2/q3/r2/r、长除法的 r/t）全部走模块级
+ * scratch，不逐次分配——modMul 是 pairing/点乘的最热路径，一次配对要调几千次，
+ * 逐次 new StaticArray 的 GC 压力实测占了相当大比例。
+ * scratch 非重入：modMul/modSqr 是叶子函数（不互相嵌套），调用方拿到的返回值是
+ * 独立分配的 U256，不受后续调用影响。
+ */
+const MUL_X = new StaticArray<u32>(16); // 512-bit 积
+const BR_Q1 = new StaticArray<u32>(9);
+const BR_Q2 = new StaticArray<u32>(18);
+const BR_Q3 = new StaticArray<u32>(9);
+const BR_R2 = new StaticArray<u32>(17);
+const BR_R = new StaticArray<u32>(10);
+const RD_R = new StaticArray<u32>(9); // reduce512 的余数
+const RD_T = new StaticArray<u32>(9); // reduce512 的 q·m
+
+/** mul512 的原地版：a × b → out（16 limb，需先清零语义由本函数保证）。 */
+function mul512Into(a: U256, b: U256, out: StaticArray<u32>): void {
+  for (let i = 0; i < 16; i++) out[i] = 0;
+  for (let i = 0; i < 8; i++) {
+    let carry: u64 = 0;
+    const ai = u64(a[i]);
+    for (let j = 0; j < 8; j++) {
+      const cur: u64 = u64(out[i + j]) + ai * u64(b[j]) + carry;
+      out[i + j] = <u32>(cur & 0xffffffff);
+      carry = cur >>> 32;
+    }
+    let k = i + 8;
+    while (carry !== 0 && k < 16) {
+      const cur: u64 = u64(out[k]) + carry;
+      out[k] = <u32>(cur & 0xffffffff);
+      carry = cur >>> 32;
+      k++;
+    }
+  }
 }
 
-/** a² mod m。 */
+export function modMul(a: U256, b: U256, m: U256): U256 {
+  mul512Into(a, b, MUL_X);
+  const mu = barrettMu(m);
+  const out = new StaticArray<u32>(8);
+  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
+  else reduce512Into(MUL_X, m, out);
+  return out;
+}
+
+/**
+ * a² mod m。平方特化：对角项 a_i·a_i 只算一次，交叉项 a_i·a_j（i<j）只算一次再
+ * 翻倍进位——比通用 modMul(a,a) 少 20 个 32×32 部分积（64 → 36+加法）。
+ * 归约路径与 modMul 一致（Barrett / 长除法）。
+ */
 export function modSqr(a: U256, m: U256): U256 {
-  return modMul(a, a, m);
+  sqr512Into(a, MUL_X);
+  const mu = barrettMu(m);
+  const out = new StaticArray<u32>(8);
+  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
+  else reduce512Into(MUL_X, m, out);
+  return out;
+}
+
+/** a(8) × a(8) → 512-bit(16) 平方，schoolbook 对角折半。 */
+function sqr512Into(a: U256, out: StaticArray<u32>): void {
+  for (let i = 0; i < 16; i++) out[i] = 0;
+  // 交叉项：每对 (i, j>i) 算一次 p = a_i·a_j，加倍加进位置 i+j。
+  for (let i = 0; i < 8; i++) {
+    const ai = u64(a[i]);
+    for (let j = i + 1; j < 8; j++) {
+      const p = ai * u64(a[j]); // < 2^64
+      // p 加两次到 out[i+j..i+j+2]
+      for (let rep = 0; rep < 2; rep++) {
+        let k = i + j;
+        let add: u64 = p;
+        while (add !== 0 && k < 16) {
+          const cur = u64(out[k]) + (add & 0xffffffff);
+          out[k] = <u32>(cur & 0xffffffff);
+          add = (add >>> 32) + (cur >>> 32);
+          k++;
+        }
+      }
+    }
+  }
+  // 对角项：a_i² 加到位置 2i。
+  for (let i = 0; i < 8; i++) {
+    const p = ai2(a, i);
+    let k = 2 * i;
+    let add: u64 = p;
+    while (add !== 0 && k < 16) {
+      const cur = u64(out[k]) + (add & 0xffffffff);
+      out[k] = <u32>(cur & 0xffffffff);
+      add = (add >>> 32) + (cur >>> 32);
+      k++;
+    }
+  }
+}
+
+@inline
+function ai2(a: U256, i: i32): u64 {
+  const v = u64(a[i]);
+  return v * v;
 }
 
 /** a^{-1} mod m（费马小定理 a^{m-2}；要求 m 为素数）。a == 0 时返回 0。 */
@@ -460,18 +556,18 @@ function mulLimbArrays(
   }
 }
 
-/** Barrett 归约：x(16 limb) mod m(8 limb) → 结果 < m。 */
-function barrettReduce(x: U512, m: U256, mu: StaticArray<u32>): U256 {
-  const q1 = new StaticArray<u32>(9);
+/** Barrett 归约（scratch 版）：x(16 limb) mod m(8 limb) → out(8 limb)，结果 < m。 */
+function barrettReduceInto(x: U512, m: U256, mu: StaticArray<u32>, out: StaticArray<u32>): void {
+  const q1 = BR_Q1;
   for (let i = 0; i < 9; i++) q1[i] = x[7 + i]; // x >> 224
-  const q2 = new StaticArray<u32>(18);
+  const q2 = BR_Q2;
   mulLimbArrays(q1, 9, mu, 9, q2);
-  const q3 = new StaticArray<u32>(9);
+  const q3 = BR_Q3;
   for (let i = 0; i < 9; i++) q3[i] = q2[9 + i]; // q2 >> 288
-  const r2 = new StaticArray<u32>(17);
+  const r2 = BR_R2;
   mulLimbArrays(q3, 9, m, 8, r2);
 
-  const r = new StaticArray<u32>(10);
+  const r = BR_R;
   let borrow: i64 = 0;
   for (let i = 0; i < 9; i++) {
     const d: i64 = i64(x[i]) - i64(r2[i]) - borrow;
@@ -502,7 +598,5 @@ function barrettReduce(x: U512, m: U256, mu: StaticArray<u32>): U256 {
     guard++;
   }
 
-  const out = new StaticArray<u32>(8);
   for (let i = 0; i < 8; i++) out[i] = r[i];
-  return out;
 }
