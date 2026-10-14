@@ -9,7 +9,7 @@
 //
 // 参考：GM/T 0044-2016。
 
-import { U256, u256 } from './fp';
+import { U256, fpToMont, u256 } from './fp';
 import {
   Fp2,
   fp2Conjugate,
@@ -67,9 +67,9 @@ import {
 const PI1_C = '3f23ea58e5720bdb843c6cfa9c08674947c5c86e0ddd04eda91d8354377b698b';
 const PI2_C = 'f300000002a3a6f2780272354f8b78f4d5fc11967be65334';
 
-// 预构造：原先每次 twist 调用都重新解析一遍 hex。
-const PI1_C_U = u256(PI1_C);
-const PI2_C_U = u256(PI2_C);
+// 预构造：原先每次 twist 调用都重新解析一遍 hex；系数是 Fp 常量，进 Montgomery 域。
+const PI1_C_U = fpToMont(u256(PI1_C));
+const PI2_C_U = fpToMont(u256(PI2_C));
 
 /** π1：Frobenius 自同构。 */
 export function twistPi1(Q: G2): G2 {
@@ -301,11 +301,13 @@ const FE_A2 = 'd8000000019062ed0000b98b0cb27659';
 const FE_A3 = '2400000000215d941';
 
 // 预构造：原先每次 final exponent 都把这些 hex 重新解析一遍。
-const ALPHA1_U = u256(ALPHA1);
-const ALPHA2_U = u256(ALPHA2);
-const ALPHA3_U = u256(ALPHA3);
-const ALPHA4_U = u256(ALPHA4);
-const ALPHA5_U = u256(ALPHA5);
+// ALPHA1..5 是 Frobenius 的 Fp 系数（参与 fp*MulFp）→ 转 Montgomery 域；
+// FE_A2 / FE_A3 却是**幂指数**（喂给 fp12Pow），必须保持标准域整数 —— 转了会整条幂次都错。
+const ALPHA1_U = fpToMont(u256(ALPHA1));
+const ALPHA2_U = fpToMont(u256(ALPHA2));
+const ALPHA3_U = fpToMont(u256(ALPHA3));
+const ALPHA4_U = fpToMont(u256(ALPHA4));
+const ALPHA5_U = fpToMont(u256(ALPHA5));
 const FE_A2_U = u256(FE_A2);
 const FE_A3_U = u256(FE_A3);
 

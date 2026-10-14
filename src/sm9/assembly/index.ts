@@ -15,12 +15,12 @@
 import {
   arenaAlloc,
   arenaRewind,
-  u256copy,
   u256fromMemBE,
   u256fromU32,
   u256toBytes,
+  u256zero,
 } from '../../common/assembly/field256';
-import { U256 } from './fp';
+import { fpFromMontTo, fpMontOne, fpToMont, fpToMontTo, U256 } from './fp';
 import { Fp2, fp2Inv, fp2Mul, fp2one, fp2Sqr, fp2set, fp2zero } from './fp2';
 import { Fp4, fp4Inv, fp4Mul, fp4Sqr, fp4zero } from './fp4';
 import { Fp12, fp12Inv, fp12Mul, fp12Pow, fp12Sqr, fp12zero } from './fp12';
@@ -85,17 +85,23 @@ export function freeAll(): void {
   pinned.length = 0;
 }
 
-// GmSSL 约定：Fp2 序列化为 a1||a0（a1 在前）。
+// 转回标准域的字节输出暂存（u256toBytes 只读，顺序调用安全；非重入：这些是叶子）。
+const W_FP: U256 = u256zero();
+
+/** 读 Fp2（字节是标准域，读入即转 Montgomery）。GmSSL 约定：a1||a0。 */
 function readFp2(ptr: usize): Fp2 {
   const r = arenaAlloc(64);
-  u256copy(u256fromMemBE(ptr + 32), r); // a0
-  u256copy(u256fromMemBE(ptr), r + 32); // a1
+  fpToMontTo(r, u256fromMemBE(ptr + 32)); // a0
+  fpToMontTo(r + 32, u256fromMemBE(ptr)); // a1
   return r;
 }
 
+/** 写 Fp2（转回标准域）。 */
 function writeFp2(a: Fp2, ptr: usize): void {
-  u256toBytes(a + 32, ptr);
-  u256toBytes(a, ptr + 32);
+  fpFromMontTo(W_FP, a + 32);
+  u256toBytes(W_FP, ptr);
+  fpFromMontTo(W_FP, a);
+  u256toBytes(W_FP, ptr + 32);
 }
 
 function readFp4(ptr: usize): Fp4 {
@@ -183,17 +189,14 @@ export function g1MulGOut(kPtr: usize, outPtr: usize): void {
   arenaRewind();
   const k = readU256(kPtr);
   const r = g1ToAffine(g1MulG(k));
-  // 注意：不能对裸数字字面量调用 u256toBytes 之外的东西；outPtr 需为实际内存地址。
-  u256toBytes(r.X, outPtr);
-  u256toBytes(r.Y, outPtr + 32);
+  writeG1Affine(r, outPtr);
 }
 
 // 临时标量入口：G1/G2 用固定小标量测试（避免 readU256 字节序问题）。
 export function g1MulSmall(k: u32, outPtr: usize): void {
   arenaRewind();
   const r = g1ToAffine(g1MulG(u256fromU32(k)));
-  u256toBytes(r.X, outPtr);
-  u256toBytes(r.Y, outPtr + 32);
+  writeG1Affine(r, outPtr);
 }
 export function g2MulSmall(k: u32, outPtr: usize): void {
   arenaRewind();
@@ -227,9 +230,9 @@ export function pairingOut(qPtr: usize, pPtr: usize, outPtr: usize): void {
   Q.Y = readFp2(qPtr + 64);
   Q.Z = fp2one();
   const P = new G1();
-  P.X = readU256(pPtr);
-  P.Y = readU256(pPtr + 32);
-  P.Z = u256fromU32(1);
+  P.X = fpToMont(readU256(pPtr));
+  P.Y = fpToMont(readU256(pPtr + 32));
+  P.Z = fpMontOne();
   writeFp12(sm9Pairing(Q, P), outPtr);
 }
 
@@ -241,12 +244,21 @@ function readG2Affine(ptr: usize): G2 {
   return Q;
 }
 
+/** 读 G1 仿射（x||y 各 32 字节，标准域 → Montgomery）。 */
 function readG1Affine(ptr: usize): G1 {
   const P = new G1();
-  P.X = readU256(ptr);
-  P.Y = readU256(ptr + 32);
-  P.Z = u256fromU32(1);
+  P.X = fpToMont(readU256(ptr));
+  P.Y = fpToMont(readU256(ptr + 32));
+  P.Z = fpMontOne();
   return P;
+}
+
+/** 写 G1 仿射（x||y 各 32 字节，Montgomery → 标准域）。 */
+function writeG1Affine(P: G1, ptr: usize): void {
+  fpFromMontTo(W_FP, P.X);
+  u256toBytes(W_FP, ptr);
+  fpFromMontTo(W_FP, P.Y);
+  u256toBytes(W_FP, ptr + 32);
 }
 
 /** 诊断：切线 line function。输入 T（G2 仿射 128B）、Q（G1 64B），输出 num/den 各 384B。 */
@@ -351,8 +363,7 @@ function readG2Jac(ptr: usize): G2 {
 export function signDsOut(ksPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
   arenaRewind();
   const r = g1ToAffine(signExtractKeyDs(readU256(ksPtr), readBytes(idPtr, idLen), idLen));
-  u256toBytes(r.X, outPtr);
-  u256toBytes(r.Y, outPtr + 32);
+  writeG1Affine(r, outPtr);
 }
 
 /** 诊断：加密私钥 de = [ke/(H1+ke)]P2。输入 ke 32B、id，输出仿射 X||Y 128B。 */
@@ -594,8 +605,7 @@ export function signPubOut(ksPtr: usize, outPtr: usize): void {
 export function encPubOut(kePtr: usize, outPtr: usize): void {
   arenaRewind();
   const r = g1ToAffine(encMasterPublic(readU256(kePtr)));
-  u256toBytes(r.X, outPtr);
-  u256toBytes(r.Y, outPtr + 32);
+  writeG1Affine(r, outPtr);
 }
 
 // ---------- 主公钥形态入口（spec §6：verify / encrypt 直接吃主公钥） ----------
@@ -633,8 +643,7 @@ export function sm9UserEncPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr
   const ppube = readG1Affine(pubPtr);
   const t = hash1(readBytes(idPtr, idLen), idLen, 3);
   const r = g1ToAffine(g1Add(g1MulG(t), ppube));
-  u256toBytes(r.X, outPtr);
-  u256toBytes(r.Y, outPtr + 32);
+  writeG1Affine(r, outPtr);
 }
 
 /** 用户签名公钥 Q = [H1(id, hid=1)]P2 + Ppub-s（G2 仿射 128B）。输入签名主公钥 128B。 */

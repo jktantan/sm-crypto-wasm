@@ -22,7 +22,7 @@ import {
   u256zero,
 } from '../../common/assembly/field256';
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
-import { addModN, invModN, mulModN, nArr, U256 } from './fp';
+import { addModN, fpFromMontTo, fpMontOne, fpToMont, invModN, mulModN, nArr, U256 } from './fp';
 import { Fp2 } from './fp2';
 import { Fp4 } from './fp4';
 import { Fp12, fp12Mul, fp12one, fp12Pow } from './fp12';
@@ -283,10 +283,15 @@ function u256FromBytesBE(b: StaticArray<u8>, off: i32): U256 {
   return x;
 }
 
-/** Fp2 → 线性内存：a1||a0。 */
+// 转回标准域的字节输出暂存（u256toBytes 只读，顺序调用安全；非重入：这些是叶子）。
+const FP_TMP: U256 = u256zero();
+
+/** Fp2 → 线性内存：a1||a0（转回标准域）。 */
 function fp2ToBytes(a: Fp2, ptr: usize): void {
-  u256toBytes(a + 32, ptr);
-  u256toBytes(a, ptr + 32);
+  fpFromMontTo(FP_TMP, a + 32);
+  u256toBytes(FP_TMP, ptr);
+  fpFromMontTo(FP_TMP, a);
+  u256toBytes(FP_TMP, ptr + 32);
 }
 
 /** Fp4 → 线性内存：a1||a0。 */
@@ -305,22 +310,26 @@ function fp12ToBytes(w: Fp12): StaticArray<u8> {
   return r;
 }
 
-/** G1 仿射 → 65 字节 0x04||x||y。 */
+/** G1 仿射 → 65 字节 0x04||x||y（转回标准域）。 */
 function g1Compressed(P: G1): StaticArray<u8> {
   const A = g1ToAffine(P);
   const r = new StaticArray<u8>(65);
   r[0] = 0x04;
-  u256toBytes(A.X, changetype<usize>(r) + 1);
-  u256toBytes(A.Y, changetype<usize>(r) + 33);
+  fpFromMontTo(FP_TMP, A.X);
+  u256toBytes(FP_TMP, changetype<usize>(r) + 1);
+  fpFromMontTo(FP_TMP, A.Y);
+  u256toBytes(FP_TMP, changetype<usize>(r) + 33);
   return r;
 }
 
-/** G1 仿射 → 64 字节 x||y（KDF 输入用）。 */
+/** G1 仿射 → 64 字节 x||y（KDF 输入用，转回标准域）。 */
 function g1xy(P: G1): StaticArray<u8> {
   const A = g1ToAffine(P);
   const r = new StaticArray<u8>(64);
-  u256toBytes(A.X, changetype<usize>(r));
-  u256toBytes(A.Y, changetype<usize>(r) + 32);
+  fpFromMontTo(FP_TMP, A.X);
+  u256toBytes(FP_TMP, changetype<usize>(r));
+  fpFromMontTo(FP_TMP, A.Y);
+  u256toBytes(FP_TMP, changetype<usize>(r) + 32);
   return r;
 }
 
@@ -370,8 +379,10 @@ export function sm9Sign(
   const l = modSub(r, h, nArr());
   const S = g1ToAffine(g1Mul(l, ds));
   u256toBytes(h, outPtr);
-  u256toBytes(S.X, outPtr + 32);
-  u256toBytes(S.Y, outPtr + 64);
+  fpFromMontTo(FP_TMP, S.X);
+  u256toBytes(FP_TMP, outPtr + 32);
+  fpFromMontTo(FP_TMP, S.Y);
+  u256toBytes(FP_TMP, outPtr + 64);
 }
 
 /** SM9 验签。签名 = h(32)||Sx(32)||Sy(32)。通过返回 1。 */
@@ -385,9 +396,9 @@ export function sm9Verify(
 ): i32 {
   const h = readU256(sigPtr);
   const S = new G1();
-  S.X = readU256(sigPtr + 32);
-  S.Y = readU256(sigPtr + 64);
-  S.Z = u256fromU32(1);
+  S.X = fpToMont(readU256(sigPtr + 32));
+  S.Y = fpToMont(readU256(sigPtr + 64));
+  S.Z = fpMontOne();
 
   const g = signG(ppubs);
   const t = fp12Pow(g, h);
@@ -469,9 +480,9 @@ export function sm9Decrypt(
   if (C1[0] !== 0x04) return -1;
 
   const P = new G1();
-  P.X = u256FromBytesBE(C1, 1);
-  P.Y = u256FromBytesBE(C1, 33);
-  P.Z = u256fromU32(1);
+  P.X = fpToMont(u256FromBytesBE(C1, 1));
+  P.Y = fpToMont(u256FromBytesBE(C1, 33));
+  P.Z = fpMontOne();
 
   const w = sm9Pairing(g2ToAffine(de), P);
   const C1xy = new StaticArray<u8>(64);
@@ -573,9 +584,9 @@ export function sm9KemDecrypt(
   if (C1[0] !== 0x04) return 0;
 
   const P = new G1();
-  P.X = u256FromBytesBE(C1, 1);
-  P.Y = u256FromBytesBE(C1, 33);
-  P.Z = u256fromU32(1);
+  P.X = fpToMont(u256FromBytesBE(C1, 1));
+  P.Y = fpToMont(u256FromBytesBE(C1, 33));
+  P.Z = fpMontOne();
 
   const w = sm9Pairing(g2ToAffine(de), P);
   const C1xy = new StaticArray<u8>(64);
@@ -615,12 +626,12 @@ function xy64(p65: StaticArray<u8>): StaticArray<u8> {
   return r;
 }
 
-/** 从线性内存读 65 字节未压缩 G1 点（04||x||y）为 G1（Z=1）。 */
+/** 从线性内存读 65 字节未压缩 G1 点（04||x||y）为 G1（Z=1，坐标转 Montgomery）。 */
 function readG1Bytes(ptr: usize): G1 {
   const P = new G1();
-  P.X = readU256(ptr + 1);
-  P.Y = readU256(ptr + 33);
-  P.Z = u256fromU32(1);
+  P.X = fpToMont(readU256(ptr + 1));
+  P.Y = fpToMont(readU256(ptr + 33));
+  P.Z = fpMontOne();
   return P;
 }
 

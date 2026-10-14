@@ -61,15 +61,15 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 | SM2 | 加密 64 B | 503 µs | 2.97 ms | 快 5.9× |
 | SM2 | 解密 64 B | 340 µs | 2.55 ms | 快 7.5× |
 | SM2 | 密钥交换（完整 A↔B） | 1.52 ms | 11.4 ms | 快 7.5× |
-| SM9 | 主密钥对生成（签名 / 加密） | 3.45 / 3.02 ms | — | — |
-| SM9 | 主公钥派生（签名 / 加密） | 158 / 78.5 µs | — | — |
-| SM9 | 用户公钥派生 | 1.06 ms | — | — |
-| SM9 | 签名 32 B | 6.65 ms | — | — |
-| SM9 | 验签 32 B | 12.7 ms | — | — |
-| SM9 | 加密 32 B | 5.51 ms | — | — |
-| SM9 | 解密 32 B | 7.49 ms | — | — |
-| SM9 | KEM 封装 / 解封装 | 4.90 / 7.50 ms | — | — |
-| SM9 | 密钥交换（完整 A↔B） | 28.0 ms | — | — |
+| SM9 | 主密钥对生成（签名 / 加密） | 2.07 / 1.73 ms | — | — |
+| SM9 | 主公钥派生（签名 / 加密） | 97.1 / 49.1 µs | — | — |
+| SM9 | 用户公钥派生 | 563 µs | — | — |
+| SM9 | 签名 32 B | 4.11 ms | — | — |
+| SM9 | 验签 32 B | 8.00 ms | — | — |
+| SM9 | 加密 32 B | 3.69 ms | — | — |
+| SM9 | 解密 32 B | 5.40 ms | — | — |
+| SM9 | KEM 封装 / 解封装 | 3.42 / 4.92 ms | — | — |
+| SM9 | 密钥交换（完整 A↔B） | 19.6 ms | — | — |
 | ZUC | EEA3 加密 1 KB | 9.08 µs | 20.6 µs | 快 2.3× |
 | ZUC | EEA3 密钥流 1 KB | 6.18 µs | — | — |
 | ZUC | EIA3 MAC 1 KB | 11.4 µs | — | — |
@@ -119,14 +119,18 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
   **注意**：TS 门面层每操作还要付一次公钥派生与编解码（见上表的波动说明），所以端到端
   数字的改善幅度会被摊薄；
 - **代价与取舍**：comb 只适用于固定基点，Solinas 只适用于伪 Mersenne 模数——SM2 的
-  标量模 n 与 SM9 的 p/n 都不是这个形状（仍走 Barrett），SM9 若要再快需要换 Montgomery，
-  而那意味着把该曲线全部常数搬进 Montgomery 域，属重写级改动；**混合坐标**要求表项是
+  标量模 n 与 SM9 的 p/n 都不是这个形状，SM9 的基域因而改走 Montgomery（见下条）；
+  **混合坐标**要求表项是
   仿射，所以每张预计算表都要先付一次批量求逆——G 的两张表缓存在永久区、只摊一次，而
   任意点的 wNAF 表每次现算，批量求逆与节省的点加基本抵消，因此仍留 Jacobian；
   **联合标量乘**只在 `s·G + t·P` 这种「一个固定基点 + 一个任意点」的组合上成立，
   单点标量乘用不上；
-- SM9 由 pairing 主导，扩域元素（Fp2/Fp4/Fp12）改为连续内存表示后 sign / verify
-  快约 2.6×；
+- SM9 由 pairing 主导。基域 Fp 已改用 **Montgomery 域**（CIOS，R = 2²⁵⁶）：SM9 的 p 是
+  BN 参数、不是伪 Mersenne，原先一次模乘要付 Barrett 的 64 次部分积 + 约 153 次归约
+  乘法，CIOS 只要 2×64 次；元素在域内一律是 a·R，只在 wasm 边界（字节 ↔ 元素、模块
+  常量）转换一次。单次模乘 179 → 98 ns（1.8×），端到端 sign / verify / encrypt /
+  decrypt / KEM / 密钥交换全面快 **1.6~1.8×**；扩域元素（Fp2/Fp4/Fp12）改用连续内存
+  表示则让 sign / verify 相对更早的版本快约 2.6×；
 - **hex 编解码一度是端到端的大头**：SM4 4 KB ECB 的耗时里 hex **输出**曾占 69%
   （`bytesToHex` 逐字节 `toString(16).padStart` 拼字符串）。改走 Node 的
   `Buffer.toString('hex')`（浏览器回落查表）后编码快约 27×（4 KB：52.6 → 1.9 µs）；
@@ -425,15 +429,15 @@ with `pnpm bench`:
 | SM2 | encrypt 64 B | 503 µs | 2.97 ms | 5.9× faster |
 | SM2 | decrypt 64 B | 340 µs | 2.55 ms | 7.5× faster |
 | SM2 | key exchange (full A↔B) | 1.52 ms | 11.4 ms | 7.5× faster |
-| SM9 | master key pair (sign / enc) | 3.45 / 3.02 ms | — | — |
-| SM9 | master public key (sign / enc) | 158 / 78.5 µs | — | — |
-| SM9 | user public key (derive) | 1.06 ms | — | — |
-| SM9 | sign 32 B | 6.65 ms | — | — |
-| SM9 | verify 32 B | 12.7 ms | — | — |
-| SM9 | encrypt 32 B | 5.51 ms | — | — |
-| SM9 | decrypt 32 B | 7.49 ms | — | — |
-| SM9 | KEM encapsulate / decapsulate | 4.90 / 7.50 ms | — | — |
-| SM9 | key exchange (full A↔B) | 28.0 ms | — | — |
+| SM9 | master key pair (sign / enc) | 2.07 / 1.73 ms | — | — |
+| SM9 | master public key (sign / enc) | 97.1 / 49.1 µs | — | — |
+| SM9 | user public key (derive) | 563 µs | — | — |
+| SM9 | sign 32 B | 4.11 ms | — | — |
+| SM9 | verify 32 B | 8.00 ms | — | — |
+| SM9 | encrypt 32 B | 3.69 ms | — | — |
+| SM9 | decrypt 32 B | 5.40 ms | — | — |
+| SM9 | KEM encapsulate / decapsulate | 3.42 / 4.92 ms | — | — |
+| SM9 | key exchange (full A↔B) | 19.6 ms | — | — |
 | ZUC | EEA3 encrypt 1 KB | 9.08 µs | 20.6 µs | 2.3× faster |
 | ZUC | EEA3 keystream 1 KB | 6.18 µs | — | — |
 | ZUC | EIA3 MAC 1 KB | 11.4 µs | — | — |
@@ -512,17 +516,23 @@ Notes:
   are diluted;
 - **Trade-offs**: comb applies only to the fixed base point and Solinas only to
   pseudo-Mersenne moduli — SM2's scalar modulus n and SM9's p/n are not of that
-  shape (they still use Barrett), and going faster on SM9 would mean Montgomery,
-  i.e. moving every curve constant into the Montgomery domain, which is a rewrite
-  rather than a change; **mixed coordinates** require affine table entries, so
+  shape, so SM9's base field now runs in the Montgomery domain (next bullet);
+  **mixed coordinates** require affine table entries, so
   every precomputed table pays one batch inversion up front — G's two tables are
   cached in the permanent area and amortized, while an arbitrary point's wNAF table
   is rebuilt each time, where the batch inversion roughly cancels the additions it
   saves, so it stays Jacobian; **joint scalar multiplication** only applies to the
   "one fixed base + one arbitrary point" shape of `s·G + t·P`, not to a plain
   single-point scalar multiplication;
-- SM9 is dominated by pairings; with its extension-field elements (Fp2/Fp4/Fp12)
-  now laid out as contiguous memory, sign / verify are ~2.6× faster;
+- SM9 is dominated by pairings. Its base field Fp now runs in the **Montgomery
+  domain** (CIOS, R = 2²⁵⁶): SM9's p is a BN parameter, not pseudo-Mersenne, so one
+  modular multiply used to pay Barrett's 64 partial products plus ~153 reduction
+  multiplies, where CIOS needs only 2×64. Elements are a·R throughout the field,
+  converted once at the wasm boundary (bytes ↔ elements, module constants). A
+  single modular multiply went 179 → 98 ns (1.8×), which carries through end to
+  end as **1.6–1.8×** on sign / verify / encrypt / decrypt / KEM / key exchange;
+  laying the extension-field elements (Fp2/Fp4/Fp12) out as contiguous memory is
+  what made sign / verify ~2.6× faster than earlier versions;
 - **hex codecs used to be a large part of the end-to-end cost**: hex *output* once
   accounted for 69% of SM4's 4 KB ECB time (`bytesToHex` built the string byte by
   byte with `toString(16).padStart`). Routing to Node's `Buffer.toString('hex')`
@@ -859,15 +869,15 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 | SM2 | шифрование 64 B | 503 µs | 2.97 ms | в 5.9× быстрее |
 | SM2 | расшифрование 64 B | 340 µs | 2.55 ms | в 7.5× быстрее |
 | SM2 | обмен ключами (полный A↔B) | 1.52 ms | 11.4 ms | в 7.5× быстрее |
-| SM9 | главная пара ключей (sign / enc) | 3.45 / 3.02 ms | — | — |
-| SM9 | главный открытый ключ (sign / enc) | 158 / 78.5 µs | — | — |
-| SM9 | открытый ключ пользователя | 1.06 ms | — | — |
-| SM9 | подпись 32 B | 6.65 ms | — | — |
-| SM9 | проверка 32 B | 12.7 ms | — | — |
-| SM9 | шифрование 32 B | 5.51 ms | — | — |
-| SM9 | расшифрование 32 B | 7.49 ms | — | — |
-| SM9 | KEM инкапсуляция / декапсуляция | 4.90 / 7.50 ms | — | — |
-| SM9 | обмен ключами (полный A↔B) | 28.0 ms | — | — |
+| SM9 | главная пара ключей (sign / enc) | 2.07 / 1.73 ms | — | — |
+| SM9 | главный открытый ключ (sign / enc) | 97.1 / 49.1 µs | — | — |
+| SM9 | открытый ключ пользователя | 563 µs | — | — |
+| SM9 | подпись 32 B | 4.11 ms | — | — |
+| SM9 | проверка 32 B | 8.00 ms | — | — |
+| SM9 | шифрование 32 B | 3.69 ms | — | — |
+| SM9 | расшифрование 32 B | 5.40 ms | — | — |
+| SM9 | KEM инкапсуляция / декапсуляция | 3.42 / 4.92 ms | — | — |
+| SM9 | обмен ключами (полный A↔B) | 19.6 ms | — | — |
 | ZUC | EEA3 шифрование 1 KB | 9.08 µs | 20.6 µs | в 2.3× быстрее |
 | ZUC | EEA3 гамма 1 KB | 6.18 µs | — | — |
 | ZUC | EIA3 MAC 1 KB | 11.4 µs | — | — |
@@ -947,9 +957,8 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   операцию (см. примечание о колебаниях над таблицей), поэтому сквозные числа
   размываются;
 - **Компромиссы**: comb применим только к фиксированной базовой точке, Солинас — только
-  к псевдо-мерсенновым модулям: скалярный модуль n у SM2 и p/n у SM9 не такой формы
-  (там по-прежнему Барретт), а чтобы ускорить SM9 дальше, нужен Монтгомери — то есть
-  перенос всех констант кривой в область Монтгомери, а это переписывание, а не правка;
+  к псевдо-мерсенновым модулям: скалярный модуль n у SM2 и p/n у SM9 не такой формы,
+  поэтому базовое поле SM9 теперь работает в области Монтгомери (следующий пункт);
   **смешанные координаты** требуют аффинных записей таблиц, поэтому каждая
   предвычисленная таблица сначала платит одно пакетное обращение — обе таблицы G
   кэшируются в постоянной области и амортизируются, а wNAF-таблица произвольной точки
@@ -957,8 +966,16 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
   сложения, поэтому там остаётся якобиан; **совместное скалярное умножение** работает
   только для формы «одна фиксированная база + одна произвольная точка» (`s·G + t·P`),
   но не для обычного умножения на скаляр одной точки;
-- SM9 определяется спариваниями; после перехода элементов расширения (Fp2/Fp4/Fp12)
-  на непрерывную память sign / verify ускорились примерно в 2.6×;
+- SM9 определяется спариваниями. Его базовое поле Fp теперь работает в
+  **области Монтгомери** (CIOS, R = 2²⁵⁶): p у SM9 — параметр BN, а не
+  псевдо-мерсенново число, поэтому одно модульное умножение платило 64 частичных
+  произведения Барретта плюс ~153 умножения на этапе приведения, тогда как CIOS
+  требует только 2×64. Элементы внутри поля всюду имеют вид a·R и преобразуются
+  один раз на границе wasm (байты ↔ элементы, константы модуля). Одно модульное
+  умножение ускорилось с 179 до 98 нс (1.8×), что переносится в сквозной результат
+  **1.6–1.8×** на sign / verify / encrypt / decrypt / KEM / обмене ключами; а переход
+  элементов расширения (Fp2/Fp4/Fp12) на непрерывную память — это то, что дало
+  ускорение sign / verify примерно в 2.6× относительно более ранних версий;
 - **Кодеки hex раньше были большой частью сквозной стоимости**: вывод hex когда-то
   занимал 69% времени SM4 4 KB ECB (`bytesToHex` собирал строку побайтово через
   `toString(16).padStart`). После перехода на `Buffer.toString('hex')` в Node (в

@@ -18,7 +18,6 @@ import {
   u256copy,
   u256eq,
   u256fromBytes as u256fromBytesShared,
-  u256fromU32,
   u256isZero,
   u256zero,
 } from '../../common/assembly/field256';
@@ -27,11 +26,13 @@ import {
   fpAddTo,
   fpDiv2To,
   fpInv,
+  fpMontOne,
   fpMul,
   fpMulTo,
   fpSqr,
   fpSqrTo,
   fpSubTo,
+  fpToMontTo,
   U256,
 } from './fp';
 
@@ -68,11 +69,11 @@ export function fp2set(a0: U256, a1: U256): Fp2 {
   return r;
 }
 
-/** 从字节数组读（a0 在前，各 32 字节大端）。 */
+/** 从字节数组读（a0 在前，各 32 字节大端）；字节是标准域，读入即转 Montgomery。 */
 export function fp2fromBytes(b: Uint8Array, off: usize): Fp2 {
   const r = arenaAlloc(FP2_BYTES);
-  u256copy(u256fromBytesShared(b, off), r);
-  u256copy(u256fromBytesShared(b, off + 32), a1of(r));
+  fpToMontTo(r, u256fromBytesShared(b, off));
+  fpToMontTo(a1of(r), u256fromBytesShared(b, off + 32));
   return r;
 }
 
@@ -108,7 +109,8 @@ const S3 = u256zero();
 const S4 = u256zero();
 const S5 = u256zero();
 const ZERO = u256zero(); // 只读零常量
-const ONE: U256 = u256fromU32(1);
+// 「1」必须是 Montgomery 表示（= R mod p）：本层所有 Fp 元素都在 Montgomery 域。
+const ONE: U256 = fpMontOne();
 const TRIPLE_TMP: Fp2 = arenaAlloc(FP2_BYTES); // fp2TriTo 的 Fp2 级暂存
 
 // ---------- 加法 / 减法 / 取负 ----------
