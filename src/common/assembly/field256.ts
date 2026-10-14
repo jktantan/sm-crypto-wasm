@@ -1,42 +1,160 @@
 // 通用 256-bit 模运算（AssemblyScript）—— 供 SM2 与 SM9 共用。
 //
-// 表示：每个 256-bit 无符号整数用 8 个 u32 limb，**小端序**（limb[0] 是最低 32 位）。
+// 表示：每个 256-bit 无符号整数是**线性内存裸指针**：`usize` 指向一段 32 字节的
+// limb 区，8×u32 **小端序**（limb[0] 是最低 32 位）。旧实现用 `StaticArray<u32>`
+// 表示，索引访问会编译成 `__get`/`__set` runtime 调用（含边界检查），每次分配还要
+// 走 TLSF 分配器 + itcms 记账 —— CPU 采样显示这两项合计占 SM2 签名的 ~30%。
+//
+// 分配：模块级 bump arena。一次性 `heap.alloc` 拿一大块，导出函数入口用
+// `arenaMark()` 记水位、出口用 `arenaReset()` 回退，因此单次调用期间的临时量
+// 既无 GC 扫描也无回收成本。**不要**把 arena 指针存到跨导出调用的长生命周期结构里。
 //
 // 与具体曲线解耦：所有运算把**模数 m 作为参数传入**，因此：
 // - SM2 传其素域 p 或子群阶 n；
 // - SM9 传其 BN 曲线素域 p 或阶 n。
 //
-// 归约策略：基数 2^32 的多 limb 长除法（Knuth D 简化版）把 512-bit 积归约到 < m。
-// 假定模数 m 的最高 limb ≥ 2^31（SM2/SM9 的 p、n 均满足）——此时 Knuth 估商高估 ≤ 2，修正很快。
+// 归约策略：已知模数（SM2/SM9 的 p、n）走 Barrett 归约，否则回退多 limb 长除法
+// （Knuth D 简化版）。长除法假定模数 m 的最高 limb ≥ 2^31，此时估商高估 ≤ 2。
 //
 // 参考：GM/T 0003-2012（SM2）、GM/T 0044-2016（SM9）。
 
-/** 256-bit 无符号整数，8×u32 小端。 */
-export type U256 = StaticArray<u32>;
+/** 256-bit 无符号整数：指向 32 字节小端 limb 区的裸指针。 */
+export type U256 = usize;
 
-/** 512-bit 中间积，16×u32 小端。 */
-export type U512 = StaticArray<u32>;
+/** 512-bit 中间积：指向 64 字节小端 limb 区的裸指针。 */
+export type U512 = usize;
+
+/** 一个 U256 的字节数。 */
+export const U256_BYTES: usize = 32;
+
+// ---------- 模块级 bump arena ----------
+
+const ARENA_BYTES: usize = 4 << 20; // 4 MiB
+// 用 heap.alloc 而不是 `new StaticArray<u8>`：后者会从 TLSF（GC 堆）里吃掉
+// 4 MiB，把 GC 的可用空间压低，随后任何一次分配都可能触发 memory.grow —— 而
+// JS 门面持有 `new Uint8Array(memory.buffer)` 视图，内存一增长就 detach。
+// heap.alloc 在 __heap_base 之上 bump，与自顶向下的 GC 堆互不侵占。
+const ARENA_BASE: usize = heap.alloc(ARENA_BYTES);
+let ARENA_OFF: usize = 0;
+let ARENA_HW: usize = 0;
+
+/** 记录 arena 水位（导出函数入口调用）。 */
+export function arenaMark(): usize {
+  return ARENA_OFF;
+}
+
+/** 回退 arena 到 mark（导出函数出口调用）；期间分配的 U256 全部失效。 */
+export function arenaReset(mark: usize): void {
+  ARENA_OFF = mark;
+}
+
+// 模块级常量（SM2/SM9 的 p、n、基点坐标…）在模块初始化时也走 arena。它们在
+// 首次导出调用之前就已分配完毕，所以「首次调用时封存水位、之后每次调用回卷到
+// 该水位」既保住了常量，又让单次调用内的临时量零成本回收。
+let BASE_MARK: usize = 0;
+let SEALED: bool = false;
+
+/**
+ * 回卷到模块初始化后的水位（每个 wasm 导出函数的第一条语句）。
+ *
+ * 首次调用时封存水位（此时模块级常量已全部就位），之后每次调用都从该水位
+ * 重新分配 —— 等价于「每次调用一个全新的 arena」，且不触碰常量。
+ */
+export function arenaRewind(): void {
+  if (!SEALED) {
+    BASE_MARK = ARENA_OFF;
+    SEALED = true;
+    return;
+  }
+  ARENA_OFF = BASE_MARK;
+}
+
+/** 诊断：本次进程内 arena 高水位（字节）。 */
+export function arenaHighWater(): usize {
+  return ARENA_HW;
+}
+
+/** 在 arena 里分配 n 字节（U256 分配恒为 32 的倍数）。 */
+export function arenaAlloc(n: usize): usize {
+  const off = ARENA_OFF + n;
+  if (off > ARENA_BYTES) unreachable(); // arena 不够：立即失败，绝不静默越界
+  if (off > ARENA_HW) ARENA_HW = off;
+  const p = ARENA_BASE + ARENA_OFF;
+  ARENA_OFF = off;
+  return p;
+}
+
+// ---------- 永久区（跨导出调用的缓存） ----------
+//
+// arena 会在每次导出调用入口回卷，所以**跨调用存活**的数据（例如 SM9 固定基点
+// 的 comb 预计算表）不能落在 arena 里。永久区同样是一次 heap.alloc 的 bump 区，
+// 但不受 arenaRewind 影响。
+const PERM_BYTES: usize = 1 << 20; // 1 MiB
+const PERM_BASE: usize = heap.alloc(PERM_BYTES);
+let PERM_OFF: usize = 0;
+
+/** 在永久区分配 n 字节。 */
+export function permAlloc(n: usize): usize {
+  const off = PERM_OFF + n;
+  if (off > PERM_BYTES) unreachable();
+  const p = PERM_BASE + PERM_OFF;
+  PERM_OFF = off;
+  return p;
+}
+
+/** 把一个 U256 深拷贝到永久区，返回新地址。 */
+export function permU256(src: U256): U256 {
+  const p = permAlloc(U256_BYTES);
+  memory.copy(p, src, U256_BYTES);
+  return p;
+}
+
+// ---------- limb 访问 ----------
+
+/** 读第 i 个 limb（小端）。 */
+function limb(a: U256, i: i32): u32 {
+  return load<u32>(a + ((<usize>i) << 2));
+}
+
+/** 写第 i 个 limb（小端）。 */
+function setLimb(a: U256, i: i32, v: u32): void {
+  store<u32>(a + ((<usize>i) << 2), v);
+}
 
 // ---------- 构造 / 转换 ----------
 
 export function u256zero(): U256 {
-  return new StaticArray<u32>(8);
+  const r = arenaAlloc(U256_BYTES);
+  memory.fill(r, 0, U256_BYTES);
+  return r;
 }
 
 export function u256fromU32(v: u32): U256 {
-  const x = new StaticArray<u32>(8);
-  x[0] = v;
+  const x = arenaAlloc(U256_BYTES);
+  memory.fill(x, 0, U256_BYTES);
+  setLimb(x, 0, v);
   return x;
 }
 
 /** 从 Uint8Array（大端）读 256-bit，起点 off。 */
 export function u256fromBytes(b: Uint8Array, off: usize): U256 {
-  const x = new StaticArray<u32>(8);
+  // 注意：Uint8Array 是 TypedArray，数据在 .buffer 里，`changetype<usize>(b)` 拿到的是
+  // **对象指针**而不是数据起始 —— 必须走 `.dataStart`（StaticArray<u8> 才可以直接
+  // changetype，它的引用本身就指向数据）。
+  return u256fromMemBE(b.dataStart + off);
+}
+
+/** 从线性内存读 32 字节大端为 U256。 */
+export function u256fromMemBE(b: usize): U256 {
+  const x = arenaAlloc(U256_BYTES);
   for (let i = 0; i < 8; i++) {
-    const o = <i32>off + i * 4;
-    x[7 - i] =
-      (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3]) &
-      0xffffffff;
+    const o = b + i * 4;
+    const v =
+      ((<u32>load<u8>(o)) << 24) |
+      ((<u32>load<u8>(o + 1)) << 16) |
+      ((<u32>load<u8>(o + 2)) << 8) |
+      <u32>load<u8>(o + 3);
+    setLimb(x, 7 - i, v & 0xffffffff);
   }
   return x;
 }
@@ -44,7 +162,7 @@ export function u256fromBytes(b: Uint8Array, off: usize): U256 {
 /** 写 256-bit 到线性内存 out（大端），32 字节。 */
 export function u256toBytes(x: U256, out: usize): void {
   for (let i = 0; i < 8; i++) {
-    const v = x[7 - i];
+    const v = limb(x, 7 - i);
     store<u8>(out + i * 4, <u8>(v >>> 24));
     store<u8>(out + i * 4 + 1, <u8>(v >>> 16));
     store<u8>(out + i * 4 + 2, <u8>(v >>> 8));
@@ -54,38 +172,42 @@ export function u256toBytes(x: U256, out: usize): void {
 
 /** 判断 256-bit 是否全 0（1=零）。 */
 export function u256isZero(a: U256): bool {
-  for (let i = 0; i < 8; i++) if (a[i] !== 0) return false;
+  for (let i = 0; i < 8; i++) if (limb(a, i) !== 0) return false;
   return true;
 }
 
 /** 判断 256-bit 是否等于给定 32 字节大端。 */
 export function u256eqBytes(a: U256, b: Uint8Array, off: usize): bool {
+  const base = b.dataStart + off;
   for (let i = 0; i < 8; i++) {
-    const x = a[7 - i];
-    const o = off + i * 4;
+    const x = limb(a, 7 - i);
+    const o = base + i * 4;
     const y =
-      ((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3];
+      ((<u32>load<u8>(o)) << 24) |
+      ((<u32>load<u8>(o + 1)) << 16) |
+      ((<u32>load<u8>(o + 2)) << 8) |
+      <u32>load<u8>(o + 3);
     if (x !== (y & 0xffffffff)) return false;
   }
   return true;
 }
 
-/** 把 U256 拷贝到静态数组（返回新对象）。 */
+/** 返回新分配的副本。 */
 export function u256clone(a: U256): U256 {
-  const r = new StaticArray<u32>(8);
-  for (let i = 0; i < 8; i++) r[i] = a[i];
+  const r = arenaAlloc(U256_BYTES);
+  memory.copy(r, a, U256_BYTES);
   return r;
 }
 
 /** 原地拷贝：dst = src（保持旧的 `u256copy(src, dst)` 签名）。 */
 export function u256copy(src: U256, dst: U256): void {
-  for (let i = 0; i < 8; i++) dst[i] = src[i];
+  memory.copy(dst, src, U256_BYTES);
 }
 
 /** 从 8 个 u32（小端）构造 U256。 */
 export function u256fromLimbs(limbs: StaticArray<u32>): U256 {
-  const r = new StaticArray<u32>(8);
-  for (let i = 0; i < 8; i++) r[i] = limbs[i];
+  const r = arenaAlloc(U256_BYTES);
+  for (let i = 0; i < 8; i++) setLimb(r, i, limbs[i]);
   return r;
 }
 
@@ -94,8 +216,8 @@ export function u256fromLimbs(limbs: StaticArray<u32>): U256 {
 /** 比较：a > b → 1，a == b → 0，a < b → -1。 */
 export function u256cmp(a: U256, b: U256): i32 {
   for (let i = 7; i >= 0; i--) {
-    const x = a[i];
-    const y = b[i];
+    const x = limb(a, i);
+    const y = limb(b, i);
     if (x > y) return 1;
     if (x < y) return -1;
   }
@@ -104,7 +226,7 @@ export function u256cmp(a: U256, b: U256): i32 {
 
 /** 取第 i 位（0..255）。 */
 export function u256bit(a: U256, i: i32): u32 {
-  return (a[i >> 5] >>> (i & 31)) & 1;
+  return (limb(a, i >> 5) >>> (i & 31)) & 1;
 }
 
 export function u256eq(a: U256, b: U256): bool {
@@ -113,7 +235,7 @@ export function u256eq(a: U256, b: U256): bool {
 
 /** 从十六进制字符串构造 U256。 */
 export function u256fromHex(hex: string): U256 {
-  const x = new StaticArray<u32>(8);
+  const x = arenaAlloc(U256_BYTES);
   const n = hex.length;
   for (let i = 0; i < 8; i++) {
     let v: u32 = 0;
@@ -127,7 +249,7 @@ export function u256fromHex(hex: string): U256 {
       }
       v = ((v << 4) | hexNib(hex.charCodeAt(j))) & 0xffffffff;
     }
-    x[i] = v;
+    setLimb(x, i, v);
   }
   return x;
 }
@@ -145,8 +267,8 @@ function hexNib(c: i32): u32 {
 export function u256addRaw(a: U256, b: U256): u32 {
   let carry: u64 = 0;
   for (let i = 0; i < 8; i++) {
-    const s: u64 = u64(a[i]) + u64(b[i]) + carry;
-    a[i] = <u32>(s & 0xffffffff);
+    const s: u64 = u64(limb(a, i)) + u64(limb(b, i)) + carry;
+    setLimb(a, i, <u32>(s & 0xffffffff));
     carry = s >>> 32;
   }
   return <u32>carry;
@@ -156,12 +278,12 @@ export function u256addRaw(a: U256, b: U256): u32 {
 export function u256subRaw(a: U256, b: U256): u32 {
   let borrow: i64 = 0;
   for (let i = 0; i < 8; i++) {
-    const d: i64 = i64(a[i]) - i64(b[i]) - borrow;
+    const d: i64 = i64(limb(a, i)) - i64(limb(b, i)) - borrow;
     if (d < 0) {
-      a[i] = <u32>(d + 0x100000000);
+      setLimb(a, i, <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      a[i] = <u32>d;
+      setLimb(a, i, <u32>d);
       borrow = 0;
     }
   }
@@ -183,25 +305,24 @@ export function modAdd(a: U256, b: U256, m: U256): U256 {
 /**
  * out = (a + b) mod m（原地变体，允许 out 与 a / b 别名）。
  *
- * 供 fp2 / fp4 层的 `*To` 算子使用：整条扩域运算链不再产生逐次的
- * `new StaticArray<u32>(8)`，这是 pairing 里分配压力的主要来源。
+ * 供 fp2 / fp4 层的 `*To` 算子使用：整条扩域运算链不再产生逐次的分配。
  */
 export function modAddInto(out: U256, a: U256, b: U256, m: U256): void {
   let carry: u64 = 0;
   for (let i = 0; i < 8; i++) {
-    const s: u64 = u64(a[i]) + u64(b[i]) + carry;
-    out[i] = <u32>(s & 0xffffffff);
+    const s: u64 = u64(limb(a, i)) + u64(limb(b, i)) + carry;
+    setLimb(out, i, <u32>(s & 0xffffffff));
     carry = s >>> 32;
   }
   if (carry !== 0 || u256cmp(out, m) >= 0) {
     let borrow: i64 = 0;
     for (let i = 0; i < 8; i++) {
-      const d: i64 = i64(out[i]) - i64(m[i]) - borrow;
+      const d: i64 = i64(limb(out, i)) - i64(limb(m, i)) - borrow;
       if (d < 0) {
-        out[i] = <u32>(d + 0x100000000);
+        setLimb(out, i, <u32>(d + 0x100000000));
         borrow = 1;
       } else {
-        out[i] = <u32>d;
+        setLimb(out, i, <u32>d);
         borrow = 0;
       }
     }
@@ -212,20 +333,20 @@ export function modAddInto(out: U256, a: U256, b: U256, m: U256): void {
 export function modSubInto(out: U256, a: U256, b: U256, m: U256): void {
   let borrow: i64 = 0;
   for (let i = 0; i < 8; i++) {
-    const d: i64 = i64(a[i]) - i64(b[i]) - borrow;
+    const d: i64 = i64(limb(a, i)) - i64(limb(b, i)) - borrow;
     if (d < 0) {
-      out[i] = <u32>(d + 0x100000000);
+      setLimb(out, i, <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      out[i] = <u32>d;
+      setLimb(out, i, <u32>d);
       borrow = 0;
     }
   }
   if (borrow !== 0) {
     let c: u64 = 0;
     for (let i = 0; i < 8; i++) {
-      const s: u64 = u64(out[i]) + u64(m[i]) + c;
-      out[i] = <u32>(s & 0xffffffff);
+      const s: u64 = u64(limb(out, i)) + u64(limb(m, i)) + c;
+      setLimb(out, i, <u32>(s & 0xffffffff));
       c = s >>> 32;
     }
   }
@@ -241,25 +362,11 @@ export function modSub(a: U256, b: U256, m: U256): U256 {
   return r;
 }
 
-/** a(8) × b(8) → 512-bit(16)，学校算法。 */export function mul512(a: U256, b: U256): U512 {
-  const r = new StaticArray<u32>(16);
-  for (let i = 0; i < 16; i++) r[i] = 0;
-  for (let i = 0; i < 8; i++) {
-    let carry: u64 = 0;
-    const ai = u64(a[i]);
-    for (let j = 0; j < 8; j++) {
-      const cur: u64 = u64(r[i + j]) + ai * u64(b[j]) + carry;
-      r[i + j] = <u32>(cur & 0xffffffff);
-      carry = cur >>> 32;
-    }
-    let k = i + 8;
-    while (carry !== 0 && k < 16) {
-      const cur: u64 = u64(r[k]) + carry;
-      r[k] = <u32>(cur & 0xffffffff);
-      carry = cur >>> 32;
-      k++;
-    }
-  }
+/** a(8) × b(8) → 512-bit(16)，学校算法。 */
+export function mul512(a: U256, b: U256): U512 {
+  const r = arenaAlloc(64);
+  memory.fill(r, 0, 64);
+  mul512Into(a, b, r);
   return r;
 }
 
@@ -270,23 +377,23 @@ export function modSub(a: U256, b: U256, m: U256): U256 {
  * 假定 m 的最高 limb ≥ 2^31（SM2/SM9 的 p、n 均满足），此时估商高估 ≤ 2。
  */
 export function reduce512(x: U512, m: U256): U256 {
-  const out = new StaticArray<u32>(8);
-  reduce512Into(changetype<usize>(x), m, out);
+  const out = arenaAlloc(U256_BYTES);
+  reduce512Into(x, m, out);
   return out;
 }
 
 /** reduce512 的 scratch 版（modMul 长除回退路径用，无逐次分配）。 */
-function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
+function reduce512Into(x: usize, m: U256, out: U256): void {
   const r = RD_R; // 余数（< m · 2^32，故 9 limb 足够）
   const t = RD_T; // q · m
-  for (let k = 0; k < 9; k++) store<u32>(r + (<usize>k << 2), 0);
-  const mhi = m[7];
+  for (let k = 0; k < 9; k++) store<u32>(r + ((<usize>k) << 2), 0);
+  const mhi = limb(m, 7);
   for (let i = 15; i >= 0; i--) {
     // r = r * 2^32 + x[i]
     for (let k = 8; k > 0; k--) {
-      store<u32>(r + (<usize>k << 2), load<u32>(r + (<usize>(k - 1) << 2)));
+      store<u32>(r + ((<usize>k) << 2), load<u32>(r + ((<usize>(k - 1)) << 2)));
     }
-    store<u32>(r, load<u32>(x + (<usize>i << 2)));
+    store<u32>(r, load<u32>(x + ((<usize>i) << 2)));
 
     // 估商 q = floor((r[8]·2^32 + r[7]) / m[7])，上限 2^32-1
     const num = (u64(load<u32>(r + 32)) << 32) | u64(load<u32>(r + 28));
@@ -298,8 +405,8 @@ function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
     while (true) {
       let carry: u64 = 0;
       for (let j = 0; j < 8; j++) {
-        const cur = u64(q) * u64(m[j]) + carry;
-        store<u32>(t + (<usize>j << 2), <u32>(cur & 0xffffffff));
+        const cur = u64(q) * u64(limb(m, j)) + carry;
+        store<u32>(t + ((<usize>j) << 2), <u32>(cur & 0xffffffff));
         carry = cur >>> 32;
       }
       store<u32>(t + 32, <u32>carry);
@@ -307,12 +414,12 @@ function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
       let borrow: i64 = 0;
       for (let k = 0; k < 9; k++) {
         const d: i64 =
-          i64(load<u32>(r + (<usize>k << 2))) - i64(load<u32>(t + (<usize>k << 2))) - borrow;
+          i64(load<u32>(r + ((<usize>k) << 2))) - i64(load<u32>(t + ((<usize>k) << 2))) - borrow;
         if (d < 0) {
-          store<u32>(r + (<usize>k << 2), <u32>(d + 0x100000000));
+          store<u32>(r + ((<usize>k) << 2), <u32>(d + 0x100000000));
           borrow = 1;
         } else {
-          store<u32>(r + (<usize>k << 2), <u32>d);
+          store<u32>(r + ((<usize>k) << 2), <u32>d);
           borrow = 0;
         }
       }
@@ -321,8 +428,8 @@ function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
       // 恢复 r（加回 t），q 减 1 重试
       let c: u64 = 0;
       for (let k = 0; k < 9; k++) {
-        const s = u64(load<u32>(r + (<usize>k << 2))) + u64(load<u32>(t + (<usize>k << 2))) + c;
-        store<u32>(r + (<usize>k << 2), <u32>(s & 0xffffffff));
+        const s = u64(load<u32>(r + ((<usize>k) << 2))) + u64(load<u32>(t + ((<usize>k) << 2))) + c;
+        store<u32>(r + ((<usize>k) << 2), <u32>(s & 0xffffffff));
         c = s >>> 32;
       }
       q = (q - 1) & 0xffffffff;
@@ -335,18 +442,21 @@ function reduce512Into(x: usize, m: U256, out: StaticArray<u32>): void {
       sub9(r, m);
     }
   }
-  for (let i = 0; i < 8; i++) out[i] = load<u32>(r + (<usize>i << 2));
+  for (let i = 0; i < 8; i++) setLimb(out, i, load<u32>(r + ((<usize>i) << 2)));
 }
 
 /** 大端字节串（任意长度）mod m：Horner 法 acc = acc*256 + b[i]。用于 SM9 的 40 字节哈希取模。 */
 export function bytesMod(b: StaticArray<u8>, m: U256): U256 {
-  const c256 = new StaticArray<u32>(8);
-  c256[0] = 256;
-  let acc = new StaticArray<u32>(8); // 0
+  const c256 = arenaAlloc(U256_BYTES);
+  memory.fill(c256, 0, U256_BYTES);
+  setLimb(c256, 0, 256);
+  let acc = arenaAlloc(U256_BYTES);
+  memory.fill(acc, 0, U256_BYTES);
+  const add = arenaAlloc(U256_BYTES);
   for (let i = 0; i < b.length; i++) {
     acc = modMul(acc, c256, m);
-    const add = new StaticArray<u32>(8);
-    add[0] = <u32>b[i];
+    memory.fill(add, 0, U256_BYTES);
+    setLimb(add, 0, <u32>b[i]);
     acc = modAdd(acc, add, m);
   }
   return acc;
@@ -355,9 +465,10 @@ export function bytesMod(b: StaticArray<u8>, m: U256): U256 {
 function cmp9(a: usize, b: U256): i32 {
   if (load<u32>(a + 32) !== 0) return 1;
   for (let i = 7; i >= 0; i--) {
-    const ai = load<u32>(a + (<usize>i << 2));
-    if (ai > b[i]) return 1;
-    if (ai < b[i]) return -1;
+    const ai = load<u32>(a + ((<usize>i) << 2));
+    const bi = limb(b, i);
+    if (ai > bi) return 1;
+    if (ai < bi) return -1;
   }
   return 0;
 }
@@ -365,13 +476,13 @@ function cmp9(a: usize, b: U256): i32 {
 function sub9(a: usize, b: U256): void {
   let borrow: i64 = 0;
   for (let i = 0; i < 9; i++) {
-    const bi: i64 = i < 8 ? i64(b[i]) : 0;
-    const d: i64 = i64(load<u32>(a + (<usize>i << 2))) - bi - borrow;
+    const bi: i64 = i < 8 ? i64(limb(b, i)) : 0;
+    const d: i64 = i64(load<u32>(a + ((<usize>i) << 2))) - bi - borrow;
     if (d < 0) {
-      store<u32>(a + (<usize>i << 2), <u32>(d + 0x100000000));
+      store<u32>(a + ((<usize>i) << 2), <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      store<u32>(a + (<usize>i << 2), <u32>d);
+      store<u32>(a + ((<usize>i) << 2), <u32>d);
       borrow = 0;
     }
   }
@@ -381,14 +492,10 @@ function sub9(a: usize, b: U256): void {
  * (a * b) mod m。已知模数（SM2/SM9 的 p、n）走 Barrett 归约，否则回退多 limb 长除法。
  *
  * 内部工作数组（512-bit 积、Barrett 的 q1/q2/q3/r2/r、长除法的 r/t）全部走模块级
- * scratch，不逐次分配——modMul 是 pairing/点乘的最热路径，一次配对要调几千次，
- * 逐次 new StaticArray 的 GC 压力实测占了相当大比例。
+ * scratch，不逐次分配——modMul 是 pairing/点乘的最热路径。
  * scratch 非重入：modMul/modSqr 是叶子函数（不互相嵌套），调用方拿到的返回值是
- * 独立分配的 U256，不受后续调用影响。
+ * 独立分配（arena）的 U256，不受后续调用影响。
  */
-// 线性内存裸指针：这些区域在**每次** modMul 里要被访问上百次。用 StaticArray
-// 的索引访问会退化成 `__get`/`__set` runtime 调用（含边界检查），实测是模乘的
-// 主要开销（SM2 的一次数标量乘要做几千次模乘，于是放大成几十毫秒）。
 const MUL_X: usize = heap.alloc(16 * 4); // 512-bit 积
 const BR_Q1: usize = heap.alloc(9 * 4);
 const BR_Q2: usize = heap.alloc(18 * 4);
@@ -400,31 +507,124 @@ const RD_T: usize = heap.alloc(9 * 4); // reduce512 的 q·m
 
 /** mul512 的原地版：a × b → out（16 limb 裸指针）。 */
 function mul512Into(a: U256, b: U256, out: usize): void {
-  for (let i = 0; i < 16; i++) store<u32>(out + (<usize>i << 2), 0);
+  for (let i = 0; i < 16; i++) store<u32>(out + ((<usize>i) << 2), 0);
   for (let i = 0; i < 8; i++) {
     let carry: u64 = 0;
-    const ai = u64(a[i]);
+    const ai = u64(limb(a, i));
     for (let j = 0; j < 8; j++) {
-      const cur: u64 = u64(load<u32>(out + (<usize>(i + j) << 2))) + ai * u64(b[j]) + carry;
-      store<u32>(out + (<usize>(i + j) << 2), <u32>(cur & 0xffffffff));
+      const cur: u64 = u64(load<u32>(out + ((<usize>(i + j)) << 2))) + ai * u64(limb(b, j)) + carry;
+      store<u32>(out + ((<usize>(i + j)) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
     }
     let k = i + 8;
     while (carry !== 0 && k < 16) {
-      const cur: u64 = u64(load<u32>(out + (<usize>k << 2))) + carry;
-      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
+      const cur: u64 = u64(load<u32>(out + ((<usize>k) << 2))) + carry;
+      store<u32>(out + ((<usize>k) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
       k++;
     }
   }
 }
 
+// ---------- SM2 素域 p 的 Solinas 归约 ----------
+//
+// p = 2^256 − 2^224 − 2^96 + 2^64 − 1 是伪 Mersenne，于是
+//   2^256 ≡ 2^224 + 2^96 − 2^64 + 1  (mod p)
+// 把 512 位积里位置 ≥ 8 的每个 32-bit 字按
+//   2^32i ≡ 2^32(i−1) + 2^32(i−5) − 2^32(i−6) + 2^32(i−8)
+// 展开到低位即可 —— 全程只有加减与移位，**没有乘法**。相比通用 Barrett
+// （q1·μ 的 9×9 加 q3·m 的 9×8，共 153 次 32×32 乘法）是数量级差别；SM2 的
+// 一次标量乘要做几千次模乘，归约正是签名耗时的大头。
+//
+// 只有 SM2 的 p 是这个形状：n 与 SM9 的 p/n 仍走 Barrett。展开表与收敛性已用
+// limb 级原型对 BigInt 跑过 10015 组（含 p±1、(2^256−1)²、p·p 等边界）对拍。
+
+/** SM2 素域 p 的小端 limb 特征：limb0=limb1=ffffffff、limb2=0、limb7=fffffffe。 */
+function isSm2Prime(m: U256): bool {
+  if (limb(m, 7) !== 0xfffffffe) return false;
+  return limb(m, 2) === 0 && limb(m, 1) === 0xffffffff && limb(m, 3) === 0xffffffff;
+}
+
+const SM2_P_ARR: U256 = sm2PrimeInit();
+
+function sm2PrimeInit(): U256 {
+  const p = arenaAlloc(U256_BYTES);
+  setLimb(p, 0, 0xffffffff);
+  setLimb(p, 1, 0xffffffff);
+  setLimb(p, 2, 0);
+  setLimb(p, 3, 0xffffffff);
+  setLimb(p, 4, 0xffffffff);
+  setLimb(p, 5, 0xffffffff);
+  setLimb(p, 6, 0xffffffff);
+  setLimb(p, 7, 0xfffffffe);
+  return p;
+}
+
+/** Solinas 展开的带符号累加器（16 个 i64；非重入：reduceSm2PInto 是叶子）。 */
+const SOL_T: usize = heap.alloc(16 * 8);
+
+function solAdd(i: i32, v: i64): void {
+  store<i64>(SOL_T + ((<usize>i) << 3), load<i64>(SOL_T + ((<usize>i) << 3)) + v);
+}
+
+/** 把 SOL_T 的低 8 槽归一化成 8×u32 写入 out，返回溢出的 carry（可为负）。 */
+function solNormalize(out: U256): i64 {
+  let carry: i64 = 0;
+  for (let i = 0; i < 8; i++) {
+    const v = load<i64>(SOL_T + ((<usize>i) << 3)) + carry;
+    setLimb(out, i, <u32>(v & <i64>0xffffffff));
+    carry = v >> 32;
+  }
+  return carry;
+}
+
+/** x(512 位) mod SM2 的 p → out。 */
+function reduceSm2PInto(x: usize, out: U256): void {
+  for (let i = 0; i < 16; i++) {
+    store<i64>(SOL_T + ((<usize>i) << 3), <i64>load<u32>(x + ((<usize>i) << 2)));
+  }
+  // 折叠：从高到低处理位置 15..8（轮到 i 时它已收到所有更高位的贡献）
+  for (let i = 15; i >= 8; i--) {
+    const v = load<i64>(SOL_T + ((<usize>i) << 3));
+    if (v === 0) continue;
+    store<i64>(SOL_T + ((<usize>i) << 3), 0);
+    solAdd(i - 1, v);
+    solAdd(i - 5, v);
+    solAdd(i - 6, -v);
+    solAdd(i - 8, v);
+  }
+  let carry = solNormalize(out);
+  // carry·2^256 折回：+ carry·(2^224 + 2^96 − 2^64 + 1)。|carry| 很小，几轮内收敛。
+  let guard = 0;
+  while (carry !== 0 && guard < 8) {
+    for (let i = 0; i < 8; i++) {
+      store<i64>(SOL_T + ((<usize>i) << 3), <i64>load<u32>(out + ((<usize>i) << 2)));
+    }
+    solAdd(7, carry);
+    solAdd(3, carry);
+    solAdd(2, -carry);
+    solAdd(0, carry);
+    carry = solNormalize(out);
+    guard++;
+  }
+  while (u256cmp(out, SM2_P_ARR) >= 0) u256subRaw(out, SM2_P_ARR);
+}
+
+/** 归约分派：SM2 的 p 走 Solinas，已知模数走 Barrett，其余回退多 limb 长除法。 */
+function reduceInto(x: usize, m: U256, out: U256): void {
+  if (isSm2Prime(m)) {
+    reduceSm2PInto(x, out);
+    return;
+  }
+  const mu = barrettMu(m);
+  if (mu !== null) barrettReduceInto(x, m, mu, out);
+  else reduce512Into(x, m, out);
+}
+
 export function modMul(a: U256, b: U256, m: U256): U256 {
   mul512Into(a, b, MUL_X);
-  const mu = barrettMu(m);
-  const out = new StaticArray<u32>(8);
-  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
-  else reduce512Into(MUL_X, m, out);
+  const out = arenaAlloc(U256_BYTES);
+  reduceInto(MUL_X, m, out);
   return out;
 }
 
@@ -436,17 +636,13 @@ export function modMul(a: U256, b: U256, m: U256): U256 {
  */
 export function modMulInto(out: U256, a: U256, b: U256, m: U256): void {
   mul512Into(a, b, MUL_X);
-  const mu = barrettMu(m);
-  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
-  else reduce512Into(MUL_X, m, out);
+  reduceInto(MUL_X, m, out);
 }
 
 /** out = a² mod m（原地变体，允许 out 与 a 别名）。 */
 export function modSqrInto(out: U256, a: U256, m: U256): void {
   sqr512Into(a, MUL_X);
-  const mu = barrettMu(m);
-  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
-  else reduce512Into(MUL_X, m, out);
+  reduceInto(MUL_X, m, out);
 }
 
 /**
@@ -456,51 +652,53 @@ export function modSqrInto(out: U256, a: U256, m: U256): void {
  */
 export function modSqr(a: U256, m: U256): U256 {
   sqr512Into(a, MUL_X);
-  const mu = barrettMu(m);
-  const out = new StaticArray<u32>(8);
-  if (mu !== null) barrettReduceInto(MUL_X, m, mu, out);
-  else reduce512Into(MUL_X, m, out);
+  const out = arenaAlloc(U256_BYTES);
+  reduceInto(MUL_X, m, out);
   return out;
 }
 
-/** a(8) × a(8) → 512-bit(16) 平方，schoolbook 对角折半。out 为裸指针。 */
-function sqr512Into(a: U256, out: usize): void {
-  for (let i = 0; i < 16; i++) store<u32>(out + (<usize>i << 2), 0);
-  // 交叉项：每对 (i, j>i) 算一次 p = a_i·a_j，加倍加进位置 i+j。
-  for (let i = 0; i < 8; i++) {
-    const ai = u64(a[i]);
-    for (let j = i + 1; j < 8; j++) {
-      const p = ai * u64(a[j]); // < 2^64
-      // p 加两次到 out[i+j..i+j+2]
-      for (let rep = 0; rep < 2; rep++) {
-        let k = i + j;
-        let add: u64 = p;
-        while (add !== 0 && k < 16) {
-          const cur = u64(load<u32>(out + (<usize>k << 2))) + (add & 0xffffffff);
-          store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
-          add = (add >>> 32) + (cur >>> 32);
-          k++;
-        }
-      }
-    }
-  }
-  // 对角项：a_i² 加到位置 2i。
-  for (let i = 0; i < 8; i++) {
-    const p = ai2(a, i);
-    let k = 2 * i;
-    let add: u64 = p;
-    while (add !== 0 && k < 16) {
-      const cur = u64(load<u32>(out + (<usize>k << 2))) + (add & 0xffffffff);
-      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
-      add = (add >>> 32) + (cur >>> 32);
-      k++;
-    }
-  }
-}
+/**
+ * a(8) × a(8) → 512-bit(16) 平方，**Comba（列扫描）+ 统一进位**。
+ *
+ * 旧实现每对 (i, j>i) 都要跑两遍完整的进位传播 while 循环（28 对 × 2 = 56 次
+ * 内存循环），是 SM2 里最贵的单个函数（CPU 采样 ~37%，比同规模的乘法还高一倍）。
+ * 现在改成：所有部分积先拆 lo/hi 累加进 16 个 u64 槽，最后只做一遍进位。
+ *
+ * 槽容量：位置 k 最多收到 8 个交叉 lo（各 ×2）+ 8 个交叉 hi（各 ×2）+ 1 个对角项，
+ * 每项 < 2^32，故槽值 < 2^37，u64 富余。
+ */
+const SQ_T: usize = heap.alloc(16 * 8);
 
-function ai2(a: U256, i: i32): u64 {
-  const v = u64(a[i]);
-  return v * v;
+function sqr512Into(a: U256, out: usize): void {
+  for (let k = 0; k < 16; k++) store<u64>(SQ_T + ((<usize>k) << 3), 0);
+  // 交叉项 2·a_i·a_j（i < j）
+  for (let i = 0; i < 8; i++) {
+    const ai = u64(limb(a, i));
+    for (let j = i + 1; j < 8; j++) {
+      const p = ai * u64(limb(a, j));
+      const lo = p & <u64>0xffffffff;
+      const hi = p >>> 32;
+      const klo = SQ_T + ((<usize>(i + j)) << 3);
+      const khi = klo + 8;
+      store<u64>(klo, load<u64>(klo) + lo + lo);
+      store<u64>(khi, load<u64>(khi) + hi + hi);
+    }
+  }
+  // 对角项 a_i²
+  for (let i = 0; i < 8; i++) {
+    const p = u64(limb(a, i)) * u64(limb(a, i));
+    const klo = SQ_T + ((<usize>(i + i)) << 3);
+    const khi = klo + 8;
+    store<u64>(klo, load<u64>(klo) + (p & <u64>0xffffffff));
+    store<u64>(khi, load<u64>(khi) + (p >>> 32));
+  }
+  // 统一进位
+  let carry: u64 = 0;
+  for (let k = 0; k < 16; k++) {
+    const s = load<u64>(SQ_T + ((<usize>k) << 3)) + carry;
+    store<u32>(out + ((<usize>k) << 2), <u32>(s & <u64>0xffffffff));
+    carry = s >>> 32;
+  }
 }
 
 /**
@@ -544,6 +742,13 @@ export function modInv(a: U256, m: U256): U256 {
   return x2; // v == 1：a·x2 ≡ v ≡ 1
 }
 
+/** modInv 内部临时量（模块级 scratch，避免每轮 3 次分配）。 */
+const HLV_T: usize = heap.alloc(32); // floor(x/2)
+const HLV_S: usize = heap.alloc(32); // floor(m/2)
+const HLV_ONE: usize = heap.alloc(32); // 常量 1
+memory.fill(HLV_ONE, 0, 32);
+store<u32>(HLV_ONE, 1);
+
 /**
  * x = x/2 mod m（要求 x < m）。
  *
@@ -552,17 +757,17 @@ export function modInv(a: U256, m: U256): U256 {
  */
 function halveMod(x: U256, m: U256): void {
   if (u256isOdd(x)) {
-    const t = u256clone(x);
-    u256shr1(t); // floor(x/2)
-    const s = u256clone(m);
-    u256shr1(s); // floor(m/2)
-    u256copy(t, x);
-    const carry = u256addRaw(x, s); // < m，无溢出
+    memory.copy(HLV_T, x, 32);
+    u256shr1(HLV_T); // floor(x/2)
+    memory.copy(HLV_S, m, 32);
+    u256shr1(HLV_S); // floor(m/2)
+    memory.copy(x, HLV_T, 32);
+    const carry = u256addRaw(x, HLV_S); // < m，无溢出
     if (carry !== 0) {
       // 不应发生（x>>1 + m>>1 < m），安全兜底
       u256subRaw(x, m);
     }
-    u256addRaw(x, u256fromU32(1));
+    u256addRaw(x, HLV_ONE);
     // x + 1 仍 < m（(x+m)/2 ≤ m-1），无溢出
   } else {
     u256shr1(x);
@@ -582,20 +787,20 @@ function subMod(x1: U256, x2: U256, m: U256): void {
 
 /** a 是否为偶数。 */
 function u256isEven(a: U256): bool {
-  return (a[0] & 1) === 0;
+  return (limb(a, 0) & 1) === 0;
 }
 
 /** a 是否为奇数。 */
 export function u256isOdd(a: U256): bool {
-  return (a[0] & 1) === 1;
+  return (limb(a, 0) & 1) === 1;
 }
 
 /** 原地右移一位（a >>= 1）。 */
 export function u256shr1(a: U256): void {
   let carry: u32 = 0;
   for (let i = 7; i >= 0; i--) {
-    const v = a[i];
-    a[i] = ((v >>> 1) | (carry << 31)) & 0xffffffff;
+    const v = limb(a, i);
+    setLimb(a, i, ((v >>> 1) | (carry << 31)) & 0xffffffff);
     carry = v & 1;
   }
 }
@@ -613,36 +818,34 @@ export function modHalve(a: U256, m: U256): U256 {
   if (odd) {
     const half = u256clone(m);
     u256shr1(half);
-    u256addRaw(half, u256fromU32(1)); // (m>>1) + 1 = (m+1)/2，不会溢出
+    u256addRaw(half, HLV_ONE); // (m>>1) + 1 = (m+1)/2，不会溢出
     u256addRaw(r, half); // r + (m+1)/2 ≤ (a-1)/2 + (m+1)/2 < m，不会溢出
   }
   return r;
 }
 
-const HALF_TMP = new StaticArray<u32>(8); // modHalveInto 的 (m>>1) 暂存
-const HALF_ONE = new StaticArray<u32>(8);
-HALF_ONE[0] = 1;
+const HALF_TMP: usize = heap.alloc(32); // modHalveInto 的 (m>>1) 暂存
 
 /** out = a / 2 mod m（原地变体，允许 out 与 a 别名）。 */
 export function modHalveInto(out: U256, a: U256, m: U256): void {
   const odd = u256isOdd(a);
   let carry: u32 = 0;
   for (let i = 7; i >= 0; i--) {
-    const v = a[i];
-    out[i] = ((v >>> 1) | (carry << 31)) & 0xffffffff;
+    const v = limb(a, i);
+    setLimb(out, i, ((v >>> 1) | (carry << 31)) & 0xffffffff);
     carry = v & 1;
   }
   if (odd) {
     let hc: u32 = 0;
     for (let i = 7; i >= 0; i--) {
-      const v = m[i];
-      HALF_TMP[i] = ((v >>> 1) | (hc << 31)) & 0xffffffff;
+      const v = limb(m, i);
+      store<u32>(HALF_TMP + ((<usize>i) << 2), ((v >>> 1) | (hc << 31)) & 0xffffffff);
       hc = v & 1;
     }
     let c: u64 = 1; // (m>>1) + 1
     for (let i = 0; i < 8; i++) {
-      const s: u64 = u64(out[i]) + u64(HALF_TMP[i]) + c;
-      out[i] = <u32>(s & 0xffffffff);
+      const s: u64 = u64(limb(out, i)) + u64(load<u32>(HALF_TMP + ((<usize>i) << 2))) + c;
+      setLimb(out, i, <u32>(s & 0xffffffff));
       c = s >>> 32;
     }
   }
@@ -653,8 +856,9 @@ export function modHalveInto(out: U256, a: U256, m: U256): void {
  * k 为 8×u32 小端。
  */
 export function modPow(a: U256, k: U256, m: U256): U256 {
-  let result = new StaticArray<u32>(8);
-  result[0] = 1;
+  let result = arenaAlloc(U256_BYTES);
+  memory.fill(result, 0, U256_BYTES);
+  setLimb(result, 0, 1);
   let base = u256clone(a);
   for (let i = 0; i < 256; i++) {
     if (u256bit(k, i) === 1) {
@@ -690,35 +894,35 @@ const SM9_N_MU: StaticArray<u32> = [
 
 /** 按模数取 Barrett 常数 μ；未知模数返回 null（回退长除法）。 */
 function barrettMu(m: U256): StaticArray<u32> | null {
-  const hi = m[7];
+  const hi = limb(m, 7);
   if (hi === 0xfffffffe) {
-    if (m[3] === 0xffffffff) return SM2_P_MU;
-    if (m[3] === 0x7203df6b) return SM2_N_MU;
+    if (limb(m, 3) === 0xffffffff) return SM2_P_MU;
+    if (limb(m, 3) === 0x7203df6b) return SM2_N_MU;
   } else if (hi === 0xb6400000) {
-    if (m[3] === 0x21f2934b) return SM9_P_MU;
-    if (m[3] === 0x49f2934b) return SM9_N_MU;
+    if (limb(m, 3) === 0x21f2934b) return SM9_P_MU;
+    if (limb(m, 3) === 0x49f2934b) return SM9_N_MU;
   }
   return null;
 }
 
 /** out(na+nb) = a(na) · b(nb)（schoolbook）。全部为裸指针。 */
 function mulLimbArrays(a: usize, na: i32, b: usize, nb: i32, out: usize): void {
-  for (let i = 0; i < na + nb; i++) store<u32>(out + (<usize>i << 2), 0);
+  for (let i = 0; i < na + nb; i++) store<u32>(out + ((<usize>i) << 2), 0);
   for (let i = 0; i < na; i++) {
     let carry: u64 = 0;
-    const ai = u64(load<u32>(a + (<usize>i << 2)));
+    const ai = u64(load<u32>(a + ((<usize>i) << 2)));
     for (let j = 0; j < nb; j++) {
       const cur =
-        u64(load<u32>(out + (<usize>(i + j) << 2))) +
-        ai * u64(load<u32>(b + (<usize>j << 2))) +
+        u64(load<u32>(out + ((<usize>(i + j)) << 2))) +
+        ai * u64(load<u32>(b + ((<usize>j) << 2))) +
         carry;
-      store<u32>(out + (<usize>(i + j) << 2), <u32>(cur & 0xffffffff));
+      store<u32>(out + ((<usize>(i + j)) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
     }
     let k = i + nb;
     while (carry !== 0) {
-      const cur = u64(load<u32>(out + (<usize>k << 2))) + carry;
-      store<u32>(out + (<usize>k << 2), <u32>(cur & 0xffffffff));
+      const cur = u64(load<u32>(out + ((<usize>k) << 2))) + carry;
+      store<u32>(out + ((<usize>k) << 2), <u32>(cur & 0xffffffff));
       carry = cur >>> 32;
       k++;
     }
@@ -726,50 +930,49 @@ function mulLimbArrays(a: usize, na: i32, b: usize, nb: i32, out: usize): void {
 }
 
 /** Barrett 归约（scratch 版）：x(16 limb 裸指针) mod m(8 limb) → out(8 limb)，结果 < m。 */
-function barrettReduceInto(x: usize, m: U256, mu: StaticArray<u32>, out: StaticArray<u32>): void {
+function barrettReduceInto(x: usize, m: U256, mu: StaticArray<u32>, out: U256): void {
   const q1 = BR_Q1;
-  for (let i = 0; i < 9; i++) store<u32>(q1 + (<usize>i << 2), load<u32>(x + (<usize>(7 + i) << 2))); // x >> 224
+  for (let i = 0; i < 9; i++)
+    store<u32>(q1 + ((<usize>i) << 2), load<u32>(x + ((<usize>(7 + i)) << 2))); // x >> 224
   const q2 = BR_Q2;
   mulLimbArrays(q1, 9, changetype<usize>(mu), 9, q2);
   const q3 = BR_Q3;
-  for (let i = 0; i < 9; i++) store<u32>(q3 + (<usize>i << 2), load<u32>(q2 + (<usize>(9 + i) << 2))); // q2 >> 288
+  for (let i = 0; i < 9; i++)
+    store<u32>(q3 + ((<usize>i) << 2), load<u32>(q2 + ((<usize>(9 + i)) << 2))); // q2 >> 288
   const r2 = BR_R2;
-  mulLimbArrays(q3, 9, changetype<usize>(m), 8, r2);
+  mulLimbArrays(q3, 9, m, 8, r2);
 
   const r = BR_R;
   let borrow: i64 = 0;
   for (let i = 0; i < 9; i++) {
     const d: i64 =
-      i64(load<u32>(x + (<usize>i << 2))) - i64(load<u32>(r2 + (<usize>i << 2))) - borrow;
+      i64(load<u32>(x + ((<usize>i) << 2))) - i64(load<u32>(r2 + ((<usize>i) << 2))) - borrow;
     if (d < 0) {
-      store<u32>(r + (<usize>i << 2), <u32>(d + 0x100000000));
+      store<u32>(r + ((<usize>i) << 2), <u32>(d + 0x100000000));
       borrow = 1;
     } else {
-      store<u32>(r + (<usize>i << 2), <u32>d);
+      store<u32>(r + ((<usize>i) << 2), <u32>d);
       borrow = 0;
     }
   }
   store<u32>(r + 36, <u32>borrow); // r 为负时 +2^288
 
   let guard = 0;
-  while (
-    guard < 4 &&
-    (load<u32>(r + 36) !== 0 || load<u32>(r + 32) !== 0 || cmp9(r, m) >= 0)
-  ) {
+  while (guard < 4 && (load<u32>(r + 36) !== 0 || load<u32>(r + 32) !== 0 || cmp9(r, m) >= 0)) {
     let b: i64 = 0;
     for (let i = 0; i < 10; i++) {
-      const mi: i64 = i < 8 ? i64(m[i]) : 0;
-      const d: i64 = i64(load<u32>(r + (<usize>i << 2))) - mi - b;
+      const mi: i64 = i < 8 ? i64(limb(m, i)) : 0;
+      const d: i64 = i64(load<u32>(r + ((<usize>i) << 2))) - mi - b;
       if (d < 0) {
-        store<u32>(r + (<usize>i << 2), <u32>(d + 0x100000000));
+        store<u32>(r + ((<usize>i) << 2), <u32>(d + 0x100000000));
         b = 1;
       } else {
-        store<u32>(r + (<usize>i << 2), <u32>d);
+        store<u32>(r + ((<usize>i) << 2), <u32>d);
         b = 0;
       }
     }
     guard++;
   }
 
-  for (let i = 0; i < 8; i++) out[i] = load<u32>(r + (<usize>i << 2));
+  for (let i = 0; i < 8; i++) setLimb(out, i, load<u32>(r + ((<usize>i) << 2)));
 }

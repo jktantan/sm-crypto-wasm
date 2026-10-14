@@ -15,6 +15,7 @@ import {
   modSqr,
   modSub,
   mul512,
+  permU256,
   reduce512,
   U256,
   U512,
@@ -25,11 +26,13 @@ import {
   u256copy,
   u256fromBytes,
   u256fromLimbs,
+  u256fromMemBE,
   u256fromU32,
   u256isZero,
   u256subRaw,
   u256toBytes,
   u256zero,
+  arenaRewind,
 } from '../../common/assembly/field256';
 
 // 重新导出通用工具，供 SM2 其它文件沿用。
@@ -41,10 +44,13 @@ export {
   u256cmp,
   u256copy,
   u256fromBytes,
+  u256fromMemBE,
   u256fromU32,
   u256isZero,
   u256toBytes,
   u256zero,
+  permU256,
+  arenaRewind,
 };
 
 // SM2 素域 p（小端 limb）。

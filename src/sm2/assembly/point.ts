@@ -19,10 +19,16 @@ import {
   fpSub,
   nArr,
   pArr,
+  permU256,
   U256,
+  u256bit,
+  u256clone,
   u256cmp,
+  u256copy,
   u256fromBytes,
+  u256fromU32,
   u256isZero,
+  u256subRaw,
   u256zero,
 } from './field';
 
@@ -32,9 +38,9 @@ export class JPoint {
   y: U256;
   z: U256;
   constructor() {
-    this.x = new StaticArray<u32>(8);
-    this.y = new StaticArray<u32>(8);
-    this.z = new StaticArray<u32>(8);
+    this.x = u256zero();
+    this.y = u256zero();
+    this.z = u256zero(); // Z = 0 即无穷远点
   }
 }
 
@@ -55,9 +61,7 @@ export function basePoint(): JPoint {
   hexToBytesInto('BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0', gy);
   p.x = u256fromBytes(gx, 0);
   p.y = u256fromBytes(gy, 0);
-  const z = u256zero();
-  z[0] = 1;
-  p.z = z;
+  p.z = u256fromU32(1);
   return p;
 }
 
@@ -176,19 +180,26 @@ export function infinity(): JPoint {
 
 export function clonePoint(p: JPoint): JPoint {
   const r = new JPoint();
-  for (let i = 0; i < 8; i++) {
-    r.x[i] = p.x[i];
-    r.y[i] = p.y[i];
-    r.z[i] = p.z[i];
-  }
+  u256copy(p.x, r.x);
+  u256copy(p.y, r.y);
+  u256copy(p.z, r.z);
   return r;
 }
 
-/** 小整数乘（1..8）：k * a mod p，k 为 u32 小值。 */
+/**
+ * 小整数乘：k·a mod p，k ∈ {2,3,4,8}。
+ *
+ * 全部用加倍/加法实现 —— 原先走 `fpMul(a, u256fromU32(k))`，即**整次模乘**
+ * （64 次 32×32 乘法 + 归约）。倍点里有 4 处、点加里有 2 处这种调用，一次标量乘
+ * 累计上千次，改成模加（各一次条件减）后这部分成本基本消失。
+ */
 function mulSmall(a: U256, k: u32): U256 {
-  const kv = u256zero();
-  kv[0] = k;
-  return fpMul(a, kv);
+  const d = fpAdd(a, a); // 2a
+  if (k === 2) return d;
+  if (k === 3) return fpAdd(d, a); // 2a + a
+  const q = fpAdd(d, d); // 4a
+  if (k === 4) return q;
+  return fpAdd(q, q); // 8a
 }
 
 // ---------- 标量模运算（mod n） ----------
@@ -204,18 +215,8 @@ function _reduceModN(a: U256): U256 {
 
 /** 原始 256-bit 减法（不 mod p），借位忽略（假定 a >= b）。 */
 function fpSubRaw(a: U256, b: U256): U256 {
-  const r = new StaticArray<u32>(8);
-  let borrow: i64 = 0;
-  for (let i = 0; i < 8; i++) {
-    const d: i64 = i64(a[i]) - i64(b[i]) - borrow;
-    if (d < 0) {
-      r[i] = <u32>(d + 0x100000000);
-      borrow = 1;
-    } else {
-      r[i] = <u32>d;
-      borrow = 0;
-    }
-  }
+  const r = u256clone(a);
+  u256subRaw(r, b);
   return r;
 }
 
@@ -230,7 +231,7 @@ export function scalarMul(k: U256, p: JPoint): JPoint {
     if (started) {
       r = doublePoint(r);
     }
-    const bit = (k[i >> 5] >>> (i & 31)) & 1;
+    const bit = u256bit(k, i);
     if (bit === 1) {
       if (!started) {
         r = clonePoint(p);
@@ -244,10 +245,96 @@ export function scalarMul(k: U256, p: JPoint): JPoint {
 }
 
 /**
- * 标量乘 G：R = k · G。与 scalarMul 相同，但固定基点可优化（此处未做窗口）。
+ * 标量乘 G：R = k · G。
+ *
+ * 基点固定，故用 comb 预计算表（与 SM9 侧同一套构造）：
+ *   k·G = Σ_{j=0}^{d-1} 2^j · G[c_j]，  c_j = Σ_{t=0}^{w-1} b_{j + t·d} · 2^t
+ *   G[c] = Σ_{t: c_t = 1} (2^d)^t · G
+ * 表只有 2^w = 32 项，运行时 d-1 = 51 次倍点 + 52 次点加，取代逐位双倍-点加的
+ * 255 次倍点 + ~128 次点加。表惰性构造一次后缓存在永久区。
  */
+const COMB_W = 5;
+const COMB_D = 52; // ceil(256 / COMB_W)
+const COMB_SIZE = 1 << COMB_W; // 32 项
+
+/** v 的最低置位的位索引（要求 v > 0）。 */
+function lowBitIndex(v: i32): i32 {
+  let i = 0;
+  while (((v >>> i) & 1) === 0) i++;
+  return i;
+}
+
+/** 第 j 个 comb 位置的 w 位索引 c_j。 */
+function combIndex(k: U256, j: i32): i32 {
+  let c: i32 = 0;
+  for (let t = COMB_W - 1; t >= 0; t--) {
+    const i = j + t * COMB_D;
+    const bit = i < 256 ? <i32>u256bit(k, i) : 0;
+    c = (c << 1) | bit;
+  }
+  return c;
+}
+
+/** 构造基点 G 的 comb 表。 */
+function buildComb(): StaticArray<JPoint> {
+  const S = new StaticArray<JPoint>(COMB_W);
+  S[0] = basePoint();
+  for (let t = 1; t < COMB_W; t++) {
+    let s = S[t - 1];
+    for (let j = 0; j < COMB_D; j++) s = doublePoint(s);
+    S[t] = s;
+  }
+  const G = new StaticArray<JPoint>(COMB_SIZE);
+  G[0] = new JPoint(); // 无穷远
+  for (let c = 1; c < COMB_SIZE; c++) {
+    const low = c & -c;
+    G[c] = addPoints(G[c ^ low], S[lowBitIndex(low)]);
+  }
+  return G;
+}
+
+let g1CombCache: StaticArray<JPoint> = new StaticArray<JPoint>(0);
+
+/** 惰性取 comb 表（首次构造后缓存；坐标深拷贝到永久区，免被 arena 回卷覆盖）。 */
+function combTable(): StaticArray<JPoint> {
+  if (g1CombCache.length === 0) {
+    const t = buildComb();
+    for (let i = 0; i < t.length; i++) {
+      const p = t[i];
+      p.x = permU256(p.x);
+      p.y = permU256(p.y);
+      p.z = permU256(p.z);
+    }
+    g1CombCache = t;
+  }
+  return g1CombCache;
+}
+
+/** 标量乘 G：R = k · G（固定基点 comb）。 */
 export function scalarMulG(k: U256): JPoint {
-  return scalarMul(k, basePoint());
+  const G = combTable();
+  const Q = clonePoint(G[combIndex(k, COMB_D - 1)]);
+  for (let j = COMB_D - 2; j >= 0; j--) {
+    doubleInto(Q, Q);
+    addInto(Q, Q, G[combIndex(k, j)]);
+  }
+  return Q;
+}
+
+/** out = 2·p（原地，避免逐次分配 JPoint + 三个 U256）。 */
+function doubleInto(out: JPoint, p: JPoint): void {
+  const r = doublePoint(p);
+  u256copy(r.x, out.x);
+  u256copy(r.y, out.y);
+  u256copy(r.z, out.z);
+}
+
+/** out = p + q（原地）。 */
+function addInto(out: JPoint, p: JPoint, q: JPoint): void {
+  const r = addPoints(p, q);
+  u256copy(r.x, out.x);
+  u256copy(r.y, out.y);
+  u256copy(r.z, out.z);
 }
 
 /** Jacobian → 仿射：返回 (x, y)。Z == 0 时返回全 0。 */
@@ -261,8 +348,6 @@ export function toAffine(p: JPoint): JPoint {
   const zinv3 = fpMul(zinv2, zinv);
   out.x = fpMul(p.x, zinv2);
   out.y = fpMul(p.y, zinv3);
-  const z = u256zero();
-  z[0] = 1;
-  out.z = z;
+  out.z = u256fromU32(1);
   return out;
 }

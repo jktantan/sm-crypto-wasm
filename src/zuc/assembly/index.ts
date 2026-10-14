@@ -132,7 +132,7 @@ function lfsrFeedback(): u32 {
 
 function shiftLfsr(s16: u32): void {
   for (let i = 0; i < 15; i++) {
-    store<u32>(S_PTR + (<usize>i << 2), load<u32>(S_PTR + (<usize>(i + 1) << 2)));
+    store<u32>(S_PTR + ((<usize>i) << 2), load<u32>(S_PTR + ((<usize>(i + 1)) << 2)));
   }
   store<u32>(S_PTR + 15 * 4, s16 & 0x7fffffff);
 }
@@ -161,8 +161,7 @@ function fFunction(): u32 {
     (((load<u32>(S_PTR + 11 * 4) & 0xffff) << 16) | (load<u32>(S_PTR + 9 * 4) >>> 15)) & 0xffffffff;
   const x2 =
     (((load<u32>(S_PTR + 7 * 4) & 0xffff) << 16) | (load<u32>(S_PTR + 5 * 4) >>> 15)) & 0xffffffff;
-  const x3 =
-    (((load<u32>(S_PTR + 2 * 4) & 0xffff) << 16) | (load<u32>(S_PTR) >>> 15)) & 0xffffffff;
+  const x3 = (((load<u32>(S_PTR + 2 * 4) & 0xffff) << 16) | (load<u32>(S_PTR) >>> 15)) & 0xffffffff;
   store<u32>(X_PTR + 12, x3);
 
   const r1 = load<u32>(R_PTR);
@@ -188,8 +187,8 @@ function initState(keyPtr: usize, ivPtr: usize): void {
     const k = <u32>load<u8>(keyPtr + i);
     const v = <u32>load<u8>(ivPtr + i);
     store<u32>(
-      S_PTR + (<usize>i << 2),
-      ((k << 23) | (load<u32>(D + (<usize>i << 2)) << 8) | v) & 0x7fffffff,
+      S_PTR + ((<usize>i) << 2),
+      ((k << 23) | (load<u32>(D + ((<usize>i) << 2)) << 8) | v) & 0x7fffffff,
     );
   }
   store<u32>(R_PTR, 0);

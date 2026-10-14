@@ -11,6 +11,8 @@
 import {
   bytesMod,
   modSub,
+  permAlloc,
+  permU256,
   u256addRaw,
   u256clone,
   u256eq,
@@ -167,18 +169,12 @@ export function encMasterPublic(ke: U256): G1 {
 
 /** signG 缓存槽：key 为 Ppubs 仿射（128 字节），value 为 e(Ppubs, P1)。 */
 class SignGCacheSlot {
-  keyX1: U256;
-  keyX0: U256;
-  keyY1: U256;
-  keyY0: U256;
-  value: Fp12 | null;
-  constructor() {
-    this.keyX1 = u256zero();
-    this.keyX0 = u256zero();
-    this.keyY1 = u256zero();
-    this.keyY0 = u256zero();
-    this.value = null;
-  }
+  keyX1: U256 = 0;
+  keyX0: U256 = 0;
+  keyY1: U256 = 0;
+  keyY0: U256 = 0;
+  /** 0 表示空槽（Fp12 现在是指针类型，不能用 null）；非 0 时指向永久区的值。 */
+  value: Fp12 = 0;
 }
 
 const SIGN_G_CACHE = new StaticArray<SignGCacheSlot>(4);
@@ -186,11 +182,18 @@ for (let i = 0; i < 4; i++) SIGN_G_CACHE[i] = new SignGCacheSlot();
 
 function g2FingerprintU(P: G2): u32 {
   let h: u32 = 0x9e3779b9;
-  h = (h ^ P.X[0][0]) * <u32>0x01000193;
-  h = (h ^ P.X[1][7]) * <u32>0x01000193;
-  h = (h ^ P.Y[0][3]) * <u32>0x01000193;
-  h = (h ^ P.Y[1][0]) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.X)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.X + 60)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.Y + 12)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.Y + 32)) * <u32>0x01000193;
   return h;
+}
+
+/** 把一个 Fp12（384 字节）深拷贝到永久区（缓存必须跨导出调用存活）。 */
+function permFp12(src: Fp12): Fp12 {
+  const p = permAlloc(384);
+  memory.copy(p, src, 384);
+  return p;
 }
 
 /** g = e(Ppubs, P1)（带 4 槽缓存；Ppubs 需为仿射）。 */
@@ -199,33 +202,29 @@ export function signG(ppubs: G2): Fp12 {
   const slotIdx = g2FingerprintU(a) & 3;
   const slot = SIGN_G_CACHE[slotIdx];
   if (
-    slot.value !== null &&
-    u256eq(slot.keyX1, a.X[1]) &&
-    u256eq(slot.keyX0, a.X[0]) &&
-    u256eq(slot.keyY1, a.Y[1]) &&
-    u256eq(slot.keyY0, a.Y[0])
+    slot.value !== 0 &&
+    u256eq(slot.keyX1, a.X + 32) &&
+    u256eq(slot.keyX0, a.X) &&
+    u256eq(slot.keyY1, a.Y + 32) &&
+    u256eq(slot.keyY0, a.Y)
   ) {
-    return slot.value as Fp12;
+    return slot.value;
   }
   const g = sm9Pairing(a, g1Generator());
-  slot.keyX1 = u256clone(a.X[1]);
-  slot.keyX0 = u256clone(a.X[0]);
-  slot.keyY1 = u256clone(a.Y[1]);
-  slot.keyY0 = u256clone(a.Y[0]);
-  slot.value = g;
+  slot.keyX1 = permU256(a.X + 32);
+  slot.keyX0 = permU256(a.X);
+  slot.keyY1 = permU256(a.Y + 32);
+  slot.keyY0 = permU256(a.Y);
+  slot.value = permFp12(g);
   return g;
 }
 
 /** encG 缓存槽：key 为 Ppube 仿射（64 字节）。 */
 class EncGCacheSlot {
-  keyX: U256;
-  keyY: U256;
-  value: Fp12 | null;
-  constructor() {
-    this.keyX = u256zero();
-    this.keyY = u256zero();
-    this.value = null;
-  }
+  keyX: U256 = 0;
+  keyY: U256 = 0;
+  /** 0 表示空槽。 */
+  value: Fp12 = 0;
 }
 
 const ENC_G_CACHE = new StaticArray<EncGCacheSlot>(4);
@@ -233,10 +232,10 @@ for (let i = 0; i < 4; i++) ENC_G_CACHE[i] = new EncGCacheSlot();
 
 function g1FingerprintU(P: G1): u32 {
   let h: u32 = 0x9e3779b9;
-  h = (h ^ P.X[0]) * <u32>0x01000193;
-  h = (h ^ P.X[7]) * <u32>0x01000193;
-  h = (h ^ P.Y[3]) * <u32>0x01000193;
-  h = (h ^ P.Y[0]) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.X)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.X + 28)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.Y + 12)) * <u32>0x01000193;
+  h = (h ^ load<u32>(P.Y)) * <u32>0x01000193;
   return h;
 }
 
@@ -245,13 +244,13 @@ export function encG(ppube: G1): Fp12 {
   const a = g1ToAffine(ppube);
   const slotIdx = g1FingerprintU(a) & 3;
   const slot = ENC_G_CACHE[slotIdx];
-  if (slot.value !== null && u256eq(slot.keyX, a.X) && u256eq(slot.keyY, a.Y)) {
-    return slot.value as Fp12;
+  if (slot.value !== 0 && u256eq(slot.keyX, a.X) && u256eq(slot.keyY, a.Y)) {
+    return slot.value;
   }
   const g = sm9Pairing(g2Generator(), a);
-  slot.keyX = u256clone(a.X);
-  slot.keyY = u256clone(a.Y);
-  slot.value = g;
+  slot.keyX = permU256(a.X);
+  slot.keyY = permU256(a.Y);
+  slot.value = permFp12(g);
   return g;
 }
 
@@ -270,35 +269,39 @@ function cat3(a: StaticArray<u8>, b: StaticArray<u8>, c: StaticArray<u8>): Stati
 
 /** 从 32 字节大端（起点 off）读 U256。 */
 function u256FromBytesBE(b: StaticArray<u8>, off: i32): U256 {
-  const x = new StaticArray<u32>(8);
+  const x = u256zero();
+  const base = changetype<usize>(b) + <usize>off;
   for (let i = 0; i < 8; i++) {
-    const o = off + i * 4;
-    x[7 - i] =
-      (((<u32>b[o]) << 24) | ((<u32>b[o + 1]) << 16) | ((<u32>b[o + 2]) << 8) | <u32>b[o + 3]) &
-      0xffffffff;
+    const o = base + i * 4;
+    const v =
+      ((<u32>load<u8>(o)) << 24) |
+      ((<u32>load<u8>(o + 1)) << 16) |
+      ((<u32>load<u8>(o + 2)) << 8) |
+      <u32>load<u8>(o + 3);
+    store<u32>(x + ((<usize>(7 - i)) << 2), v & 0xffffffff);
   }
   return x;
 }
 
 /** Fp2 → 线性内存：a1||a0。 */
 function fp2ToBytes(a: Fp2, ptr: usize): void {
-  u256toBytes(a[1], ptr);
-  u256toBytes(a[0], ptr + 32);
+  u256toBytes(a + 32, ptr);
+  u256toBytes(a, ptr + 32);
 }
 
 /** Fp4 → 线性内存：a1||a0。 */
 function fp4ToBytes(a: Fp4, ptr: usize): void {
-  fp2ToBytes(a[1], ptr);
-  fp2ToBytes(a[0], ptr + 64);
+  fp2ToBytes(a + 64, ptr);
+  fp2ToBytes(a, ptr + 64);
 }
 
 /** Fp12 → 384 字节：a2||a1||a0（GmSSL 约定）。 */
 function fp12ToBytes(w: Fp12): StaticArray<u8> {
   const r = new StaticArray<u8>(384);
   const p = changetype<usize>(r);
-  fp4ToBytes(w[2], p);
-  fp4ToBytes(w[1], p + 128);
-  fp4ToBytes(w[0], p + 256);
+  fp4ToBytes(w + 256, p);
+  fp4ToBytes(w + 128, p + 128);
+  fp4ToBytes(w, p + 256);
   return r;
 }
 

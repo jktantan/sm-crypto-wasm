@@ -133,12 +133,12 @@ function keyExpansion(keyPtr: usize, rk: usize): void {
   let k2 = readU32BE(keyPtr + 8) ^ load<u32>(FK + 8);
   let k3 = readU32BE(keyPtr + 12) ^ load<u32>(FK + 12);
   for (let i = 0; i < 32; i++) {
-    const t = (k0 ^ tTransformKey(k1 ^ k2 ^ k3 ^ load<u32>(CK + (<usize>i << 2)))) & 0xffffffff;
+    const t = (k0 ^ tTransformKey(k1 ^ k2 ^ k3 ^ load<u32>(CK + ((<usize>i) << 2)))) & 0xffffffff;
     k0 = k1;
     k1 = k2;
     k2 = k3;
     k3 = t;
-    store<u32>(rk + (<usize>i << 2), t);
+    store<u32>(rk + ((<usize>i) << 2), t);
   }
 }
 
@@ -156,7 +156,7 @@ function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
   let x2 = readU32BE(inPtr + 8);
   let x3 = readU32BE(inPtr + 12);
   for (let i = 0; i < 32; i++) {
-    const t = (x0 ^ tTransform(x1 ^ x2 ^ x3 ^ load<u32>(rk + (<usize>i << 2)))) & 0xffffffff;
+    const t = (x0 ^ tTransform(x1 ^ x2 ^ x3 ^ load<u32>(rk + ((<usize>i) << 2)))) & 0xffffffff;
     x0 = x1;
     x1 = x2;
     x2 = x3;
@@ -173,10 +173,10 @@ function cipherBlock(rk: usize, inPtr: usize, outPtr: usize): void {
 function reverseRk(rk: usize): void {
   for (let i = 0; i < 16; i++) {
     const j = 31 - i;
-    const a = load<u32>(rk + (<usize>i << 2));
-    const b = load<u32>(rk + (<usize>j << 2));
-    store<u32>(rk + (<usize>i << 2), b);
-    store<u32>(rk + (<usize>j << 2), a);
+    const a = load<u32>(rk + ((<usize>i) << 2));
+    const b = load<u32>(rk + ((<usize>j) << 2));
+    store<u32>(rk + ((<usize>i) << 2), b);
+    store<u32>(rk + ((<usize>j) << 2), a);
   }
 }
 
@@ -464,13 +464,7 @@ function inc32Copy(srcPtr: usize, dstPtr: usize): void {
  * GCTR：以 icb 为初始计数器块对数据做流式加/解密（NIST SP 800-38D §6.5）。
  * 输入输出可重叠。
  */
-function gctr(
-  rk: usize,
-  icbPtr: usize,
-  inPtr: usize,
-  inLen: usize,
-  outPtr: usize,
-): void {
+function gctr(rk: usize, icbPtr: usize, inPtr: usize, inLen: usize, outPtr: usize): void {
   if (inLen === 0) return;
   const cb = new StaticArray<u8>(16);
   const cbPtr = changetype<usize>(cb);

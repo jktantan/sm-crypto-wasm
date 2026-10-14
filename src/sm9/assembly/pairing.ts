@@ -49,6 +49,7 @@ import {
   fp12SqrTo,
   fp12zero,
 } from './fp12';
+import { permAlloc } from '../../common/assembly/field256';
 import {
   G1,
   G2,
@@ -222,10 +223,10 @@ export function evalGTangent(T: G2, Q: G1): StaticArray<Fp12> {
 
   const num = fp12zero();
   const den = fp12zero();
-  fp2Put(num[0][0], a0v);
-  fp2Put(num[0][1], a1v);
-  fp2Put(num[2][0], a4v);
-  fp2Put(den[0][1], b1v);
+  fp2Put(num, a0v);
+  fp2Put(num + 64, a1v);
+  fp2Put(num + 256, a4v);
+  fp2Put(den + 64, b1v);
   return staticPair(num, den);
 }
 
@@ -274,10 +275,10 @@ export function evalGLine(T: G2, P: G2, Q: G1): StaticArray<Fp12> {
 
   const num = fp12zero();
   const den = fp12zero();
-  fp2Put(num[0][0], a0v);
-  fp2Put(num[0][1], a1v);
-  fp2Put(num[2][0], a4v);
-  fp2Put(den[0][1], b1v);
+  fp2Put(num, a0v);
+  fp2Put(num + 64, a1v);
+  fp2Put(num + 256, a4v);
+  fp2Put(den + 64, b1v);
   return staticPair(num, den);
 }
 
@@ -359,8 +360,10 @@ const ABITS = '00100000000000000000000000000000000000010000101011101100100111110
 
 // 预展开为位图：热循环里逐字符 charCodeAt 换成下标访问（ABITS.length == 65 == i32 位宽）。
 const ABITS_LEN = ABITS.length;
-const ABITS_BITS = new StaticArray<i32>(ABITS_LEN);
-for (let i = 0; i < ABITS_LEN; i++) ABITS_BITS[i] = ABITS.charCodeAt(i) - 0x30;
+// 位图落在永久区（跨导出调用只构造一次）。
+const ABITS_BITS: usize = permAlloc(<usize>ABITS_LEN * 4);
+for (let i = 0; i < ABITS_LEN; i++)
+  store<i32>(ABITS_BITS + ((<usize>i) << 2), ABITS.charCodeAt(i) - 0x30);
 
 /**
  * Miller loop 累积结果（final exponent 之前）。
@@ -381,7 +384,7 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
 
     g2DoubleInto(T, T);
 
-    if (ABITS_BITS[i] === 1) {
+    if (load<i32>(ABITS_BITS + ((<usize>i) << 2)) === 1) {
       evalGLineInto(T, Q, P);
       fp12MulLineTo(f, f, L_A0, L_A1, L_A4);
       g2AddInto(T, T, Q);
@@ -417,14 +420,14 @@ export function sqrCycSelfTest(seed: u32): i32 {
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < 2; j++) {
       for (let k = 0; k < 2; k++) {
-        const limb = a[i][j][k];
+        const limb = a + <usize>i * 128 + <usize>j * 64 + <usize>k * 32;
         // 只填低 7 个 limb，保证每个分量 < 2^224 < p：
         // fpAdd/fpSub（modAdd/modSub）只做一次条件减，要求输入已约化；
         // fpMul/fpInv 则不需要（Barrett/EE 对任意 256 位输入都成立）。
-        limb[7] = 0;
+        store<u32>(limb + 28, 0);
         for (let l = 0; l < 7; l++) {
           s = s * 1664525 + 1013904223; // LCG 溢出即截断（u32）
-          limb[l] = s;
+          store<u32>(limb + ((<usize>l) << 2), s);
         }
       }
     }

@@ -13,8 +13,11 @@
 //   fp2InvOut(aPtr, outPtr)
 
 import {
-  u256fromBytes as u256fromBytesShared,
-  u256fromHex,
+  arenaAlloc,
+  arenaRewind,
+  u256copy,
+  u256fromMemBE,
+  u256fromU32,
   u256toBytes,
 } from '../../common/assembly/field256';
 import { U256 } from './fp';
@@ -71,107 +74,113 @@ import {
 const pinned: Array<StaticArray<u8>> = [];
 
 export function alloc(n: i32): usize {
+  arenaRewind();
   const a = new StaticArray<u8>(n);
   pinned.push(a);
   return changetype<usize>(a);
 }
 
 export function freeAll(): void {
+  arenaRewind();
   pinned.length = 0;
 }
 
 // GmSSL 约定：Fp2 序列化为 a1||a0（a1 在前）。
 function readFp2(ptr: usize): Fp2 {
-  const b = new Uint8Array(64);
-  for (let i = 0; i < 64; i++) b[i] = load<u8>(ptr + i);
-  const r = new StaticArray<U256>(2);
-  r[0] = u256fromBytesShared(b, 32);
-  r[1] = u256fromBytesShared(b, 0);
+  const r = arenaAlloc(64);
+  u256copy(u256fromMemBE(ptr + 32), r); // a0
+  u256copy(u256fromMemBE(ptr), r + 32); // a1
   return r;
 }
 
 function writeFp2(a: Fp2, ptr: usize): void {
-  u256toBytes(a[1], ptr);
-  u256toBytes(a[0], ptr + 32);
+  u256toBytes(a + 32, ptr);
+  u256toBytes(a, ptr + 32);
 }
 
 function readFp4(ptr: usize): Fp4 {
-  return fp4set_(readFp2(ptr + 64), readFp2(ptr));
-}
-
-function fp4set_(a0: Fp2, a1: Fp2): Fp4 {
-  const r = new StaticArray<Fp2>(2);
-  r[0] = a0;
-  r[1] = a1;
+  const r = arenaAlloc(128);
+  memory.copy(r, readFp2(ptr + 64), 64); // a0
+  memory.copy(r + 64, readFp2(ptr), 64); // a1
   return r;
 }
 
 function writeFp4(a: Fp4, ptr: usize): void {
-  writeFp2(a[1], ptr);
-  writeFp2(a[0], ptr + 64);
+  writeFp2(a + 64, ptr);
+  writeFp2(a, ptr + 64);
 }
 
 function readFp12(ptr: usize): Fp12 {
-  const r = new StaticArray<Fp4>(3);
-  r[0] = readFp4(ptr + 256);
-  r[1] = readFp4(ptr + 128);
-  r[2] = readFp4(ptr);
+  const r = arenaAlloc(384);
+  memory.copy(r, readFp4(ptr + 256), 128); // a0
+  memory.copy(r + 128, readFp4(ptr + 128), 128); // a1
+  memory.copy(r + 256, readFp4(ptr), 128); // a2
   return r;
 }
 
 function writeFp12(a: Fp12, ptr: usize): void {
-  writeFp4(a[2], ptr);
-  writeFp4(a[1], ptr + 128);
-  writeFp4(a[0], ptr + 256);
+  writeFp4(a + 256, ptr);
+  writeFp4(a + 128, ptr + 128);
+  writeFp4(a, ptr + 256);
 }
 
 /** 诊断：Fp2 乘。 */
 export function fp2MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp2(fp2Mul(readFp2(aPtr), readFp2(bPtr)), outPtr);
 }
 
 /** 诊断：Fp2 平方。 */
 export function fp2SqrOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp2(fp2Sqr(readFp2(aPtr)), outPtr);
 }
 
 /** 诊断：Fp2 逆。 */
 export function fp2InvOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp2(fp2Inv(readFp2(aPtr)), outPtr);
 }
 
 /** 诊断：Fp4 乘。 */
 export function fp4MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp4(fp4Mul(readFp4(aPtr), readFp4(bPtr)), outPtr);
 }
 
 /** 诊断：Fp4 平方。 */
 export function fp4SqrOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp4(fp4Sqr(readFp4(aPtr)), outPtr);
 }
 
 /** 诊断：Fp4 逆。 */
 export function fp4InvOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp4(fp4Inv(readFp4(aPtr)), outPtr);
 }
 
 /** 诊断：Fp12 乘。 */
 export function fp12MulOut(aPtr: usize, bPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(fp12Mul(readFp12(aPtr), readFp12(bPtr)), outPtr);
 }
 
 /** 诊断：Fp12 平方。 */
 export function fp12SqrOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(fp12Sqr(readFp12(aPtr)), outPtr);
 }
 
 /** 诊断：Fp12 逆。 */
 export function fp12InvOut(aPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(fp12Inv(readFp12(aPtr)), outPtr);
 }
 
 /** 诊断：G1 标量乘基点 P1，输出仿射 x||y（64 字节）。 */
 export function g1MulGOut(kPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const k = readU256(kPtr);
   const r = g1ToAffine(g1MulG(k));
   // 注意：不能对裸数字字面量调用 u256toBytes 之外的东西；outPtr 需为实际内存地址。
@@ -181,24 +190,21 @@ export function g1MulGOut(kPtr: usize, outPtr: usize): void {
 
 // 临时标量入口：G1/G2 用固定小标量测试（避免 readU256 字节序问题）。
 export function g1MulSmall(k: u32, outPtr: usize): void {
-  const kk = new StaticArray<u32>(8);
-  kk[0] = k;
-  const r = g1ToAffine(g1MulG(kk));
+  arenaRewind();
+  const r = g1ToAffine(g1MulG(u256fromU32(k)));
   u256toBytes(r.X, outPtr);
   u256toBytes(r.Y, outPtr + 32);
 }
 export function g2MulSmall(k: u32, outPtr: usize): void {
-  const kk = new StaticArray<u32>(8);
-  kk[0] = k;
-  const r = g2ToAffine(g2MulG(kk));
+  arenaRewind();
+  const r = g2ToAffine(g2MulG(u256fromU32(k)));
   writeFp2(r.X, outPtr);
   writeFp2(r.Y, outPtr + 64);
 }
 // 输出原始 Jacobian (X||Y||Z) 用于对拍。
 export function g2MulSmallRaw(k: u32, outPtr: usize): void {
-  const kk = new StaticArray<u32>(8);
-  kk[0] = k;
-  const r = g2MulG(kk);
+  arenaRewind();
+  const r = g2MulG(u256fromU32(k));
   writeFp2(r.X, outPtr);
   writeFp2(r.Y, outPtr + 64);
   writeFp2(r.Z, outPtr + 128);
@@ -206,6 +212,7 @@ export function g2MulSmallRaw(k: u32, outPtr: usize): void {
 
 /** 诊断：G2 标量乘基点 P2，输出仿射 X||Y（各 Fp2 = 64 字节，共 128 字节）。 */
 export function g2MulGOut(kPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const k = readU256(kPtr);
   const r = g2ToAffine(g2MulG(k));
   writeFp2(r.X, outPtr);
@@ -214,6 +221,7 @@ export function g2MulGOut(kPtr: usize, outPtr: usize): void {
 
 /** 诊断：SM9 pairing e(Q, P)。Q 为 twist 点（Z=1，X||Y 各 64 字节），P 为 base 点（x||y 各 32 字节）。输出 Fp12 = 12×32 字节。 */
 export function pairingOut(qPtr: usize, pPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const Q = new G2();
   Q.X = readFp2(qPtr);
   Q.Y = readFp2(qPtr + 64);
@@ -221,7 +229,7 @@ export function pairingOut(qPtr: usize, pPtr: usize, outPtr: usize): void {
   const P = new G1();
   P.X = readU256(pPtr);
   P.Y = readU256(pPtr + 32);
-  P.Z = u256fromHex('0000000000000000000000000000000000000000000000000000000000000001');
+  P.Z = u256fromU32(1);
   writeFp12(sm9Pairing(Q, P), outPtr);
 }
 
@@ -237,12 +245,13 @@ function readG1Affine(ptr: usize): G1 {
   const P = new G1();
   P.X = readU256(ptr);
   P.Y = readU256(ptr + 32);
-  P.Z = u256fromHex('0000000000000000000000000000000000000000000000000000000000000001');
+  P.Z = u256fromU32(1);
   return P;
 }
 
 /** 诊断：切线 line function。输入 T（G2 仿射 128B）、Q（G1 64B），输出 num/den 各 384B。 */
 export function tangentOut(tPtr: usize, pPtr: usize, numPtr: usize, denPtr: usize): void {
+  arenaRewind();
   const g = evalGTangent(readG2Affine(tPtr), readG1Affine(pPtr));
   writeFp12(g[0], numPtr);
   writeFp12(g[1], denPtr);
@@ -256,6 +265,7 @@ export function lineOut(
   numPtr: usize,
   denPtr: usize,
 ): void {
+  arenaRewind();
   const g = evalGLine(readG2Affine(tPtr), readG2Affine(pp2Ptr), readG1Affine(pPtr));
   writeFp12(g[0], numPtr);
   writeFp12(g[1], denPtr);
@@ -263,6 +273,7 @@ export function lineOut(
 
 /** 诊断：twist 点自同构。kind: 0=π1, 1=π2, 2=-π2。输入 Q 仿射 128B，输出 Jacobian X||Y||Z（196B）。 */
 export function twistAutoOut(kind: u32, qPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const Q = readG2Affine(qPtr);
   const R = kind === 0 ? twistPi1(Q) : kind === 1 ? twistPi2(Q) : twistNegPi2(Q);
   writeFp2(R.X, outPtr);
@@ -272,11 +283,13 @@ export function twistAutoOut(kind: u32, qPtr: usize, outPtr: usize): void {
 
 /** 诊断：最终幂。输入 f（Fp12 384B），输出 384B。 */
 export function finalExpOut(fPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(finalExponent(readFp12(fPtr)), outPtr);
 }
 
 /** 诊断：Miller loop（final exponent 之前）。输入 Q 仿射 128B、P 64B，输出结果 384B。 */
 export function millerOut(qPtr: usize, pPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(millerLoop(readG2Affine(qPtr), readG1Affine(pPtr)), outPtr);
 }
 
@@ -289,6 +302,7 @@ export function pairingTraceOut(
   numPtr: usize,
   denPtr: usize,
 ): void {
+  arenaRewind();
   const Q = readG2Affine(qPtr);
   const P = readG1Affine(pPtr);
   const T = millerStepT(<i32>step, Q, P);
@@ -302,6 +316,7 @@ export function pairingTraceOut(
 
 /** 诊断：twist 点运算。op: 0=double, 1=add, 2=addFull。输入 a、b 为 Jacobian（192B），输出 Jacobian 192B。 */
 export function g2OpsOut(op: u32, aPtr: usize, bPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const A = readG2Jac(aPtr);
   const B = readG2Jac(bPtr);
   const R = op === 0 ? g2Double(A) : op === 1 ? g2Add(A, B) : g2AddFull(A, B);
@@ -318,6 +333,7 @@ export function lineJacOut(
   numPtr: usize,
   denPtr: usize,
 ): void {
+  arenaRewind();
   const g = evalGLine(readG2Jac(tPtr), readG2Jac(p2Ptr), readG1Affine(qPtr));
   writeFp12(g[0], numPtr);
   writeFp12(g[1], denPtr);
@@ -333,6 +349,7 @@ function readG2Jac(ptr: usize): G2 {
 
 /** 诊断：签名私钥 ds = [ks/(H1+ks)]P1。输入 ks 32B、id idLen 字节，输出仿射 x||y 64B。 */
 export function signDsOut(ksPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  arenaRewind();
   const r = g1ToAffine(signExtractKeyDs(readU256(ksPtr), readBytes(idPtr, idLen), idLen));
   u256toBytes(r.X, outPtr);
   u256toBytes(r.Y, outPtr + 32);
@@ -340,6 +357,7 @@ export function signDsOut(ksPtr: usize, idPtr: usize, idLen: i32, outPtr: usize)
 
 /** 诊断：加密私钥 de = [ke/(H1+ke)]P2。输入 ke 32B、id，输出仿射 X||Y 128B。 */
 export function encDeOut(kePtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  arenaRewind();
   const r = g2ToAffine(encExtractKeyDe(readU256(kePtr), readBytes(idPtr, idLen), idLen));
   writeFp2(r.X, outPtr);
   writeFp2(r.Y, outPtr + 64);
@@ -355,6 +373,7 @@ export function sm9SignOut(
   rPtr: usize,
   outPtr: usize,
 ): void {
+  arenaRewind();
   const ks = readU256(ksPtr);
   const ds = signExtractKeyDs(ks, readBytes(idPtr, idLen), idLen);
   const ppubs = signMasterPublic(ks);
@@ -370,6 +389,7 @@ export function sm9VerifyOut(
   msgLen: i32,
   sigPtr: usize,
 ): i32 {
+  arenaRewind();
   const ppubs = signMasterPublic(readU256(ksPtr));
   return sm9Verify(ppubs, idPtr, idLen, msgPtr, msgLen, sigPtr);
 }
@@ -384,6 +404,7 @@ export function sm9EncryptOut(
   rPtr: usize,
   outPtr: usize,
 ): i32 {
+  arenaRewind();
   const ppube = encMasterPublic(readU256(kePtr));
   return sm9Encrypt(ppube, idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr);
 }
@@ -397,6 +418,7 @@ export function sm9DecryptOut(
   ctLen: i32,
   outPtr: usize,
 ): i32 {
+  arenaRewind();
   const de = encExtractKeyDe(readU256(kePtr), readBytes(idPtr, idLen), idLen);
   return sm9Decrypt(de, idPtr, idLen, ctPtr, ctLen, outPtr);
 }
@@ -411,6 +433,7 @@ export function sm9KemEncryptOut(
   c1Ptr: usize,
   kPtr: usize,
 ): i32 {
+  arenaRewind();
   const ppube = encMasterPublic(readU256(kePtr));
   return sm9KemEncrypt(ppube, idPtr, idLen, readU256(rPtr), klen, c1Ptr, kPtr);
 }
@@ -424,6 +447,7 @@ export function sm9KemDecryptOut(
   klen: i32,
   kPtr: usize,
 ): i32 {
+  arenaRewind();
   const de = encExtractKeyDe(readU256(kePtr), readBytes(idPtr, idLen), idLen);
   return sm9KemDecrypt(de, idPtr, idLen, c1Ptr, klen, kPtr);
 }
@@ -438,6 +462,7 @@ export function sm9ExchEphemeralOut(
   rPtr: usize,
   outPtr: usize,
 ): void {
+  arenaRewind();
   const ppube = encMasterPublic(readU256(kePtr));
   sm9ExchEphemeral(ppube, peerIdPtr, peerIdLen, readU256(rPtr), outPtr);
 }
@@ -456,6 +481,7 @@ export function sm9ExchKeyOut(
   klen: i32,
   outPtr: usize,
 ): i32 {
+  arenaRewind();
   const de = exchExtractKeyDe(readU256(kePtr), readBytes(selfIdPtr, selfIdLen), selfIdLen);
   const ppube = encMasterPublic(readU256(kePtr));
   return sm9ExchKey(
@@ -488,6 +514,7 @@ export function sm9ExchConfirmOut(
   prefix: i32,
   outPtr: usize,
 ): void {
+  arenaRewind();
   const de = exchExtractKeyDe(readU256(kePtr), readBytes(selfIdPtr, selfIdLen), selfIdLen);
   const ppube = encMasterPublic(readU256(kePtr));
   sm9ExchConfirm(
@@ -522,6 +549,7 @@ export function sm9ExchAllOut(
   sbPtr: usize,
   kPtr: usize,
 ): i32 {
+  arenaRewind();
   const de = exchExtractKeyDe(readU256(kePtr), readBytes(selfIdPtr, selfIdLen), selfIdLen);
   const ppube = encMasterPublic(readU256(kePtr));
   return sm9ExchAll(
@@ -544,16 +572,19 @@ export function sm9ExchAllOut(
 
 /** 诊断：H1 值。hid 为 1（签名）或 3（加密）。输出 32B。 */
 export function hash1Out(idPtr: usize, idLen: i32, hid: u32, outPtr: usize): void {
+  arenaRewind();
   u256toBytes(hash1(readBytes(idPtr, idLen), idLen, <u8>hid), outPtr);
 }
 
 /** 诊断：t2 = ks·(H1+ks)^{-1} mod n（签名）。输出 32B。 */
 export function signT2Out(ksPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  arenaRewind();
   u256toBytes(signT2(readU256(ksPtr), readBytes(idPtr, idLen), idLen), outPtr);
 }
 
 /** 诊断：签名主公钥 [ks]P2，输出仿射 128B。 */
 export function signPubOut(ksPtr: usize, outPtr: usize): void {
+  arenaRewind();
   const r = g2ToAffine(signMasterPublic(readU256(ksPtr)));
   writeFp2(r.X, outPtr);
   writeFp2(r.Y, outPtr + 64);
@@ -561,6 +592,7 @@ export function signPubOut(ksPtr: usize, outPtr: usize): void {
 
 /** 诊断：加密主公钥 [ke]P1，输出仿射 64B。 */
 export function encPubOut(kePtr: usize, outPtr: usize): void {
+  arenaRewind();
   const r = g1ToAffine(encMasterPublic(readU256(kePtr)));
   u256toBytes(r.X, outPtr);
   u256toBytes(r.Y, outPtr + 32);
@@ -577,6 +609,7 @@ export function sm9VerifyPubOut(
   msgLen: i32,
   sigPtr: usize,
 ): i32 {
+  arenaRewind();
   return sm9Verify(readG2Affine(pubPtr), idPtr, idLen, msgPtr, msgLen, sigPtr);
 }
 
@@ -590,11 +623,13 @@ export function sm9EncryptPubOut(
   rPtr: usize,
   outPtr: usize,
 ): i32 {
+  arenaRewind();
   return sm9Encrypt(readG1Affine(pubPtr), idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr);
 }
 
 /** 用户加密公钥 Q = [H1(id, hid=3)]P1 + Ppub-e（G1 仿射 64B）。输入加密主公钥 64B。 */
 export function sm9UserEncPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  arenaRewind();
   const ppube = readG1Affine(pubPtr);
   const t = hash1(readBytes(idPtr, idLen), idLen, 3);
   const r = g1ToAffine(g1Add(g1MulG(t), ppube));
@@ -604,6 +639,7 @@ export function sm9UserEncPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr
 
 /** 用户签名公钥 Q = [H1(id, hid=1)]P2 + Ppub-s（G2 仿射 128B）。输入签名主公钥 128B。 */
 export function sm9UserSignPubOut(pubPtr: usize, idPtr: usize, idLen: i32, outPtr: usize): void {
+  arenaRewind();
   const ppubs = readG2Affine(pubPtr);
   const t = hash1(readBytes(idPtr, idLen), idLen, 1);
   const r = g2ToAffine(g2Add(g2MulG(t), ppubs));
@@ -619,20 +655,18 @@ function readBytes(ptr: usize, len: i32): StaticArray<u8> {
 
 /** 诊断：Fp12 幂。输入 f 384B、k 32B，输出 384B。 */
 export function fp12PowOut(fPtr: usize, kPtr: usize, outPtr: usize): void {
+  arenaRewind();
   writeFp12(fp12Pow(readFp12(fPtr), readU256(kPtr)), outPtr);
 }
 
-function readU256(ptr: usize): StaticArray<u32> {
-  const b = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) b[i] = load<u8>(ptr + i);
-  return u256fromBytesShared(b, 0);
+function readU256(ptr: usize): U256 {
+  return u256fromMemBE(ptr);
 }
 
 void fp2zero;
 void fp4zero;
 void fp12zero;
 void fp2set;
-void u256fromHex;
 void g2Generator;
 void g1Generator;
 
@@ -660,10 +694,12 @@ function kdfImpl(z: StaticArray<u8>, klen: i32): StaticArray<u8> {
 }
 /** 诊断：cyclotomic 平方自测（见 pairing.ts 的 sqrCycSelfTest）。返回 1=一致。 */
 export function sqrCycSelfTestOut(seed: i32): i32 {
+  arenaRewind();
   return sqrCycSelfTest(<u32>seed);
 }
 
 export function kdfOut(zPtr: usize, zLen: i32, kPtr: usize, kLen: i32): void {
+  arenaRewind();
   const z = new StaticArray<u8>(zLen);
   for (let i = 0; i < zLen; i++) z[i] = load<u8>(zPtr + i);
   const K = kdfImpl(z, kLen);

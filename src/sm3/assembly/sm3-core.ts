@@ -27,7 +27,7 @@ const T1: u32 = 0x7a879d8a;
 /** 轮常数 Tj = rotl(T0, j)（j < 16）/ rotl(T1, j mod 32)（j ≥ 16）。一次算好复用。 */
 const TJ = new StaticArray<u32>(64);
 for (let j = 0; j < 64; j++) {
-  TJ[j] = rotl(j < 16 ? T0 : T1, j < 16 ? j : (j & 31));
+  TJ[j] = rotl(j < 16 ? T0 : T1, j < 16 ? j : j & 31);
 }
 
 function rotl(x: u32, n: i32): u32 {
@@ -74,7 +74,7 @@ const STATE_PTR: usize = heap.alloc(8 * 4);
 
 /** 轮常数 Tj = rotl(T0, j)（j < 16）/ rotl(T1, j mod 32)（j ≥ 16）。一次算好复用。 */
 for (let j = 0; j < 64; j++) {
-  store<u32>(TJ_PTR + (<usize>j << 2), rotl(j < 16 ? T0 : T1, j < 16 ? j : (j & 31)));
+  store<u32>(TJ_PTR + ((<usize>j) << 2), rotl(j < 16 ? T0 : T1, j < 16 ? j : j & 31));
 }
 
 /** 读大端 u32。wasm 内存是小端，故需 bswap。 */
@@ -90,24 +90,25 @@ function loadU32BE(p: usize): u32 {
  */
 function compress(statePtr: usize, blockPtr: usize): void {
   for (let i = 0; i < 16; i++) {
-    store<u32>(W_PTR + (<usize>i << 2), loadU32BE(blockPtr + (<usize>i << 2)));
+    store<u32>(W_PTR + ((<usize>i) << 2), loadU32BE(blockPtr + ((<usize>i) << 2)));
   }
   for (let i = 16; i < 68; i++) {
     const v =
-      load<u32>(W_PTR + (<usize>(i - 16) << 2)) ^
-      load<u32>(W_PTR + (<usize>(i - 9) << 2)) ^
-      rotl(load<u32>(W_PTR + (<usize>(i - 3) << 2)), 15);
+      load<u32>(W_PTR + ((<usize>(i - 16)) << 2)) ^
+      load<u32>(W_PTR + ((<usize>(i - 9)) << 2)) ^
+      rotl(load<u32>(W_PTR + ((<usize>(i - 3)) << 2)), 15);
     const wv =
       (p1(v) ^
-        rotl(load<u32>(W_PTR + (<usize>(i - 13) << 2)), 7) ^
-        load<u32>(W_PTR + (<usize>(i - 6) << 2))) &
+        rotl(load<u32>(W_PTR + ((<usize>(i - 13)) << 2)), 7) ^
+        load<u32>(W_PTR + ((<usize>(i - 6)) << 2))) &
       0xffffffff;
-    store<u32>(W_PTR + (<usize>i << 2), wv);
+    store<u32>(W_PTR + ((<usize>i) << 2), wv);
   }
   for (let i = 0; i < 64; i++) {
     const wv =
-      (load<u32>(W_PTR + (<usize>i << 2)) ^ load<u32>(W_PTR + (<usize>(i + 4) << 2))) & 0xffffffff;
-    store<u32>(WP_PTR + (<usize>i << 2), wv);
+      (load<u32>(W_PTR + ((<usize>i) << 2)) ^ load<u32>(W_PTR + ((<usize>(i + 4)) << 2))) &
+      0xffffffff;
+    store<u32>(WP_PTR + ((<usize>i) << 2), wv);
   }
 
   let A = load<u32>(statePtr);
@@ -122,11 +123,10 @@ function compress(statePtr: usize, blockPtr: usize): void {
   // j = 0..15：T0 + ff0/gg0
   for (let j = 0; j < 16; j++) {
     const A12 = rotl(A, 12);
-    const SS1 = rotl((A12 + E + load<u32>(TJ_PTR + (<usize>j << 2))) & 0xffffffff, 7);
+    const SS1 = rotl((A12 + E + load<u32>(TJ_PTR + ((<usize>j) << 2))) & 0xffffffff, 7);
     const SS2 = SS1 ^ A12;
-    const TT1 =
-      (ff0(A, B, C) + D + SS2 + load<u32>(WP_PTR + (<usize>j << 2))) & 0xffffffff;
-    const TT2 = (gg0(E, F, G) + H + SS1 + load<u32>(W_PTR + (<usize>j << 2))) & 0xffffffff;
+    const TT1 = (ff0(A, B, C) + D + SS2 + load<u32>(WP_PTR + ((<usize>j) << 2))) & 0xffffffff;
+    const TT2 = (gg0(E, F, G) + H + SS1 + load<u32>(W_PTR + ((<usize>j) << 2))) & 0xffffffff;
     D = C;
     C = rotl(B, 9);
     B = A;
@@ -139,11 +139,10 @@ function compress(statePtr: usize, blockPtr: usize): void {
   // j = 16..63：T1 + ff1/gg1
   for (let j = 16; j < 64; j++) {
     const A12 = rotl(A, 12);
-    const SS1 = rotl((A12 + E + load<u32>(TJ_PTR + (<usize>j << 2))) & 0xffffffff, 7);
+    const SS1 = rotl((A12 + E + load<u32>(TJ_PTR + ((<usize>j) << 2))) & 0xffffffff, 7);
     const SS2 = SS1 ^ A12;
-    const TT1 =
-      (ff1(A, B, C) + D + SS2 + load<u32>(WP_PTR + (<usize>j << 2))) & 0xffffffff;
-    const TT2 = (gg1(E, F, G) + H + SS1 + load<u32>(W_PTR + (<usize>j << 2))) & 0xffffffff;
+    const TT1 = (ff1(A, B, C) + D + SS2 + load<u32>(WP_PTR + ((<usize>j) << 2))) & 0xffffffff;
+    const TT2 = (gg1(E, F, G) + H + SS1 + load<u32>(W_PTR + ((<usize>j) << 2))) & 0xffffffff;
     D = C;
     C = rotl(B, 9);
     B = A;
@@ -172,7 +171,7 @@ function compress(statePtr: usize, blockPtr: usize): void {
  * @param outPtr 输出 32 字节（4 字节对齐）。
  */
 export function sm3HashInto(inputPtr: usize, inputLen: usize, outPtr: usize): void {
-  for (let i = 0; i < 8; i++) store<u32>(STATE_PTR + (<usize>i << 2), IV[i]);
+  for (let i = 0; i < 8; i++) store<u32>(STATE_PTR + ((<usize>i) << 2), IV[i]);
 
   const lenWithPad: usize = inputLen + 9;
   const padding: usize = (64 - (lenWithPad % 64)) % 64;
@@ -190,7 +189,7 @@ export function sm3HashInto(inputPtr: usize, inputLen: usize, outPtr: usize): vo
   }
   // 输出大端
   for (let i = 0; i < 8; i++) {
-    store<u32>(outPtr + (<usize>i << 2), bswap<u32>(load<u32>(STATE_PTR + (<usize>i << 2))));
+    store<u32>(outPtr + ((<usize>i) << 2), bswap<u32>(load<u32>(STATE_PTR + ((<usize>i) << 2))));
   }
 }
 

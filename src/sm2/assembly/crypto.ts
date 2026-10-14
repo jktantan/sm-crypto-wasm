@@ -12,7 +12,15 @@
 // 本文件是**纯运算层**：输入输出均为线性内存指针，由 index.ts 的导出包装。
 
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
-import { U256, u256cmp, u256fromBytes, u256isZero, u256toBytes, u256zero } from './field';
+import {
+  U256,
+  u256cmp,
+  u256fromMemBE,
+  u256fromU32,
+  u256isZero,
+  u256toBytes,
+  u256zero,
+} from './field';
 import { addModN, invModN, mulModN, nArr, subModN } from './modn';
 import { addPoints, isInfinity, JPoint, scalarMul, scalarMulG, toAffine } from './point';
 
@@ -20,9 +28,7 @@ import { addPoints, isInfinity, JPoint, scalarMul, scalarMulG, toAffine } from '
 
 /** 从内存读 32 字节大端为 U256。 */
 function ld(ptr: usize): U256 {
-  const b = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) b[i] = load<u8>(ptr + i);
-  return u256fromBytes(b, 0);
+  return u256fromMemBE(ptr);
 }
 
 /** 写 U256 到内存（32 字节大端）。 */
@@ -37,18 +43,7 @@ function _memcpy(dst: usize, src: usize, n: usize): void {
 
 /** 小端 limb 数组 → 32 字节大端。 */
 function limbsToBytes(x: U256, out: Uint8Array): void {
-  for (let i = 0; i < 8; i++) {
-    const v = x[7 - i];
-    out[i * 4] = <u8>(v >>> 24);
-    out[i * 4 + 1] = <u8>(v >>> 16);
-    out[i * 4 + 2] = <u8>(v >>> 8);
-    out[i * 4 + 3] = <u8>v;
-  }
-}
-
-/** 32 字节大端 → U256。 */
-function bytesToU256(b: Uint8Array, off: usize): U256 {
-  return u256fromBytes(b, off);
+  u256toBytes(x, out.dataStart); // TypedArray 必须走 dataStart
 }
 
 // ---------- Z 值 ----------
@@ -162,9 +157,7 @@ export function sign(
   if (u256cmp(rk, n) === 0) return 1;
 
   // s = ((1+d)^-1 * (k - r*d)) mod n
-  const one = u256zero();
-  one[0] = 1;
-  const onePlD = addModN(one, d);
+  const onePlD = addModN(u256fromU32(1), d);
   const inv = invModN(onePlD);
   const rd = mulModN(r, d);
   const kSubRd = subModN(k, rd);
@@ -212,10 +205,7 @@ export function verify(
   const pub = new JPoint();
   pub.x = ld(pubXPtr);
   pub.y = ld(pubYPtr);
-  const one = u256zero();
-  one[0] = 1;
-  pub.z = one;
-
+  pub.z = u256fromU32(1);
   const sg = scalarMulG(s);
   const tp = scalarMul(t, pub);
   const sum = toAffine(addPointRaw(sg, tp));
@@ -232,9 +222,7 @@ function hashZMsg(zPtr: usize, msgPtr: usize, msgLen: usize): U256 {
   for (let i: usize = 0; i < msgLen; i++) buf[32 + <i32>i] = load<u8>(msgPtr + i);
   const out = new StaticArray<u8>(32);
   sm3HashInto(changetype<usize>(buf), total, changetype<usize>(out));
-  const tmp = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) tmp[i] = out[i];
-  return bytesToU256(tmp, 0);
+  return u256fromMemBE(changetype<usize>(out));
 }
 
 // point.ts 的 addPoints 已在顶部 import。
@@ -268,9 +256,7 @@ export function encrypt(
   const pub = new JPoint();
   pub.x = ld(pubXPtr);
   pub.y = ld(pubYPtr);
-  const one = u256zero();
-  one[0] = 1;
-  pub.z = one;
+  pub.z = u256fromU32(1);
 
   const k = ld(kPtr);
   // C1 = k·G（未压缩点）。
@@ -333,9 +319,7 @@ export function decrypt(privPtr: usize, ctPtr: usize, ctLen: usize, outPtr: usiz
   const c1 = new JPoint();
   c1.x = ld(ctPtr + 1);
   c1.y = ld(ctPtr + 33);
-  const one = u256zero();
-  one[0] = 1;
-  c1.z = one;
+  c1.z = u256fromU32(1);
 
   const msgLen: usize = ctLen - 97;
   // (x2,y2) = d·C1
@@ -412,15 +396,12 @@ export function kdf(zPtr: usize, zLen: usize, outPtr: usize, klen: usize): i32 {
 
 /** x̄ = 2^127 + (x mod 2^127)。 */
 function xHat(x: U256): U256 {
-  const r = new StaticArray<u32>(8);
-  r[0] = x[0];
-  r[1] = x[1];
-  r[2] = x[2];
-  r[3] = (x[3] & 0x7fffffff) | <u32>0x80000000; // bit127 置 1
-  r[4] = 0;
-  r[5] = 0;
-  r[6] = 0;
-  r[7] = 0;
+  const r = u256zero();
+  store<u32>(r, load<u32>(x));
+  store<u32>(r + 4, load<u32>(x + 4));
+  store<u32>(r + 8, load<u32>(x + 8));
+  store<u32>(r + 12, (load<u32>(x + 12) & 0x7fffffff) | <u32>0x80000000); // bit127 置 1
+  // r[4..7] 已由 u256zero 清零
   return r;
 }
 
@@ -429,9 +410,7 @@ function affinePoint(xyPtr: usize): JPoint {
   const p = new JPoint();
   p.x = ld(xyPtr);
   p.y = ld(xyPtr + 32);
-  const one = u256zero();
-  one[0] = 1;
-  p.z = one;
+  p.z = u256fromU32(1);
   return p;
 }
 

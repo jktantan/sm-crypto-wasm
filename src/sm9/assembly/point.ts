@@ -9,9 +9,11 @@
 // 参考：GM/T 0044-2016。
 
 import {
+  permAlloc,
+  permU256,
+  u256bit,
   u256clone,
   u256copy,
-  u256eq,
   u256fromHex,
   u256isOdd,
   u256isZero,
@@ -119,7 +121,7 @@ export function g1Generator(): G1 {
 }
 
 export function g1IsInfinity(P: G1): bool {
-  return u256eq(P.Z, u256zero());
+  return u256isZero(P.Z);
 }
 
 export function g1Copy(P: G1): G1 {
@@ -262,12 +264,12 @@ function subSmallU32(a: U256, v: u32): void {
   let borrow: i64 = <i64>v;
   let i = 0;
   while (borrow !== 0 && i < 8) {
-    const cur: i64 = <i64>a[i] - (borrow & 0xffffffff);
+    const cur: i64 = <i64>load<u32>(a + ((<usize>i) << 2)) - (borrow & 0xffffffff);
     if (cur < 0) {
-      a[i] = <u32>(cur + 0x100000000);
+      store<u32>(a + ((<usize>i) << 2), <u32>(cur + 0x100000000));
       borrow = 1;
     } else {
-      a[i] = <u32>cur;
+      store<u32>(a + ((<usize>i) << 2), <u32>cur);
       borrow = 0;
     }
     i++;
@@ -279,8 +281,8 @@ function addSmallU32(a: U256, v: u32): void {
   let carry: u64 = <u64>v;
   let i = 0;
   while (carry !== 0 && i < 8) {
-    const cur: u64 = <u64>a[i] + carry;
-    a[i] = <u32>(cur & 0xffffffff);
+    const cur: u64 = <u64>load<u32>(a + ((<usize>i) << 2)) + carry;
+    store<u32>(a + ((<usize>i) << 2), <u32>(cur & 0xffffffff));
     carry = cur >>> 32;
     i++;
   }
@@ -297,7 +299,7 @@ function wnaf(k: U256, out: StaticArray<i32>): i32 {
   let i = 0;
   while (!u256isZero(d)) {
     if (u256isOdd(d)) {
-      const m: u32 = d[0] & WNAF_MASK;
+      const m: u32 = load<u32>(d) & WNAF_MASK;
       let digit: i32 = <i32>m;
       if (m > WNAF_HALF) digit -= 32; // m - 2^W
       out[i] = digit;
@@ -367,7 +369,7 @@ function combIndex(k: U256, j: i32): i32 {
   let c: i32 = 0;
   for (let t = COMB_W - 1; t >= 0; t--) {
     const i = j + t * COMB_D;
-    const bit = i < 256 ? (k[i >> 5] >>> (i & 31)) & 1 : 0;
+    const bit = i < 256 ? <i32>u256bit(k, i) : 0;
     c = (c << 1) | bit;
   }
   return c;
@@ -395,7 +397,18 @@ let g1CombCache: StaticArray<G1> = new StaticArray<G1>(0);
 
 /** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
 function g1CombTable(): StaticArray<G1> {
-  if (g1CombCache.length === 0) g1CombCache = buildG1Comb();
+  if (g1CombCache.length === 0) {
+    const t = buildG1Comb();
+    // 缓存必须活在 arena 之外：arena 在每次导出调用入口回卷，落在里面的坐标
+    // 会在下一次调用时被覆盖。逐个把坐标深拷贝到永久区。
+    for (let i = 0; i < t.length; i++) {
+      const p = t[i];
+      p.X = permU256(p.X);
+      p.Y = permU256(p.Y);
+      p.Z = permU256(p.Z);
+    }
+    g1CombCache = t;
+  }
   return g1CombCache;
 }
 
@@ -413,7 +426,7 @@ export function g1MulG(k: U256): G1 {
 /** 转仿射。Z==0 时原样返回。 */
 export function g1ToAffine(P: G1): G1 {
   const r = g1Copy(P);
-  if (u256eq(r.Z, u256zero())) return r;
+  if (u256isZero(r.Z)) return r;
   r.Z = fpInv(r.Z);
   r.Y = fpMul(r.Y, r.Z);
   r.Z = fpSqr(r.Z);
@@ -710,8 +723,25 @@ let g2CombCache: StaticArray<G2> = new StaticArray<G2>(0);
 
 /** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
 function g2CombTable(): StaticArray<G2> {
-  if (g2CombCache.length === 0) g2CombCache = buildG2Comb();
+  if (g2CombCache.length === 0) {
+    const t = buildG2Comb();
+    // 同 G1：缓存必须落在永久区，否则下一次 arenaRewind 会覆盖这些坐标。
+    for (let i = 0; i < t.length; i++) {
+      const p = t[i];
+      p.X = permFp2(p.X);
+      p.Y = permFp2(p.Y);
+      p.Z = permFp2(p.Z);
+    }
+    g2CombCache = t;
+  }
   return g2CombCache;
+}
+
+/** 把一个 Fp2（64 字节）深拷贝到永久区。 */
+function permFp2(src: Fp2): Fp2 {
+  const p = permAlloc(64);
+  memory.copy(p, src, 64);
+  return p;
 }
 
 /** 标量乘基点 P2（固定基点 comb）。 */
