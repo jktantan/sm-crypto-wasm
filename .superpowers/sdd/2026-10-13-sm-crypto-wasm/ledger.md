@@ -533,3 +533,24 @@ GREEN；全量套件 112/112。
 
 - 5 条 `noNonNullAssertion` warning 保留在 tests（固定向量断言的必要写法）。
 - biome 修复拆两个 commit 而非一个（便于 review）。
+
+---
+
+## 许可统一（2026-10-14）
+
+用户提问触发排查，发现三处声明互不一致且存在法律冲突：`LICENSE` 文件是 **GPL-2.0** 全文、
+`package.json` 与 README 写 **MIT**、`src/zuc/assembly/index.ts` 声明"逐行移植自 gmkitx
+（Apache-2.0）"并指向一个不存在的 `NOTICE`。GPL-2.0 与 Apache-2.0 不兼容（专利条款冲突），
+三者不可能同时成立。
+
+用户裁决：**统一为 Apache-2.0**；NOTICE 版权主体用 `jktantan`。
+
+- `LICENSE`：从本地 Apache-2.0 依赖（gmkitx）取标准全文覆盖（201 行，无上游夹带信息）；
+- `package.json`：`license` → `"Apache-2.0"`，`files` 加 `NOTICE`；
+- `README.md`：License 段改 Apache-2.0 + 上游归属；
+- 新增 `NOTICE`：按 Apache-2.0 §4(d) 声明 GmSSL 与 gmkit / gmkitx；
+- spec §1/§5 与 plan 的 Global Constraints 里的 `MIT` 一并改掉（共 5 处）。
+
+`Ruling:` 选 Apache-2.0 而不是 MIT。理由：`src/zuc/assembly/index.ts` 自述"逐行移植"，
+属 Apache-2.0 的 derivative work；与上游同许可最干净，且 Apache-2.0 允许再许可与商业使用。
+代价：比 MIT 多了 NOTICE 与归属义务（已在 NOTICE 里履行）。

@@ -1,0 +1,12 @@
+sm-crypto-wasm
+Copyright 2026 jktantan
+
+This product includes software developed by the GmSSL Project
+(https://github.com/guanzhi/GmSSL), licensed under the Apache License, Version 2.0.
+The SM2 and SM9 implementations follow GmSSL's algorithm semantics and naming
+(src/sm2/assembly/*, src/sm9/assembly/*).
+
+This product includes software developed by the gmkit / gmkitx project
+(https://github.com/gmkits/gmkit), licensed under the Apache License, Version 2.0.
+The ZUC implementation was ported to AssemblyScript from gmkitx's Apache-2.0
+reference implementation (src/zuc/assembly/index.ts).

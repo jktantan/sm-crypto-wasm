@@ -38,7 +38,7 @@
 
 ## Global Constraints
 
-- Package name: `sm-crypto-wasm`; version starts at `0.1.0`; license `MIT`; `engines.node: ">=18"`.
+- Package name: `sm-crypto-wasm`; version starts at `0.1.0`; license `Apache-2.0`; `engines.node: ">=18"`.
 - Public API surface must be a **synchronous-first façade** (`sm3.hash`, `sm4.encryptCBC`, `sm2.encrypt`, `sm9.sign`, `zuc.encrypt`, `zuc.mac`); `async` only for `sm2.generateKeyPair`, `sm9.generateKeyPair`, `sm2.keyExchange.*` protocol flow (per §12.1 Q2).
 - SM2 ciphertext default ordering: **C1C3C2** (per §12.1 Q1); decryption auto-detects both orderings.
 - SM9 keystores: PKCS#8 + custom OID `1.2.156.10197.1.100` (per §12.1 Q3).
@@ -1120,7 +1120,7 @@ export const zuc = lazy('zuc', () => import('./zuc/index.js'));
 
 - [ ] **Step 3: Write `package.json` and `tsconfig.json`**
 
-- `"name": "sm-crypto-wasm"`, `"version": "0.1.0"`, `"license": "MIT"`, `"engines": { "node": ">=18" }`
+- `"name": "sm-crypto-wasm"`, `"version": "0.1.0"`, `"license": "Apache-2.0"`, `"engines": { "node": ">=18" }`
 - `"type": "module"`
 - `"main": "./dist/index.cjs"`, `"module": "./dist/index.js"`, `"types": "./dist/index.d.ts"`
 - `"files": ["dist"]`

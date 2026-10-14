@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "国密 SM2/SM3/SM4/SM9/ZUC 的 WASM 实现，Node 18+ 与现代浏览器均可使用，按算法分包懒加载。",
   "description:en": "SM2/SM3/SM4/SM9/ZUC (China crypto) implemented in AssemblyScript -> WASM. Node 18+ & modern browsers, per-algorithm lazy loading.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -60,7 +60,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "sideEffects": false,
   "scripts": {

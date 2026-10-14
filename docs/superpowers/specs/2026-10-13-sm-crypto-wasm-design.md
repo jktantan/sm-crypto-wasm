@@ -5,7 +5,7 @@
 - 包名：`sm-crypto-wasm`
 - 版本起步：`0.1.0`
 - 目标 Node：`>=18`
-- License：`MIT`
+- License：`Apache-2.0`
 
 > 这份文档给"国密 WASM 工具包"项目锁定的范围、目标、约束、关键决策。读完即可进入 plan 阶段，无需再回头问产品问题。
 
@@ -119,9 +119,9 @@ sm-crypto-wasm/
 │   └── fuzz/                     # fast-check fuzz
 ├── bench/
 │   └── *.bench.ts                # mitata micro-bench
-├── package.json                  # version 0.1.0, engines ">=18", license MIT
+├── package.json                  # version 0.1.0, engines ">=18", license Apache-2.0
 ├── README.md
-├── LICENSE                       # MIT
+├── LICENSE                       # Apache-2.0
 └── docs/
     └── superpowers/specs/        # 本目录
 ```
@@ -350,6 +350,26 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
   同时接受主公钥（按长度判别）。二者不一致，建议下一轮把 KEM 也放宽到主公钥形态。
 - `.gitignore` 里列了 `pnpm-lock.yaml` / `pnpm-workspace.yaml`，但两者其实都被 git
   跟踪 —— 配置与事实矛盾（CI 因此仍可用 `--frozen-lockfile`）。
+
+### 许可统一（2026-10-14）
+
+此前三处声明互不一致、且其中一对存在法律冲突：
+
+| 位置 | 原值 |
+|---|---|
+| `LICENSE` 文件 | **GPL-2.0** 全文（339 行） |
+| `package.json` / `README.md` | **MIT** |
+| `src/zuc/assembly/index.ts` | "逐行移植自 gmkitx（Apache-2.0）… 见仓库 LICENSE 与 NOTICE" |
+
+GPL-2.0 与 Apache-2.0 **不兼容**（专利条款冲突），因此"LICENSE=GPL-2.0"与"代码逐行移植自
+Apache-2.0 的 gmkit"不可能同时成立；`NOTICE` 文件也不存在。
+
+已统一为 **Apache-2.0**：
+
+- `LICENSE`：替换为标准 Apache-2.0 全文；
+- `package.json`：`"license": "Apache-2.0"`，`files` 增加 `NOTICE`；
+- `README.md`：License 段改为 Apache-2.0 并列出上游归属；
+- 新增 `NOTICE`：按 Apache-2.0 §4(d) 声明对 GmSSL 与 gmkit / gmkitx 的归属。
 
 **P2 — 已实现但与本文档不符**
 

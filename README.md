@@ -231,4 +231,9 @@ pnpm typecheck      # tsc --noEmit
 
 ## License
 
-MIT
+[Apache-2.0](./LICENSE)。
+
+本项目的算法实现参考/移植了以下同样以 Apache-2.0 发布的项目，归属声明见 [`NOTICE`](./NOTICE)：
+
+- [GmSSL](https://github.com/guanzhi/GmSSL) —— SM2 / SM9 的算法语义与命名对齐基准；
+- [gmkit / gmkitx](https://github.com/gmkits/gmkit) —— ZUC 实现的移植来源。
