@@ -17,6 +17,7 @@ import {
   u256fromU32,
   u256subRaw,
   u256toBytes,
+  u256zero,
 } from '../../common/assembly/field256';
 import { sm3HashInto } from '../../sm3/assembly/sm3-core';
 import { addModN, invModN, mulModN, nArr, U256 } from './fp';
@@ -156,6 +157,104 @@ export function encMasterPublic(ke: U256): G1 {
   return g1Mul(ke, g1Generator());
 }
 
+// ---------- 公开配对值缓存 ----------
+//
+// e(Ppubs, P1) 与 e(P2, Ppube) 只取决于主公钥（公开点），与消息 / 用户无关，
+// 但各占一整次 pairing（百毫秒级）。verify / encrypt / KEM 对同一主公钥反复调用时
+// 每次都重算。这里按主公钥仿射坐标做 4 槽直接映射缓存——缓存的值是公开点的
+// 配对结果，不含任何秘密，缓存只省时间不改变任何安全边界。
+// 4 槽：绝大多数应用（1 个 KGC + 少数根密钥）远用不满；满了覆盖最旧槽。
+
+/** signG 缓存槽：key 为 Ppubs 仿射（128 字节），value 为 e(Ppubs, P1)。 */
+class SignGCacheSlot {
+  keyX1: U256;
+  keyX0: U256;
+  keyY1: U256;
+  keyY0: U256;
+  value: Fp12 | null;
+  constructor() {
+    this.keyX1 = u256zero();
+    this.keyX0 = u256zero();
+    this.keyY1 = u256zero();
+    this.keyY0 = u256zero();
+    this.value = null;
+  }
+}
+
+const SIGN_G_CACHE = new StaticArray<SignGCacheSlot>(4);
+for (let i = 0; i < 4; i++) SIGN_G_CACHE[i] = new SignGCacheSlot();
+
+function g2FingerprintU(P: G2): u32 {
+  let h: u32 = 0x9e3779b9;
+  h = (h ^ P.X[0][0]) *< u32 > 0x01000193;
+  h = (h ^ P.X[1][7]) *< u32 > 0x01000193;
+  h = (h ^ P.Y[0][3]) *< u32 > 0x01000193;
+  h = (h ^ P.Y[1][0]) *< u32 > 0x01000193;
+  return h;
+}
+
+/** g = e(Ppubs, P1)（带 4 槽缓存；Ppubs 需为仿射）。 */
+export function signG(ppubs: G2): Fp12 {
+  const a = g2ToAffine(ppubs);
+  const slotIdx = g2FingerprintU(a) & 3;
+  const slot = SIGN_G_CACHE[slotIdx];
+  if (
+    slot.value !== null &&
+    u256eq(slot.keyX1, a.X[1]) &&
+    u256eq(slot.keyX0, a.X[0]) &&
+    u256eq(slot.keyY1, a.Y[1]) &&
+    u256eq(slot.keyY0, a.Y[0])
+  ) {
+    return slot.value!;
+  }
+  const g = sm9Pairing(a, g1Generator());
+  slot.keyX1 = u256clone(a.X[1]);
+  slot.keyX0 = u256clone(a.X[0]);
+  slot.keyY1 = u256clone(a.Y[1]);
+  slot.keyY0 = u256clone(a.Y[0]);
+  slot.value = g;
+  return g;
+}
+
+/** encG 缓存槽：key 为 Ppube 仿射（64 字节）。 */
+class EncGCacheSlot {
+  keyX: U256;
+  keyY: U256;
+  value: Fp12 | null;
+  constructor() {
+    this.keyX = u256zero();
+    this.keyY = u256zero();
+    this.value = null;
+  }
+}
+
+const ENC_G_CACHE = new StaticArray<EncGCacheSlot>(4);
+for (let i = 0; i < 4; i++) ENC_G_CACHE[i] = new EncGCacheSlot();
+
+function g1FingerprintU(P: G1): u32 {
+  let h: u32 = 0x9e3779b9;
+  h = (h ^ P.X[0]) *< u32 > 0x01000193;
+  h = (h ^ P.X[7]) *< u32 > 0x01000193;
+  h = (h ^ P.Y[3]) *< u32 > 0x01000193;
+  h = (h ^ P.Y[0]) *< u32 > 0x01000193;
+  return h;
+}
+
+/** g = e(P2, Ppube)（带 4 槽缓存；对应加密 / KEM 里的 e(Ppube, P2) 同一值）。 */
+export function encG(ppube: G1): Fp12 {
+  const a = g1ToAffine(ppube);
+  const slotIdx = g1FingerprintU(a) & 3;
+  const slot = ENC_G_CACHE[slotIdx];
+  if (slot.value !== null && u256eq(slot.keyX, a.X) && u256eq(slot.keyY, a.Y)) {
+    return slot.value!;
+  }
+  const g = sm9Pairing(g2Generator(), a);
+  slot.keyX = u256clone(a.X);
+  slot.keyY = u256clone(a.Y);
+  slot.value = g;
+  return g;
+}
+
 // ---------- 字节辅助 ----------
 
 function cat2(a: StaticArray<u8>, b: StaticArray<u8>): StaticArray<u8> {
@@ -248,11 +347,7 @@ function hmacSm3(key: StaticArray<u8>, msg: StaticArray<u8>): StaticArray<u8> {
 }
 
 // ---------- 签名 / 验签（GM/T 0044 第 5 章） ----------
-
-/** g = e(Ppubs, P1)（所有用户共享，可预计算）。 */
-export function signG(ppubs: G2): Fp12 {
-  return sm9Pairing(g2ToAffine(ppubs), g1Generator());
-}
+// signG（带缓存）已上移到「公开配对值缓存」一节。
 
 /** SM9 签名。输出 h(32)||Sx(32)||Sy(32)，共 96 字节。 */
 export function sm9Sign(
@@ -325,7 +420,7 @@ export function sm9Encrypt(
 
   const h1 = hash1(id, idLen, HID_ENC);
   const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
-  const g = sm9Pairing(g2Generator(), g1ToAffine(ppube));
+  const g = encG(ppube);
   const w = fp12Pow(g, r);
 
   const C1 = g1Compressed(g1Mul(r, Q));
@@ -440,7 +535,7 @@ export function sm9KemEncrypt(
   const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
   const C = g1Mul(r, Q);
 
-  const g = sm9Pairing(g2Generator(), g1ToAffine(ppube));
+  const g = encG(ppube);
   const w = fp12Pow(g, r);
 
   const C1 = g1Compressed(C);
@@ -537,7 +632,7 @@ function exchComputeG(
   g2b: StaticArray<u8>,
   g3b: StaticArray<u8>,
 ): void {
-  const E1 = fp12Pow(sm9Pairing(g2Generator(), g1ToAffine(ppube)), r);
+  const E1 = fp12Pow(encG(ppube), r);
   const E2 = sm9Pairing(g2ToAffine(de), g1ToAffine(peerR));
   const G3v = fp12Pow(E2, r);
   const G1v = isInitiator ? E1 : E2;

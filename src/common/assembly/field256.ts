@@ -426,20 +426,86 @@ function ai2(a: U256, i: i32): u64 {
   return v * v;
 }
 
-/** a^{-1} mod m（费马小定理 a^{m-2}；要求 m 为素数）。a == 0 时返回 0。 */
+/**
+ * a^{-1} mod m：**二进制扩展欧几里得**（加/减/移位，无乘法）。
+ *
+ * 原实现走费马小定理 a^{m-2}（~380 次 modMul/modSqr），是 fp12Inv / 点归一化
+ * 等所有求逆路径的大头。二进制 EE 算法每轮一次加减 + 一次移位，~256 轮即可，
+ * 单次求逆从毫秒级降到微秒级。
+ *
+ * 要求 gcd(a, m) = 1（m 为素数且 a != 0 时恒成立）。a == 0 时返回 0（与原语义一致）。
+ */
 export function modInv(a: U256, m: U256): U256 {
-  const e = u256clone(m);
-  e[0] = (e[0] - 2) & 0xffffffff;
-  let result = new StaticArray<u32>(8);
-  result[0] = 1;
-  let base = u256clone(a);
-  for (let i = 0; i < 256; i++) {
-    if (((e[i >> 5] >>> (i & 31)) & 1) === 1) {
-      result = modMul(result, base, m);
+  if (u256isZero(a)) return u256zero();
+  // u, v 为剩余；x1, x2 为 x 系数（u 的 Bezout 系数在 x1，v 的在 x2，均为 mod m 非负）
+  const u = u256clone(a);
+  const v = u256clone(m);
+  const x1 = u256fromU32(1);
+  const x2 = u256zero();
+  while (!u256isZero(u) && !u256isZero(v)) {
+    while (u256isEven(u)) {
+      u256shr1(u);
+      halveMod(x1, m);
     }
-    base = modSqr(base, m);
+    while (u256isEven(v)) {
+      u256shr1(v);
+      halveMod(x2, m);
+    }
+    // u >= v → u -= v, x1 -= x2（mod m）；否则 v -= u, x2 -= x1
+    if (u256cmp(u, v) >= 0) {
+      u256subRaw(u, v);
+      subMod(x1, x2, m);
+    } else {
+      u256subRaw(v, u);
+      subMod(x2, x1, m);
+    }
   }
-  return result;
+  // 退出时非零者为 gcd；素模数下 gcd == 1，对应 x 系数即逆元
+  if (!u256isZero(u)) {
+    return x1; // u == 1：a·x1 ≡ u ≡ 1
+  }
+  return x2; // v == 1：a·x2 ≡ v ≡ 1
+}
+
+/**
+ * x = x/2 mod m（要求 x < m）。
+ *
+ * 不能先 x += m 再右移：SM2/SM9 的模数 ≈ 0.7·2^256，x + m 会溢出 256-bit。
+ * 用无溢出分解：x、m 均奇时 (x+m)/2 = (x>>1) + (m>>1) + 1，各步 < m。
+ */
+function halveMod(x: U256, m: U256): void {
+  if (u256isOdd(x)) {
+    const t = u256clone(x);
+    u256shr1(t); // floor(x/2)
+    const s = u256clone(m);
+    u256shr1(s); // floor(m/2)
+    u256copy(t, x);
+    const carry = u256addRaw(x, s); // < m，无溢出
+    if (carry !== 0) {
+      // 不应发生（x>>1 + m>>1 < m），安全兜底
+      u256subRaw(x, m);
+    }
+    u256addRaw(x, u256fromU32(1));
+    // x + 1 仍 < m（(x+m)/2 ≤ m-1），无溢出
+  } else {
+    u256shr1(x);
+  }
+}
+
+/** x1 = (x1 - x2) mod m（要求 x1, x2 < m）。 */
+function subMod(x1: U256, x2: U256, m: U256): void {
+  if (u256cmp(x1, x2) >= 0) {
+    u256subRaw(x1, x2);
+  } else {
+    // x1 < x2：x1 - x2 + m
+    u256addRaw(x1, m);
+    u256subRaw(x1, x2);
+  }
+}
+
+/** a 是否为偶数。 */
+function u256isEven(a: U256): bool {
+  return (a[0] & 1) === 0;
 }
 
 /** a 是否为奇数。 */
