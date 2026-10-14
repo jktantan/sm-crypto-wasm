@@ -138,9 +138,10 @@ describe('错误体系（统一为 SmCryptoError 子类）', () => {
     expect(() => sm9.sign(new Uint8Array(10), 'alice', new Uint8Array([1]))).toThrow(
       InvalidKeyError,
     );
-    expect(() => sm9.decrypt(new Uint8Array(32), 'alice', new Uint8Array(10))).toThrow(
-      InvalidCiphertextError,
-    );
+    // 主私钥用合法标量（k = 1，范围校验要求 1 ≤ k ≤ n−1），以便走到密文长度校验
+    const ks = new Uint8Array(32);
+    ks[31] = 1;
+    expect(() => sm9.decrypt(ks, 'alice', new Uint8Array(10))).toThrow(InvalidCiphertextError);
   });
 
   it('普通参数仍然用宿主原生类型（TypeError / RangeError）', () => {

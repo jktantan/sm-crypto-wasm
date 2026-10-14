@@ -226,18 +226,28 @@ function toBytes(input: string | Uint8Array, label: string): Uint8Array {
  * （spec §12.1 Q3，算法 OID `1.2.156.10197.1.100`）。
  */
 function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Array {
+  let bytes: Uint8Array;
   if (typeof input === 'string' && input.includes('-----BEGIN')) {
     const parsed = parseSm9PrivateKeyPem(input);
     if (parsed.length !== 32) {
       throw new InvalidKeyError(`sm9: ${label} 作为 PEM 主私钥应为 32 字节，实际 ${parsed.length}`);
     }
-    return parsed;
+    bytes = parsed;
+  } else {
+    const b = toBytes(input, label);
+    if (b.length !== 32) {
+      throw new InvalidKeyError(`sm9: ${label} 必须是 32 字节主私钥，实际 ${b.length}`);
+    }
+    bytes = b;
   }
-  const b = toBytes(input, label);
-  if (b.length !== 32) {
-    throw new InvalidKeyError(`sm9: ${label} 必须是 32 字节主私钥，实际 ${b.length}`);
+  // 标量范围：SM9（GM/T 0044）要求 1 ≤ k ≤ n−1。
+  // 越界值不会崩，但 wasm 侧的 addModN → modAdd 只做一次条件减、要求输入已
+  // 约化（h1 + k < 2n），k ≥ n 时 k + h1 可能 ≥ 2n 而静默产出错值，故在此显式拒绝。
+  const k = BigInt(`0x${Buffer.from(bytes).toString('hex')}`);
+  if (k < 1n || k >= N) {
+    throw new InvalidKeyError(`sm9: ${label} 必须在 [1, n−1] 范围内（SM9 主私钥标量）`);
   }
-  return b;
+  return bytes;
 }
 
 /** 主公钥参数归一化：64（加密 G1）或 128（签名 G2）字节点，或 SPKI 主公钥 PEM。 */
