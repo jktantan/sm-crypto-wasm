@@ -11,7 +11,13 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.spec.ts'],
-    exclude: ['tests/fuzz/**', 'node_modules/**', 'dist/**'],
+    exclude: [
+      // 浏览器 runner 专用（happy-dom 环境），由 vitest.browser.config.ts 收集。
+      'tests/browser/**',
+      'tests/fuzz/**',
+      'node_modules/**',
+      'dist/**',
+    ],
     environment: 'node',
     // SM9 pairing 测试单测粒度需要 ≥ 60s (sm9 sign 10s + verify 16s + encrypt 10s + decrypt 7s);
     // 完整 pnpm test 跑约 130-150s 在 2m0s 主机 cap 内可一次跑完。
