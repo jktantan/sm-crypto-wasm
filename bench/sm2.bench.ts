@@ -1,26 +1,60 @@
 /**
  * SM2 基准。
  *
- * 签/验/加/解：均为单次调用（带 32 字节短消息 + 32 字节私钥），命中 wasm 入口
- * 的恒定成本（无大循环压力）。密钥生成放进来方便对比"一次性 vs 持续调用"。
+ * 覆盖本库 SM2 的全部公开操作：公钥派生、密钥对生成、签名/验签、加密/解密
+ * （C1C3C2）与一次完整的密钥交换（A↔B 三方消息流，含两端取共享密钥）。
+ *
+ * 签/验/加/解均为单次调用（32 字节私钥 + 64 字节消息），命中 wasm 入口的恒定
+ * 成本；密钥生成与密钥交换是异步（含宿主 CSPRNG）。
  */
 import { bench, group } from 'mitata';
-import { decrypt, encrypt, ensureLoaded, getPublicKey, sign, verify } from '../src/sm2/index.js';
+import {
+  createExchangeInitiator,
+  createExchangeResponder,
+  decrypt,
+  encrypt,
+  ensureLoaded,
+  generateKeyPair,
+  getPublicKey,
+  sign,
+  verify,
+} from '../src/sm2/index.js';
 
 const D = '3945208f7b2144b13f36e38ac6d39f95889393692860b51a42fb81ef4df7c5b8';
+/** 对端私钥（仅用于基准的密钥交换，合法标量：< n）。 */
+const D2 = '6fcba2e4c3ab5a4d0b5c1e8f7a9d3b2c4e5f60718293a4b5c6d7e8f90a1b2c3d';
+/** 固定的临时私钥，避免把 CSPRNG 开销算进密钥交换（两侧必须用同一对）。 */
+const RA = '1111111111111111111111111111111111111111111111111111111111111111';
+const RB = '2222222222222222222222222222222222222222222222222222222222222222';
 const MSG = new Uint8Array(64).fill(0x5a);
 
 export async function benchSm2(): Promise<void> {
   await ensureLoaded();
-  getPublicKey(D);
-  const sig = sign(D, MSG);
-  verify(getPublicKey(D), MSG, sig);
   const pub = getPublicKey(D);
+  const pub2 = getPublicKey(D2);
+  const sig = sign(D, MSG);
+  verify(pub, MSG, sig);
   const ct = encrypt(pub, MSG);
   decrypt(D, ct);
+
+  const kex = async (): Promise<void> => {
+    const a = await createExchangeInitiator(D, pub2, { ephemeralPrivateKey: RA });
+    const m1 = a.initiate();
+    const b = await createExchangeResponder(D2, pub, { ephemeralPrivateKey: RB });
+    const m2 = b.respond(m1);
+    const conf = a.confirm(m2); // 返回的是 A 自己的确认值 S_A
+    b.getSharedKey(conf); // B 用 S_A 校验并派生
+    a.getSharedKey(conf); // A 用同一个 S_A 派生（SM2 的发起方签名收 InitiatorConfirm）
+  };
+  await kex(); // 预热 + 自检
+  await generateKeyPair();
+
   group('SM2', () => {
     bench('publicKey derive (point mul)', () => {
       getPublicKey(D);
+    });
+    bench('generateKeyPair', async () => {
+      await generateKeyPair();
     });
     bench('sign 64B', () => {
       sign(D, MSG);
@@ -33,6 +67,9 @@ export async function benchSm2(): Promise<void> {
     });
     bench('decrypt 64B (auto)', () => {
       decrypt(D, ct);
+    });
+    bench('key exchange (full A↔B)', async () => {
+      await kex();
     });
   });
 }

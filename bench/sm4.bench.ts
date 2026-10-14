@@ -1,11 +1,19 @@
 /**
  * SM4 基准。
  *
- * 覆盖：ECB / CBC / CTR / GCM 四种典型模式；
+ * 覆盖本库 SM4 的全部模式：ECB / CBC / CTR / CFB / OFB / GCM 加密。
  * 短/中两档输入（16 字节与 1KB），命中"分块一次"与"多块循环"两套路径。
  */
 import { bench, group } from 'mitata';
-import { cryptCTR, encryptCBC, encryptECB, encryptGCM, ensureLoaded } from '../src/sm4/index.js';
+import {
+  cryptCTR,
+  cryptOFB,
+  encryptCBC,
+  encryptCFB,
+  encryptECB,
+  encryptGCM,
+  ensureLoaded,
+} from '../src/sm4/index.js';
 
 const KEY = new Uint8Array(16).fill(0x11);
 const IV = new Uint8Array(16).fill(0x22);
@@ -21,6 +29,9 @@ export async function benchSm4(): Promise<void> {
   await ensureLoaded();
   for (const [, msg] of SIZES) encryptECB(KEY, msg);
   encryptGCM(KEY, GCM_IV, SIZES_NO_16B[0][1]);
+  encryptCBC(KEY, IV, SIZES_NO_16B[0][1]);
+  encryptCFB(KEY, IV, SIZES_NO_16B[0][1]);
+  cryptOFB(KEY, IV, SIZES_NO_16B[0][1]);
   group('SM4', () => {
     for (const [label, msg] of SIZES) {
       bench(`ECB encrypt ${label}`, () => {
@@ -33,6 +44,12 @@ export async function benchSm4(): Promise<void> {
       });
       bench(`CTR encrypt ${label}`, () => {
         cryptCTR(KEY, IV, msg);
+      });
+      bench(`CFB encrypt ${label}`, () => {
+        encryptCFB(KEY, IV, msg);
+      });
+      bench(`OFB encrypt ${label}`, () => {
+        cryptOFB(KEY, IV, msg);
       });
       bench(`GCM encrypt ${label}`, () => {
         encryptGCM(KEY, GCM_IV, msg);
