@@ -193,3 +193,27 @@ GREEN；全量套件 112/112。
 - `sm2.decrypt` 的 auto 模式会为错误密文多跑一次解密 —— 裁决：常数级开销，
   换来"无需外部提示即可识别两种顺序"，保留。
 - spec §4/§5 与 §13 与实际的 rollup / CJS 差异 —— 裁决：已写入 spec §14，不再改历史章节。
+
+---
+
+# P2 批次（2026-10-14，plan 关闭后的新工作）
+
+用户裁决："先处理 P2"。范围＝ spec §14 的 P2 清单 + 本轮新留的缺口。
+
+### Task 1 — SM3 摘要类接受空输入
+
+- 起因：spec §14 的 P2 第 3 条。核对后**更正一处事实**：`toBytes('')` 本来就抛
+  `TypeError`（`src/runtime/convert.ts:44`），真正的不一致是 `hash('')` 抛而
+  `hash(new Uint8Array(0))` 能算出摘要。
+- 用户裁决："摘要类接受空输入（对齐 SM3 定义）"。依据：SM3 的输入是任意比特串
+  （GM/T 0004-2012），空串 `l = 0` 填充后恰好是一个完整 512 比特块；实测
+  `SM3("") = 1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b`
+  （Node v26.7.0 / OpenSSL 3.5.7；同一 oracle 复现了 GM/T 0004 附录 A 的 `SM3("abc")`）。
+- 实现：`src/sm3/index.ts` 新增 `digestInput()`，只对 SM3 的 msg/key 放行零长度输入；
+  `toBytes` 的"空输入抛错"保持原样（那是给密钥 / IV / 密文这类固定长度契约用的）。
+- 测试：`npx vitest run --config vitest.config.ts tests/sm3-oracle.spec.ts` → 9/9 pass。
+- `Ruling:` 与 plan Task 7 的 `expect(() => hash('')).toThrow(TypeError)` 相反 ——
+  算法定义优先于 plan 的 Review Focus #1，该条已在 spec §14 更正。代价：按 plan
+  原文写用例的调用方会看到不同行为；plan 正文本轮不改，只在 §14 记录。
+- 过程备注：首次写 hmac 用例时踩了字符串嗅探的坑（`'abc'` 奇数长度非 hex → 被当
+  base64），改用字节输入后通过；该坑在同文件顶部注释里本来就有警告。

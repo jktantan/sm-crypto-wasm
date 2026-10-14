@@ -48,13 +48,25 @@ function getModule(): Sm3Module {
 }
 
 /**
+ * 消息/密钥归一化。与通用 `toBytes` 不同，这里**放行空输入**：
+ * SM3 的输入是任意比特串（GM/T 0004-2012），空串（l = 0）填充后是一个完整的
+ * 512 比特块、结果唯一；HMAC 对空 key / 空消息同样有定义（RFC 2104）。
+ * `toBytes('')` 的抛错是给"漏填参数"设计的，对摘要类输入不适用。
+ */
+function digestInput(input: string | Uint8Array, label: string): Uint8Array {
+  if (input instanceof Uint8Array && input.length === 0) return new Uint8Array(0);
+  if (input === '') return new Uint8Array(0);
+  return toBytes(input, label);
+}
+
+/**
  * SM3 摘要（同步）。
  *
- * @param input 任意输入（hex / base64 / Uint8Array / 字符串）。
+ * @param input 任意输入（hex / base64 / Uint8Array / 字符串）；空输入按零长度消息处理。
  * @returns 32 字节摘要的 hex 字符串（64 字符）。
  */
 export function hash(input: string | Uint8Array): string {
-  const bytes = toBytes(input, 'msg');
+  const bytes = digestInput(input, 'msg');
   const { exports, memory } = getModule();
   const inputLen = bytes.length;
   // 从 WASM 堆分配缓冲区；**不可**用固定地址，否则覆盖 AS runtime 数据。
@@ -78,8 +90,8 @@ export function hash(input: string | Uint8Array): string {
  * @returns 32 字节摘要的 hex 字符串。
  */
 export function hmac(key: string | Uint8Array, msg: string | Uint8Array): string {
-  const k = toBytes(key, 'key');
-  const m = toBytes(msg, 'msg');
+  const k = digestInput(key, 'key');
+  const m = digestInput(msg, 'msg');
   const blockKey = k.length > 64 ? toBytes(hash(k), 'key64') : k;
   const padded = new Uint8Array(64);
   padded.set(blockKey);
