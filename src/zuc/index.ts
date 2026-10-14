@@ -90,6 +90,14 @@ export function zucKeystream(
 
 // ---------------- EIA3 完整性算法（GM/T 0001.3-2012） ----------------
 
+/** `zucMac` 选项。位置参数与 options 对象等价；对象形式给将来的扩展留位。 */
+export interface ZucMacOptions {
+  /** 参与计算的消息比特数，默认 `msg.length * 8`。 */
+  bitLength?: number;
+  /** 标签位数。当前只支持 32（ZUC-256 的 64/128 位属 Non-Goals）。 */
+  tagBits?: number;
+}
+
 /**
  * 计算 EIA3 完整性标签（GM/T 0001.3-2012 / 3GPP TS 35.221）。
  *
@@ -109,17 +117,22 @@ export function zucMac(
   key: string | Uint8Array,
   iv: string | Uint8Array,
   msg: string | Uint8Array,
-  bitLength?: number,
-  tagBits = 32,
+  bitLengthOrOptions?: number | ZucMacOptions,
+  tagBits?: number,
 ): Uint8Array {
-  if (tagBits !== 32) {
+  const opts: ZucMacOptions =
+    typeof bitLengthOrOptions === 'object' && bitLengthOrOptions !== null
+      ? bitLengthOrOptions
+      : { bitLength: bitLengthOrOptions, tagBits };
+  const resolvedTagBits = opts.tagBits ?? 32;
+  if (resolvedTagBits !== 32) {
     throw new RangeError(
-      `zuc EIA3: 仅支持 32 位标签，收到 ${tagBits}（ZUC-256 的 64/128 位不在本期范围）`,
+      `zuc EIA3: 仅支持 32 位标签，收到 ${resolvedTagBits}（ZUC-256 的 64/128 位不在本期范围）`,
     );
   }
   const { k, v } = keyIv(key, iv);
   const m = toBytes(msg, 'msg');
-  const nbits = bitLength ?? m.length * 8;
+  const nbits = opts.bitLength ?? m.length * 8;
   if (!Number.isInteger(nbits) || nbits < 0 || nbits > m.length * 8) {
     throw new RangeError(
       `zuc EIA3: bitLength 必须是 [0, ${m.length * 8}] 内的整数，收到 ${nbits}`,
@@ -143,6 +156,36 @@ export function zucMac(
   }
 }
 
+/**
+ * 按 GM/T 0001.3-2012 / 3GPP TS 35.221 的布局，把 COUNT / BEARER / DIRECTION
+ * 组装成 EIA3 的 16 字节 IV（两段等长的 64-bit 结构，见 GmSSL `zuc_set_eia_iv`）。
+ *
+ * @param count 32 位计数器。
+ * @param bearer 5 位承载标识（0..31）。
+ * @param direction 方向位（0 或 1）。
+ * @returns 16 字节 IV，可直接交给 `zucMac`。
+ */
+export function zucEia3Iv(count: number, bearer: number, direction: number): Uint8Array {
+  if (!Number.isInteger(count) || count < 0 || count > 0xffffffff) {
+    throw new RangeError(`zuc EIA3: count 必须是 32 位无符号整数，收到 ${count}`);
+  }
+  if (!Number.isInteger(bearer) || bearer < 0 || bearer > 31) {
+    throw new RangeError(`zuc EIA3: bearer 必须是 0..31，收到 ${bearer}`);
+  }
+  if (direction !== 0 && direction !== 1) {
+    throw new RangeError(`zuc EIA3: direction 必须是 0 或 1，收到 ${direction}`);
+  }
+  const iv = new Uint8Array(16);
+  iv[0] = (count >>> 24) & 0xff;
+  iv[1] = iv[9] = (count >>> 16) & 0xff;
+  iv[2] = iv[10] = (count >>> 8) & 0xff;
+  iv[3] = iv[11] = count & 0xff;
+  iv[4] = iv[12] = (bearer << 3) & 0xff;
+  iv[8] = (iv[0] ?? 0) ^ ((direction << 7) & 0xff);
+  iv[14] = (direction << 7) & 0xff;
+  return iv;
+}
+
 // ---------------- EEA3 机密性算法（GM/T 0001.2-2012） ----------------
 
 /**
@@ -153,24 +196,54 @@ export function zucMac(
  */
 const usedNonces = new Map<string, true>();
 
+/** 复用保护的默认容量上限（FIFO 淘汰最旧一条），可用 `configureReuseGuard` 调整。 */
+const DEFAULT_REUSE_GUARD_CAPACITY = 4096;
+
+let reuseGuardEnabled = true;
+let reuseGuardCapacity = DEFAULT_REUSE_GUARD_CAPACITY;
+
+/** `configureReuseGuard` 的选项。 */
+export interface ReuseGuardOptions {
+  /** 是否启用复用保护（默认 true）。关掉后同一 (key, iv, counter) 可重复加密。 */
+  enabled?: boolean;
+  /** 记录上限，超出后 FIFO 淘汰最旧一条（默认 4096）。记录必须有界。 */
+  capacity?: number;
+}
+
 /**
- * 复用记录的容量上限。超出后按 FIFO 淘汰最旧一条 —— 记录必须有界，
- * 否则长生命周期进程里这张表会无界增长（每条记录约 100 字符）。
+ * 调整 ZUC 复用保护策略。
+ *
+ * 默认 `{ enabled: true, capacity: 4096 }`。关掉保护只应在"按协议保证不重复使用
+ * 同一密钥流"的场景里做，例如密钥/IV 由外部计数器严格管理。
  */
-const REUSE_GUARD_CAPACITY = 4096;
+export function configureReuseGuard(opts: ReuseGuardOptions): void {
+  if (opts.capacity !== undefined) {
+    if (!Number.isInteger(opts.capacity) || opts.capacity < 1) {
+      throw new RangeError(`zuc: capacity 必须是正整数，收到 ${opts.capacity}`);
+    }
+    reuseGuardCapacity = opts.capacity;
+  }
+  if (opts.enabled !== undefined) reuseGuardEnabled = opts.enabled;
+  evictOverflow();
+}
 
 function nonceId(k: Uint8Array, v: Uint8Array, counter: number): string {
   return `${bytesToHex(k)}:${bytesToHex(v)}:${counter}`;
 }
 
-/** 记录一条已用过的 (key, iv, counter)，超出容量时淘汰最旧一条。 */
-function rememberNonce(id: string): void {
-  usedNonces.set(id, true);
-  while (usedNonces.size > REUSE_GUARD_CAPACITY) {
+/** FIFO 淘汰多余记录，保证表有界。 */
+function evictOverflow(): void {
+  while (usedNonces.size > reuseGuardCapacity) {
     const oldest = usedNonces.keys().next();
     if (oldest.done) break;
     usedNonces.delete(oldest.value);
   }
+}
+
+/** 记录一条已用过的 (key, iv, counter)。 */
+function rememberNonce(id: string): void {
+  usedNonces.set(id, true);
+  evictOverflow();
 }
 
 /** 清空 (key, iv, counter) 复用记录。仅供测试与明确的密钥轮换场景使用。 */
@@ -187,6 +260,12 @@ function xorKeystream(k: Uint8Array, v: Uint8Array, data: string | Uint8Array): 
   return out;
 }
 
+/** `zucEncrypt` 选项。 */
+export interface ZucEncryptOptions {
+  /** 本次调用是否参与复用保护（默认 true；全局开关见 `configureReuseGuard`）。 */
+  reuseGuard?: boolean;
+}
+
 /**
  * ZUC-128 EEA3 加密。
  *
@@ -197,23 +276,29 @@ function xorKeystream(k: Uint8Array, v: Uint8Array, data: string | Uint8Array): 
  * @param iv 16 字节 IV。
  * @param data 明文。
  * @param counter 计数器，参与复用判定（默认 0）。
- * @throws Error 当 (key, iv, counter) 已被使用过。
+ * @param opts `reuseGuard: false` 可显式跳过本次复用保护。
+ * @throws InvalidKeyError 当 (key, iv, counter) 已被使用过。
  */
 export function zucEncrypt(
   key: string | Uint8Array,
   iv: string | Uint8Array,
   data: string | Uint8Array,
   counter = 0,
+  opts: ZucEncryptOptions = {},
 ): Uint8Array {
   const { k, v } = keyIv(key, iv);
   if (!Number.isInteger(counter) || counter < 0) {
     throw new RangeError(`zuc: counter 必须是非负整数，收到 ${counter}`);
   }
+  if (!(opts.reuseGuard ?? true) || !reuseGuardEnabled) {
+    return xorKeystream(k, v, data);
+  }
   const id = nonceId(k, v, counter);
   if (usedNonces.has(id)) {
-    throw new Error(
+    throw new InvalidKeyError(
       `zuc: (key, iv, counter) 复用拒绝 —— 该组合已加密过一次（counter=${counter}）；` +
-        '重复使用同一密钥流会破坏机密性。解密请用 zucDecrypt()。',
+        '重复使用同一密钥流会破坏机密性。解密请用 zucDecrypt()，' +
+        '确有需要可传 { reuseGuard: false } 或 configureReuseGuard({ enabled: false })。',
     );
   }
   const out = xorKeystream(k, v, data);

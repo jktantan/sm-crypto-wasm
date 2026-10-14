@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { zucKeystream, zucEncrypt, zucDecrypt, zucMac, ensureLoaded } from '@/zuc';
+import {
+  zucKeystream,
+  zucEncrypt,
+  zucDecrypt,
+  zucMac,
+  zucEia3Iv,
+  configureReuseGuard,
+  ensureLoaded,
+} from '@/zuc';
 import { randomBytes } from '@/runtime/random';
 import eia3Vectors from './vectors/zuc/eia3.json';
 
@@ -12,22 +20,9 @@ const KEY = Buffer.alloc(16);
 const IV = Buffer.alloc(16);
 
 /**
- * 按 GmSSL `zuc_set_eia_iv` 的比特布局把 COUNT/BEARER/DIRECTION 组装成 16 字节 IV。
- *
- * EIA3 的 IV 是两段等长的 64-bit 结构：
- *   COUNT(32) || BEARER(5) || DIRECTION(1) || 0(26)
+ * EIA3 的 IV 构造现已由库提供（`zucEia3Iv`）—— 早先这段逻辑只存在于本测试里。
  */
-function eia3Iv(count: number, bearer: number, direction: number): Uint8Array {
-  const iv = new Uint8Array(16);
-  iv[0] = (count >>> 24) & 0xff;
-  iv[1] = iv[9] = (count >>> 16) & 0xff;
-  iv[2] = iv[10] = (count >>> 8) & 0xff;
-  iv[3] = iv[11] = count & 0xff;
-  iv[4] = iv[12] = (bearer << 3) & 0xff;
-  iv[8] = (iv[0] ?? 0) ^ ((direction << 7) & 0xff);
-  iv[14] = (direction << 7) & 0xff;
-  return iv;
-}
+const eia3Iv = zucEia3Iv;
 
 describe('ZUC vs reference (gmkitx)', () => {
   beforeAll(async () => {
@@ -126,5 +121,64 @@ describe('ZUC (key, iv, counter) reuse guard', () => {
     expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 0)).not.toThrow();
     // 最近的一条仍在保护中。
     expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 4096)).toThrow(/复用/);
+  });
+});
+
+/**
+ * API 平滑化：位置参数换成 options 对象也能用；复用保护可关/可调容量；
+ * EIA3 的 IV 构造是公共 API 而不是测试私有逻辑。
+ */
+describe('ZUC API 扩展点', () => {
+  const K = new Uint8Array(16).fill(3);
+  const V = new Uint8Array(16).fill(5);
+  const M = new Uint8Array([1, 2, 3, 4]);
+
+  beforeAll(async () => {
+    await ensureLoaded();
+  });
+
+  it('zucMac 的位置参数与 options 对象等价', () => {
+    const byPos = Buffer.from(zucMac(K, V, M, 32)).toString('hex');
+    expect(Buffer.from(zucMac(K, V, M, { bitLength: 32 })).toString('hex')).toBe(byPos);
+    expect(Buffer.from(zucMac(K, V, M, { bitLength: 32, tagBits: 32 })).toString('hex')).toBe(
+      byPos,
+    );
+  });
+
+  it('options 形式下非法 tagBits 仍抛 RangeError', () => {
+    expect(() => zucMac(K, V, M, { tagBits: 64 })).toThrow(RangeError);
+  });
+
+  it('zucEia3Iv 按 3GPP TS 35.221 的布局组装 IV', () => {
+    expect(Buffer.from(zucEia3Iv(0x66035492, 0x0f, 0)).toString('hex')).toBe(
+      '66035492780000006603549278000000',
+    );
+    expect(() => zucEia3Iv(-1, 0, 0)).toThrow(RangeError);
+    expect(() => zucEia3Iv(0, 32, 0)).toThrow(RangeError);
+    expect(() => zucEia3Iv(0, 0, 2)).toThrow(RangeError);
+  });
+
+  it('zucEncrypt 可用 reuseGuard: false 显式跳过保护', () => {
+    const k = randomBytes(16);
+    const iv = randomBytes(16);
+    zucEncrypt(k, iv, new Uint8Array([1]));
+    expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 0, { reuseGuard: false })).not.toThrow();
+  });
+
+  it('configureReuseGuard 可调容量与总开关', () => {
+    const k = randomBytes(16);
+    const iv = randomBytes(16);
+    configureReuseGuard({ capacity: 4 });
+    try {
+      for (let i = 0; i < 5; i++) zucEncrypt(k, iv, new Uint8Array([1]), i);
+      // 容量 4 → counter=0 已被挤出窗口。
+      expect(() => zucEncrypt(k, iv, new Uint8Array([2]), 0)).not.toThrow();
+
+      configureReuseGuard({ enabled: false });
+      // guard 关闭后，刚用过的 counter=4 也能再用。
+      expect(() => zucEncrypt(k, iv, new Uint8Array([3]), 4)).not.toThrow();
+    } finally {
+      configureReuseGuard({ enabled: true, capacity: 4096 });
+    }
   });
 });

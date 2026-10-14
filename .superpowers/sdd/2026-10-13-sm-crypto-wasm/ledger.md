@@ -333,3 +333,22 @@ GREEN；全量套件 112/112。
   长度校验点绝大多数是主私钥 / 标量；改默认值只动 1 处，改调用点要动 10+ 处且文本重复。
   代价：`r`（随机标量）长度错现在抛 `InvalidKeyError` 而非 `RangeError` —— 已在
   `errors.ts` 注释里把密钥支定义为"密钥 / 标量输入"以对齐。
+
+### Task 2 — ZUC 平滑化
+
+- `zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`：第 4 参现在也接受
+  `ZucMacOptions` 对象（`{ bitLength?, tagBits? }`），位置参数写法保持有效。
+  将来 ZUC-256 的参数（密钥长度、字长…）加进 options 即可，不必再动位置参数。
+- 复用保护可配置：`zucEncrypt(..., opts?: { reuseGuard?: boolean })` +
+  `configureReuseGuard({ enabled?, capacity? })`；容量默认 4096，FIFO 保持有界。
+- 新增 `zucEia3Iv(count, bearer, direction)`：把原先只活在测试里的 IV 布局（照 GmSSL
+  `zuc_set_eia_iv`）提升为公共 API，并校验 count/bearer/direction 的取值范围。
+- 复用拒绝的错误类型由裸 `Error` 改为 `InvalidKeyError`（属"密钥使用策略"问题），
+  消息里仍保留"复用"字样，故既有断言不受影响。
+- 测试：`tests/zuc.spec.ts` → 17/17；全量 → 20 文件 138/138 pass。
+- `Ruling:` `zucMac` 第 4 参保留"位置参数与 options 双形态"，而不是直接改成纯 options。
+  理由：spec §6 写的是 `zuc.mac(key, iv, 'msg', 32)`，纯 options 会让文档示例失效。
+  代价：签名是联合类型，比单一形态啰嗦。
+- `Ruling:` 复用保护同时提供"调用级"与"全局级"开关。理由：有的调用方按协议保证不重复
+  使用密钥流（外部计数器严格管理），不该被库拦死；而默认仍站在安全一侧。
+  代价：`configureReuseGuard` 是进程级状态，同进程多租户场景需谨慎。
