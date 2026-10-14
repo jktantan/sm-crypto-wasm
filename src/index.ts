@@ -26,6 +26,7 @@ export * as zuc from './zuc/index.js';
 export {
   SmCryptoError,
   InvalidKeyError,
+  InvalidPublicKeyError,
   InvalidCiphertextError,
   DecryptionError,
   isSmCryptoError,

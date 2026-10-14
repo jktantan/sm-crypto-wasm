@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { sm2GetPublicKeyFromPrivateKey, sm2Encrypt } from 'gmkitx';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '@/pem';
+import { InvalidPublicKeyError } from '@/runtime';
 import * as sm2 from '@/sm2';
 
 const D = '3945208f7b2144b13f36e38ac6d39f95889393692860b51a42fb81ef4df7c5b8';
@@ -128,5 +129,45 @@ describe('SM2 key generation & ciphertext ordering', () => {
     const c123 = sm2.encrypt(pub, msg, { outputFormat: 'C1C2C3' });
     expect(sm2.decrypt(D, c132)).toBe(sm2.decrypt(D, c123));
     expect(Buffer.from(sm2.decrypt(D, c132), 'hex').toString('utf8')).toBe('ordering matters');
+  });
+});
+
+/**
+ * 公钥合法性：不在曲线上的点必须在**使用前**被拒绝（plan Review Focus #3）。
+ * encrypt 抛 `InvalidPublicKeyError`；verify 返回 false（不抛）。
+ */
+describe('SM2 公钥合法性', () => {
+  const ONES = new Uint8Array([1]);
+
+  beforeAll(async () => {
+    await sm2.ensureLoaded();
+  });
+
+  it('encrypt throws InvalidPublicKeyError for a point off the curve', () => {
+    // x = y = 0：不在曲线（b ≠ 0），且这是仿射表示里最典型的坏点。
+    expect(() => sm2.encrypt(new Uint8Array(64), ONES)).toThrow(InvalidPublicKeyError);
+    // 同一坏点以 04 前缀 + hex 形式传入，也要被拒。
+    expect(() => sm2.encrypt('04' + '00'.repeat(64), ONES)).toThrow(InvalidPublicKeyError);
+  });
+
+  it('encrypt rejects coordinates that exceed the field prime', () => {
+    expect(() => sm2.encrypt(new Uint8Array(64).fill(0xff), ONES)).toThrow(
+      InvalidPublicKeyError,
+    );
+  });
+
+  it('encrypt accepts a genuine public key', () => {
+    expect(() => sm2.encrypt(sm2.getPublicKey(D), ONES)).not.toThrow();
+  });
+
+  it('verify returns false (does not throw) for an off-curve public key', () => {
+    const sig = sm2.sign(D, MSG);
+    expect(sm2.verify(new Uint8Array(64), MSG, sig)).toBe(false);
+    expect(sm2.verify(new Uint8Array(64).fill(0xff), MSG, sig)).toBe(false);
+  });
+
+  it('verify still returns true for a genuine public key', () => {
+    const sig = sm2.sign(D, MSG);
+    expect(sm2.verify(sm2.getPublicKey(D), MSG, sig)).toBe(true);
   });
 });

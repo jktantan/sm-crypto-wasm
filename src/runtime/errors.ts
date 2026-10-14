@@ -29,7 +29,12 @@ export class SmCryptoError extends Error {
 
 /** 密钥无效：解析失败、OID 不支持、点不在曲线上、长度不对等。 */
 export class InvalidKeyError extends SmCryptoError {
-  override readonly name = 'InvalidKeyError';
+  override readonly name: string = 'InvalidKeyError';
+}
+
+/** 公钥无效：不在曲线上、坐标越界、或为无穷远点。 */
+export class InvalidPublicKeyError extends InvalidKeyError {
+  override readonly name = 'InvalidPublicKeyError';
 }
 
 /** 密文无效：长度、版本字节、ASN.1 结构不符合规范。 */

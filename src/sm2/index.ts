@@ -20,7 +20,7 @@ import { fromBytes, toBytes } from '../runtime/convert.js';
 import { randomScalarBelow } from '../runtime/random.js';
 import { toPrivateKeyBytes, toPublicKeyBytes } from './keyInput.js';
 import { encodeSm2PrivateKeyPem, encodeSm2PublicKeyPem } from '../pem/sm2.js';
-import { DecryptionError } from '../runtime/errors.js';
+import { DecryptionError, InvalidPublicKeyError } from '../runtime/errors.js';
 
 interface Sm2Exports extends WebAssembly.Exports {
   readonly alloc: (n: number) => number;
@@ -47,6 +47,37 @@ interface Sm2Module {
 
 /** 曲线阶 n（SM2），用于随机数范围。 */
 const N = BigInt('0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123');
+
+/** 素域特征 p。 */
+const CURVE_P = BigInt('0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFF');
+
+/** 曲线系数 a = p - 3。 */
+const CURVE_A = BigInt('0xFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFC');
+
+/** 曲线系数 b。 */
+const CURVE_B = BigInt('0x28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93');
+
+/** 大端字节 → bigint。 */
+function bytesToBigInt(b: Uint8Array): bigint {
+  let v = 0n;
+  for (let i = 0; i < b.length; i++) v = (v << 8n) | BigInt(b[i] ?? 0);
+  return v;
+}
+
+/**
+ * 公钥点是否在 SM2 曲线上：`y² ≡ x³ + ax + b (mod p)`，且两坐标都落在 Fp 内。
+ *
+ * 使用前拒绝坏点可以挡掉"错误子群 / 无效曲线点"这类攻击面（plan Review Focus #3）。
+ */
+function isOnCurve(x: Uint8Array, y: Uint8Array): boolean {
+  const X = bytesToBigInt(x);
+  const Y = bytesToBigInt(y);
+  if (X >= CURVE_P || Y >= CURVE_P) return false;
+  const lhs = (Y * Y) % CURVE_P;
+  const x3 = (((X * X) % CURVE_P) * X) % CURVE_P;
+  const rhs = (x3 + ((CURVE_A * X) % CURVE_P) + CURVE_B) % CURVE_P;
+  return lhs === rhs;
+}
 
 /** 预热 WASM 模块。 */
 export async function ensureLoaded(): Promise<void> {
@@ -210,6 +241,8 @@ export function verify(
   signature: string | Uint8Array,
 ): boolean {
   const { x, y } = splitPub(publicKey);
+  // 公钥不合法时按"验签不通过"处理，不抛错（plan Review Focus #3）。
+  if (!isOnCurve(x, y)) return false;
   const m = toBytes(message, 'message');
   const sig = toBytes(signature, 'signature');
   if (sig.length !== 64) throw new RangeError('sm2: signature must be 64 bytes');
@@ -248,6 +281,9 @@ export function encrypt(
     throw new RangeError(`sm2.encrypt: 未知的 outputFormat ${String(format)}`);
   }
   const { x, y } = splitPub(publicKey);
+  if (!isOnCurve(x, y)) {
+    throw new InvalidPublicKeyError('sm2.encrypt: public key is not a point on the SM2 curve');
+  }
   const m = toBytes(message, 'message');
   const { exports } = getModule();
   const mem = new Uint8Array(getModule().memory.buffer);

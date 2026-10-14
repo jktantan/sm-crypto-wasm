@@ -234,3 +234,21 @@ GREEN；全量套件 112/112。
 - `Ruling:` `sm9.kemDecrypt` 的失败（封装非法 / K 全 0）本轮不纳入。理由：其失败原因
   包含"K 全 0"这种非校验性退化，不纯是"解密校验未通过"。代价：SM9 KEM 调用方暂时拿不到
   统一类型（记为 deferred minor）。
+
+### Task 3 — SM2 公钥曲线校验 + InvalidPublicKeyError
+
+- `src/runtime/errors.ts` 新增 `InvalidPublicKeyError extends InvalidKeyError`（plan
+  Review Focus #3 指定的名字）；facade 一并导出。
+- `src/sm2/index.ts` 新增曲线常量（p / a / b）与 `isOnCurve()`：校验
+  `y² ≡ x³ + ax + b (mod p)` 且两坐标都 < p。
+- `encrypt` 在构造密文前拒绝坏点（抛 `InvalidPublicKeyError`）；`verify` 对坏点返回
+  false 而不抛（plan 明确要求）。
+- 测试：`npx vitest run --config vitest.config.ts tests/sm2.spec.ts tests/errors.spec.ts
+  tests/sm2-kex-official.spec.ts` → 25/25 pass。
+- `Ruling:` 用新的子类而不是把坏点塞进 `InvalidKeyError`。理由：plan 指定了
+  `InvalidPublicKeyError` 这个名字，而继承 `InvalidKeyError` 让既有的
+  `catch (e) { e instanceof InvalidKeyError }` 调用方不受影响。代价：错误层级多一层。
+- `Ruling:` 曲线判定用 TS 层 BigInt，不下沉到 wasm。理由：每次调用只做一次常数级模运算，
+  而改 wasm 要重编 sm2.wasm。代价：校验不在常数时间内完成（输入是公开公钥，无秘密依赖）。
+- 附带修正：`InvalidKeyError.name` 补 `: string` 标注 —— 原先被推断成字面量类型，
+  子类无法覆盖 `name`（TS2416）。
