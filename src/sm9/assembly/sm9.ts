@@ -33,10 +33,11 @@ import {
   g1Add,
   g1Generator,
   g1Mul,
+  g1MulG,
   g1ToAffine,
   g2Add,
   g2Generator,
-  g2Mul,
+  g2MulG,
   g2ToAffine,
 } from './point';
 
@@ -121,7 +122,7 @@ export function signExtractKeyDs(ks: U256, id: StaticArray<u8>, idLen: i32): G1 
   const h1 = hash1(id, idLen, HID_SIGN);
   const t1 = addModN(h1, ks);
   const t2 = mulModN(ks, invModN(t1));
-  return g1Mul(t2, g1Generator());
+  return g1MulG(t2);
 }
 
 /** t2 = ks·(H1+ks)^{-1} mod n（签名私钥标量）。 */
@@ -136,7 +137,7 @@ function extractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32, hid: u8): G2 {
   const h1 = hash1(id, idLen, hid);
   const t1 = addModN(h1, ke);
   const t2 = mulModN(ke, invModN(t1));
-  return g2Mul(t2, g2Generator());
+  return g2MulG(t2);
 }
 
 /** 加密私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x03）。 */
@@ -151,12 +152,12 @@ export function exchExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 
 
 /** Ppubs = [ks]P2。 */
 export function signMasterPublic(ks: U256): G2 {
-  return g2Mul(ks, g2Generator());
+  return g2MulG(ks);
 }
 
 /** Ppube = [ke]P1。 */
 export function encMasterPublic(ke: U256): G1 {
-  return g1Mul(ke, g1Generator());
+  return g1MulG(ke);
 }
 
 // ---------- 公开配对值缓存 ----------
@@ -406,7 +407,7 @@ export function sm9Verify(
   const id = new StaticArray<u8>(idLen);
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
   const h1 = hash1(id, idLen, HID_SIGN);
-  const P2 = g2Add(g2Mul(h1, g2Generator()), ppubs);
+  const P2 = g2Add(g2MulG(h1), ppubs);
 
   const u = sm9Pairing(g2ToAffine(P2), S);
   const w = fp12Mul(u, t);
@@ -433,7 +434,7 @@ export function sm9Encrypt(
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
 
   const h1 = hash1(id, idLen, HID_ENC);
-  const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
+  const Q = g1Add(g1MulG(h1), ppube);
   const g = encG(ppube);
   const w = fp12Pow(g, r);
 
@@ -546,7 +547,7 @@ export function sm9KemEncrypt(
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
 
   const h1 = hash1(id, idLen, HID_ENC);
-  const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
+  const Q = g1Add(g1MulG(h1), ppube);
   const C = g1Mul(r, Q);
 
   const g = encG(ppube);
@@ -671,7 +672,7 @@ export function sm9ExchEphemeral(
 ): void {
   const peerId = ldBytes(peerIdPtr, peerIdLen);
   const h1 = hash1(peerId, peerIdLen, HID_EXCH);
-  const Q = g1Add(g1Mul(h1, g1Generator()), ppube);
+  const Q = g1Add(g1MulG(h1), ppube);
   const R = g1Compressed(g1Mul(r, Q));
   for (let i = 0; i < 65; i++) store<u8>(outPtr + i, R[i]);
 }
