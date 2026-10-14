@@ -602,6 +602,77 @@ export function scalarMulG(k: U256): JPoint {
   return Q;
 }
 
+// ---------- 联合标量乘 s·G + t·P（验签用） ----------
+//
+// 「comb 算 s·G + wNAF 算 t·P 再相加」要 51 + 256 = 307 次倍点；两条 wNAF 共享
+// 同一串倍点后只需 256 次（省掉 comb 那 51 次倍点），代价是 s 侧要多做 ~43 次点加
+// （G 的 wNAF 表），而点加远比倍点便宜。G 的表与 comb 表一样惰性缓存、且转仿射。
+
+let g1WnafCache: StaticArray<JPoint> = new StaticArray<JPoint>(0); // 16 项：0..7 正，8..15 负
+
+/**
+ * G 的 wNAF 预计算表（G, 3G, …, 15G 及其负），转仿射后永久缓存。
+ * 仿射 → 联合循环里的 G 侧加法可走混合坐标（8M+3S）。
+ */
+function gWnafTable(): StaticArray<JPoint> {
+  if (g1WnafCache.length === 0) {
+    const all = new StaticArray<JPoint>(WNAF_TABLE * 2);
+    all[0] = basePoint();
+    const step = doublePoint(all[0]); // 2G
+    for (let i = 1; i < WNAF_TABLE; i++) all[i] = addPoints(all[i - 1], step);
+    for (let i = 0; i < WNAF_TABLE; i++) all[WNAF_TABLE + i] = negate(all[i]);
+    for (let i = 0; i < all.length; i++) {
+      const q = all[i];
+      q.x = permU256(q.x);
+      q.y = permU256(q.y);
+      q.z = permU256(q.z);
+    }
+    batchToAffine(all);
+    g1WnafCache = all;
+  }
+  return g1WnafCache;
+}
+
+/**
+ * 联合标量乘：R = s·G + t·P（Jacobian，未归一化）。
+ *
+ * 两条 wNAF（宽度 5）共享同一条倍点链 —— 每轮一次倍点，然后按各自的 digit
+ * 各加一次。G 侧走缓存的仿射表 + 混合坐标加法，P 侧是每次现算的 Jacobian 表。
+ * 返回未归一点，调用方自行 toAffine（合并后只付 1 次求逆）。
+ */
+export function scalarMulGAnd(s: U256, t: U256, p: JPoint): JPoint {
+  const ds = arenaAlloc(<usize>WNAF_LEN * 4);
+  const dt = arenaAlloc(<usize>WNAF_LEN * 4);
+  const ns = wnaf(s, ds);
+  const nt = wnaf(t, dt);
+  const G = gWnafTable();
+
+  // P 的预计算表 P, 3P, …, 15P 及其负（P 每次不同，只能现算）
+  const table = new StaticArray<JPoint>(WNAF_TABLE);
+  const negTable = new StaticArray<JPoint>(WNAF_TABLE);
+  table[0] = clonePoint(p);
+  const step = doublePoint(p);
+  for (let i = 1; i < WNAF_TABLE; i++) table[i] = addPoints(table[i - 1], step);
+  for (let i = 0; i < WNAF_TABLE; i++) negTable[i] = negate(table[i]);
+
+  const len = ns > nt ? ns : nt;
+  const Q = new JPoint(); // 无穷远
+  for (let i = len - 1; i >= 0; i--) {
+    if (i !== len - 1) doubleInto(Q, Q);
+    if (i < ns) {
+      const d = load<i32>(ds + ((<usize>i) << 2));
+      if (d > 0) addMixedInto(Q, Q, G[(d - 1) >> 1]);
+      else if (d < 0) addMixedInto(Q, Q, G[WNAF_TABLE + ((-d - 1) >> 1)]);
+    }
+    if (i < nt) {
+      const d = load<i32>(dt + ((<usize>i) << 2));
+      if (d > 0) addInto(Q, Q, table[(d - 1) >> 1]);
+      else if (d < 0) addInto(Q, Q, negTable[(-d - 1) >> 1]);
+    }
+  }
+  return Q;
+}
+
 /** Jacobian → 仿射：返回 (x, y)。Z == 0 时返回全 0。 */
 export function toAffine(p: JPoint): JPoint {
   const out = new JPoint();

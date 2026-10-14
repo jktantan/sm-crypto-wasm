@@ -22,7 +22,15 @@ import {
   u256zero,
 } from './field';
 import { addModN, invModN, mulModN, nArr, subModN } from './modn';
-import { addPoints, isInfinity, JPoint, scalarMul, scalarMulG, toAffine } from './point';
+import {
+  addPoints,
+  isInfinity,
+  JPoint,
+  scalarMul,
+  scalarMulG,
+  scalarMulGAnd,
+  toAffine,
+} from './point';
 
 // ---------- 工具 ----------
 
@@ -201,14 +209,12 @@ export function verify(
   const t = addModN(r, s);
   if (u256isZero(t)) return 0;
 
-  // (x1, y1) = s·G + t·P
+  // (x1, y1) = s·G + t·P（联合 wNAF：两条标量乘共享同一条倍点链）
   const pub = new JPoint();
   pub.x = ld(pubXPtr);
   pub.y = ld(pubYPtr);
   pub.z = u256fromU32(1);
-  const sg = scalarMulG(s);
-  const tp = scalarMul(t, pub);
-  const sum = toAffine(addPointRaw(sg, tp));
+  const sum = toAffine(scalarMulGAnd(s, t, pub));
   const R = addModN(e, sum.x);
 
   return u256cmp(R, r) === 0 ? 1 : 0;
@@ -223,11 +229,6 @@ function hashZMsg(zPtr: usize, msgPtr: usize, msgLen: usize): U256 {
   const out = new StaticArray<u8>(32);
   sm3HashInto(changetype<usize>(buf), total, changetype<usize>(out));
   return u256fromMemBE(changetype<usize>(out));
-}
-
-// point.ts 的 addPoints 已在顶部 import。
-function addPointRaw(a: JPoint, b: JPoint): JPoint {
-  return addPoints(a, b);
 }
 
 // ---------- KDF（GM/T 0003.4 §5.4.3） ----------
