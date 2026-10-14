@@ -178,9 +178,22 @@ SM9 若要再快需要换 Montgomery，而那意味着把该曲线全部常数�
 
 ### 剩余空间
 
-只剩百分比级：`fpSqr` 目前复用 `montMul(a, a)`，做平方特化（交叉项只算一次）还能
-省一部分 32×32 乘法；`fpInv` 在域内求逆后要多付一次 `modMul` 去补 R。数量级空间
-已经开采完。
+只剩百分比级，而且已经逐个量过：
+
+- **平方特化**（`a²` 的交叉项只算一次，32×32 部分积 64 → 36）：`bb7c52a` 把 `fpSqr`
+  从 `field256` 的 `sqr512Into` 改成 `montMul(a, a)` 时，丢掉了 SM9 原有的这份特化
+  （SM2 至今还在用 field256 那份）。补回来的实测：**单个平方确实快 1.19×**
+  （同模块 micro-bench 121.5 → 102.5 ns），但**端到端没有可测收益** ——
+  `fp12Sqr` / `fp4Sqr` / `fp2Sqr` 这些热路径的平方都走 `fpMul`，不经过 `fpSqr`；
+  用得上它的只有 G1 点运算（倍点 / 点加 / 转仿射）与 `fp2Inv` / `fp2SqrU`。
+  同进程交替 A/B（两个 wasm 装进同一进程，两次）：G1 标量乘 50.1/51.2 → 49.8/50.2 µs
+  （+0.8% / +2.1%），pairing 3443.8/3456.8 → 3475.8/3507.9 µs（−0.9% / −1.5%）。
+  **净效果约等于零，而 pairing 是所有主操作的主导路径，不值得新增这条代码路径，
+  已回退。** 教训：micro-bench 的单点加速（1.19×）不必然传递到工作负载，得先看
+  热路径实际调用了哪个函数。
+- `fpInv` 在域内求逆后要多付一次 `modMul` 去补 R（占比很小）。
+
+数量级空间已经开采完。
 
 **未验证的推断**（与本文其他条目一样只是推断）：SM2 的 `n` 也是伪 Mersenne 形状，
 理论上可以补一条 Solinas 归约。但签名里 mod n 的运算只出现在固定基点标量乘之外的
@@ -332,3 +345,61 @@ timeIt('decrypt 64B', () => sm2.decrypt(D, ct), 500);
 > 设计要点：hit / miss 两组在**同一进程、同一时段**内测量，miss 组轮换 40 个互不
 > 相同的合法私钥（`0 < d < n`）以保证必然不命中，两组唯一差异就是 `sign` 内部是否
 > 需要做那次固定基点标量乘。预热后取 5 组样本的 min。
+
+## 附录 C：SM9 平方特化 A/B probe（临时，未入库）
+
+第三节判断「平方特化不值得」用的就是它。要点：两个 SM9 wasm 必须**同时装进一个
+进程**交替测 —— 这台机器上两次独立运行的差异可以到 ±20%（曾出现"纯点乘慢 22%、
+pairing 快 8%"的假信号），足以盖过 1~2% 的真实差异。
+
+先各构建一份（`dist/sm9/sm9.wasm` 分别是"现状"与"特化"）：
+
+```bash
+# 特化版（fpSqr 走 Comba 平方 + SOS 归约）
+cp dist/sm9/sm9.wasm ab/sm9-sqr.wasm
+# 现状（fpSqr = montMul(a, a)）：暂回未改的 fp.ts 后重新构建，再恢复
+git stash push -- src/sm9/assembly/fp.ts
+pnpm build:wasm:sm9 && cp dist/sm9/sm9.wasm ab/sm9-mul.wasm
+git stash pop
+```
+
+runner（`ab.mjs`，放在 `$TMPDIR`，从仓库根执行）：
+
+```js
+const A = await load('sm9-mul.wasm'); // 现状
+const B = await load('sm9-sqr.wasm'); // 特化
+const bufA = A.exports.alloc(1024);
+const bufB = B.exports.alloc(1024);
+A.exports.g1MulSmall(1, bufA); // G1 基点（偏移 0，64B）
+A.exports.g2MulSmall(1, bufA + 256); // G2 基点（偏移 256，128B）
+B.exports.g1MulSmall(1, bufB);
+B.exports.g2MulSmall(1, bufB + 256);
+
+// 交替采样、各取 min：漂移对两组的影响相同
+function timeAlt(fnA, fnB, iters, rounds) {
+  let bestA = Infinity, bestB = Infinity;
+  for (let r = 0; r < rounds; r++) {
+    let t0 = performance.now();
+    for (let i = 0; i < iters; i++) fnA();
+    bestA = Math.min(bestA, (performance.now() - t0) / iters);
+    t0 = performance.now();
+    for (let i = 0; i < iters; i++) fnB();
+    bestB = Math.min(bestB, (performance.now() - t0) / iters);
+  }
+  return [bestA, bestB]; // ms/op
+}
+
+timeAlt(
+  () => A.exports.g1MulSmall(0x12345678, bufA),
+  () => B.exports.g1MulSmall(0x12345678, bufB),
+  100, 21,
+);
+timeAlt(
+  () => A.exports.pairingOut(bufA + 256, bufA, bufA + 512),
+  () => B.exports.pairingOut(bufB + 256, bufB, bufB + 512),
+  8, 15,
+);
+```
+
+> 注意 `A.exports` / `B.exports` 各自持有独立内存，指针不能跨实例传递；两组输入
+> 各自由自己的实例的 `g1MulSmall` / `g2MulSmall` 生成，并逐字节比对过输出一致。
