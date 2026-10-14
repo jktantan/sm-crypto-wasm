@@ -224,8 +224,13 @@ pnpm lint           # biome（lint + format）
 pnpm typecheck      # tsc --noEmit
 ```
 
-`src/**/assembly/**` 是 AssemblyScript 源，由 `asc` 编译；这些文件**不要**用 `import { type X }`
+`src/**/assembly/**` 是 AssemblyScript 源，由 `asc` 编译；这些文件**不要**用 `import { type X}`
 或让格式化器重排 import —— `asc` 0.28 不认类型修饰符（biome 配置里已对该目录关闭相关规则）。
+
+每个 `src/*/assembly/` 目录下都有一个 `tsconfig.json`（只有一行 `extends`，指向根
+`tsconfig.assembly.json`）。它继承 AssemblyScript 的类型定义，**只为让 IDE 按 AS 语义检查**——
+否则编辑这些文件时，`usize` / `u32` / `StaticArray` 之类会被当成普通 TS 报 `TS2304`。
+根 `tsconfig.json` 已 `exclude` 该目录，命令行 `tsc` 不碰它们，所以这些配置不影响构建与类型检查。
 
 ---
 

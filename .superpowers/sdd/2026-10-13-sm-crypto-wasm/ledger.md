@@ -554,3 +554,29 @@ GREEN；全量套件 112/112。
 `Ruling:` 选 Apache-2.0 而不是 MIT。理由：`src/zuc/assembly/index.ts` 自述"逐行移植"，
 属 Apache-2.0 的 derivative work；与上游同许可最干净，且 Apache-2.0 允许再许可与商业使用。
 代价：比 MIT 多了 NOTICE 与归属义务（已在 NOTICE 里履行）。
+
+---
+
+## AS 源与 TS 的 IDE 冲突（2026-10-14）
+
+用户报告 `TS2304: Cannot find name 'usize'`。排查结论：**命令行一直是干净的**（根
+`tsconfig.json` 的 `exclude` 让 `tsc` 完全不碰 `src/**/assembly`，实测 `--listFiles` 收
+210 个文件、0 个来自 assembly），错误来自 **IDE**（仓库含 `.idea/`，JetBrains 的 TS 服务
+按"就近 tsconfig"检查文件，不按 `exclude` 跳过）——AS 专有类型 `usize` / `u32` /
+`StaticArray` / `changetype` 等在 TS 标准库里不存在，裸 TS 检查会报 1045 个 `TS2304`。
+
+用户裁决：**集中式**解决。落地：
+
+- 根 `tsconfig.assembly.json`：`extends` AS 官方的 `assemblyscript/std/assembly.json`
+  + `skipLibCheck: true`（后者用于消掉 AS 的 `index.d.ts` 与 TS 7 的 `TS2316` 冲突）；
+- 6 个 `src/{common,sm2,sm3,sm4,sm9,zuc}/assembly/tsconfig.json`：各自只有一行
+  `{ "extends": "../../../tsconfig.assembly.json" }`。
+
+`Ruling:` 配置主体集中到根的一个文件，各目录只留一行指针 —— 改配置只需改一处。
+代价：仍需要 6 个指针文件（IDE 与 tsc 都按"就近 tsconfig"决定作用域，没有文件就没有作用域）。
+`Ruling:` 不用"在根 tsconfig 里塞 AS 类型"的办法 —— AS 需要 `noLib` + `types: ["assembly"]`，
+与 TS 胶水层需要的标准库 + `types: ["node"]` 互斥（两者都声明 `Number`/`Array` 等全局名），
+一套配置无法同时成立。
+
+验证：6 个子配置各自 `tsc -p` → 均 0 错误；`pnpm lint` / `typecheck` / `build` / 全量测试
+（182/182）全部不受影响。
