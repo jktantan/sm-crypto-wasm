@@ -26,30 +26,31 @@ import { G2, g2Copy, g2Double, g2Add, g2AddFull } from './point';
 const PI1_C = '3f23ea58e5720bdb843c6cfa9c08674947c5c86e0ddd04eda91d8354377b698b';
 const PI2_C = 'f300000002a3a6f2780272354f8b78f4d5fc11967be65334';
 
+// 预构造：原先每次 twist 调用都重新解析一遍 hex。
+const PI1_C_U = u256(PI1_C);
+const PI2_C_U = u256(PI2_C);
+
 /** π1：Frobenius 自同构。 */
 export function twistPi1(Q: G2): G2 {
-  const c = u256(PI1_C);
   const r = g2Copy(Q);
   fp2Put(r.X, fp2Conjugate(r.X));
   fp2Put(r.Y, fp2Conjugate(r.Y));
-  fp2Put(r.Z, fp2MulFp(fp2Conjugate(r.Z), c));
+  fp2Put(r.Z, fp2MulFp(fp2Conjugate(r.Z), PI1_C_U));
   return r;
 }
 
 /** π2：乘以 twistor。 */
 export function twistPi2(Q: G2): G2 {
-  const c = u256(PI2_C);
   const r = g2Copy(Q);
-  fp2Put(r.Z, fp2MulFp(r.Z, c));
+  fp2Put(r.Z, fp2MulFp(r.Z, PI2_C_U));
   return r;
 }
 
 /** -π2。 */
 export function twistNegPi2(Q: G2): G2 {
-  const c = u256(PI2_C);
   const r = g2Copy(Q);
   fp2Put(r.Y, fp2Neg(r.Y));
-  fp2Put(r.Z, fp2MulFp(r.Z, c));
+  fp2Put(r.Z, fp2MulFp(r.Z, PI2_C_U));
   return r;
 }
 
@@ -155,21 +156,31 @@ const ALPHA5 = '2d40a38cf6983351711e5f99520347cc57d778a9f8ff4c8a4c949c7fa2a96686
 const FE_A2 = 'd8000000019062ed0000b98b0cb27659';
 const FE_A3 = '2400000000215d941';
 
+// 预构造：原先每次 final exponent 都把这些 hex 重新解析一遍。
+const ALPHA1_U = u256(ALPHA1);
+const ALPHA2_U = u256(ALPHA2);
+const ALPHA3_U = u256(ALPHA3);
+const ALPHA4_U = u256(ALPHA4);
+const ALPHA5_U = u256(ALPHA5);
+const FE_A2_U = u256(FE_A2);
+const FE_A3_U = u256(FE_A3);
+
+/** 5 个 Frobenius 系数（元素已预构造，这里只分配外层数组）。 */
 function alphas(): StaticArray<U256> {
   const a = new StaticArray<U256>(5);
-  a[0] = u256(ALPHA1);
-  a[1] = u256(ALPHA2);
-  a[2] = u256(ALPHA3);
-  a[3] = u256(ALPHA4);
-  a[4] = u256(ALPHA5);
+  a[0] = ALPHA1_U;
+  a[1] = ALPHA2_U;
+  a[2] = ALPHA3_U;
+  a[3] = ALPHA4_U;
+  a[4] = ALPHA5_U;
   return a;
 }
 
 /** 最终幂的 hard part，对应 GmSSL 的 final_exponent_hard_part。 */
 function finalExponentHardPart(f: Fp12): Fp12 {
-  const a2 = u256(FE_A2);
-  const a3 = u256(FE_A3);
-  const beta = u256(ALPHA3);
+  const a2 = FE_A2_U;
+  const a3 = FE_A3_U;
+  const beta = ALPHA3_U;
 
   let t0 = fp12Pow(f, a3);
   t0 = fp12Inv(t0);
@@ -186,7 +197,7 @@ function finalExponentHardPart(f: Fp12): Fp12 {
   t0 = fp12Mul(t0, t3);
   t2 = fp12Sqr(t2);
   t2 = fp12Mul(t2, t1);
-  t1 = fp12Frobenius2(f, u256(ALPHA2), u256(ALPHA4));
+  t1 = fp12Frobenius2(f, ALPHA2_U, ALPHA4_U);
   t1 = fp12Mul(t1, t2);
 
   t2 = fp12Pow(t1, a2);

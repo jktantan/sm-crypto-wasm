@@ -151,15 +151,28 @@ export function fp12Inv(a: Fp12): Fp12 {
   return fp12set(r0, r1, r2);
 }
 
-/** 幂 a^k（k 为 256-bit uint，MSB-first）。k 以 U256（8×u32 小端）给出。 */
+/**
+ * 幂 a^k（k 为 256-bit uint，MSB-first）。k 以 U256（8×u32 小端）给出。
+ *
+ * 从最高有效位起步，跳过长指数的高位零：final exponent 里用的是 a3（66 位）和
+ * a2（128 位），按原来的固定 256 次循环会白跑 318 次 fp12Sqr（实测 k=1 也要 38.8ms）。
+ */
 export function fp12Pow(a: Fp12, k: U256): Fp12 {
-  let result = fp12one();
-  let base = fp12copy(a);
-  for (let i = 0; i < 256; i++) {
+  let msb = -1;
+  for (let i = 255; i >= 0; i--) {
     if (((k[i >> 5] >>> (i & 31)) & 1) === 1) {
-      result = fp12Mul(result, base);
+      msb = i;
+      break;
     }
-    base = fp12Sqr(base);
+  }
+  if (msb < 0) return fp12one(); // k == 0
+
+  let result = fp12copy(a);
+  for (let i = msb - 1; i >= 0; i--) {
+    result = fp12Sqr(result);
+    if (((k[i >> 5] >>> (i & 31)) & 1) === 1) {
+      result = fp12Mul(result, a);
+    }
   }
   return result;
 }
