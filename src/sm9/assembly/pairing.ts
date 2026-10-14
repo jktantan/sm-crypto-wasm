@@ -190,16 +190,8 @@ const ALPHA5_U = u256(ALPHA5);
 const FE_A2_U = u256(FE_A2);
 const FE_A3_U = u256(FE_A3);
 
-/** 5 个 Frobenius 系数（元素已预构造，这里只分配外层数组）。 */
-function alphas(): StaticArray<U256> {
-  const a = new StaticArray<U256>(5);
-  a[0] = ALPHA1_U;
-  a[1] = ALPHA2_U;
-  a[2] = ALPHA3_U;
-  a[3] = ALPHA4_U;
-  a[4] = ALPHA5_U;
-  return a;
-}
+/** Frobenius 系数（模块级常量，finalExponentHardPart 每次调用都用到）。 */
+const ALPHAS: StaticArray<U256> = [ALPHA1_U, ALPHA2_U, ALPHA3_U, ALPHA4_U, ALPHA5_U];
 
 /** 最终幂的 hard part，对应 GmSSL 的 final_exponent_hard_part。 */
 function finalExponentHardPart(f: Fp12): Fp12 {
@@ -209,11 +201,11 @@ function finalExponentHardPart(f: Fp12): Fp12 {
 
   let t0 = fp12Pow(f, a3);
   t0 = fp12Inv(t0);
-  let t1 = fp12Frobenius(t0, alphas());
+  let t1 = fp12Frobenius(t0, ALPHAS);
   t1 = fp12Mul(t0, t1);
 
   t0 = fp12Mul(t0, t1);
-  let t2 = fp12Frobenius(f, alphas());
+  let t2 = fp12Frobenius(f, ALPHAS);
   let t3 = fp12Mul(t2, f);
   t3 = fp12PowSmall(t3, 9);
 
@@ -237,7 +229,7 @@ export function finalExponent(f: Fp12): Fp12 {
   let t0 = fp12Frobenius6(f);
   const t1 = fp12Inv(f);
   t0 = fp12Mul(t0, t1);
-  const t1b = fp12Frobenius2(t0, u256(ALPHA2), u256(ALPHA4));
+  const t1b = fp12Frobenius2(t0, ALPHA2_U, ALPHA4_U);
   t0 = fp12Mul(t0, t1b);
   return finalExponentHardPart(t0);
 }
@@ -246,6 +238,11 @@ export function finalExponent(f: Fp12): Fp12 {
 
 // 循环参数 a 的二进制串（与 GmSSL 一致）。
 const ABITS = '00100000000000000000000000000000000000010000101011101100100111110';
+
+// 预展开为位图：热循环里逐字符 charCodeAt 换成下标访问（ABITS.length == 65 == i32 位宽）。
+const ABITS_LEN = ABITS.length;
+const ABITS_BITS = new StaticArray<i32>(ABITS_LEN);
+for (let i = 0; i < ABITS_LEN; i++) ABITS_BITS[i] = ABITS.charCodeAt(i) - 0x30;
 
 /**
  * Miller loop 累积结果（final exponent 之前）。
@@ -259,14 +256,14 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
   let T = g2Copy(Q);
   let f = fp12one();
 
-  for (let i = 0; i < ABITS.length; i++) {
+  for (let i = 0; i < ABITS_LEN; i++) {
     f = fp12Sqr(f);
     const g1 = evalGTangent(T, P);
     f = fp12Mul(f, g1[0]);
 
     T = g2Double(T);
 
-    if (ABITS.charCodeAt(i) === 0x31) {
+    if (ABITS_BITS[i] === 1) {
       const g2 = evalGLine(T, Q, P);
       f = fp12Mul(f, g2[0]);
       T = g2Add(T, Q);
