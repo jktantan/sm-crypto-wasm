@@ -6,8 +6,8 @@
 // - SM2 传其素域 p 或子群阶 n；
 // - SM9 传其 BN 曲线素域 p 或阶 n。
 //
-// 归约策略：二进制长除法把 512-bit 积归约到 < m —— 慢但**绝对正确**。
-// 性能后续可换伪梅森 / 蒙哥马利，不影响调用方。
+// 归约策略：基数 2^32 的多 limb 长除法（Knuth D 简化版）把 512-bit 积归约到 < m。
+// 假定模数 m 的最高 limb ≥ 2^31（SM2/SM9 的 p、n 均满足）——此时 Knuth 估商高估 ≤ 2，修正很快。
 //
 // 参考：GM/T 0003-2012（SM2）、GM/T 0044-2016（SM9）。
 
@@ -207,23 +207,64 @@ export function mul512(a: U256, b: U256): U512 {
   return r;
 }
 
-/** 512-bit mod m（二进制长除法，9-limb 累加寄存器）。通用、无结构假设。 */
+/**
+ * 512-bit mod m（基数 2^32 多 limb 长除法，Knuth D 简化版）。
+ *
+ * 每轮处理 x 的一个 32-bit limb（共 16 轮），而非逐位（512 轮）——快约 30~50×。
+ * 假定 m 的最高 limb ≥ 2^31（SM2/SM9 的 p、n 均满足），此时估商高估 ≤ 2。
+ */
 export function reduce512(x: U512, m: U256): U256 {
-  const r = new StaticArray<u32>(9);
-  for (let i = 0; i < 9; i++) r[i] = 0;
-  for (let i = 511; i >= 0; i--) {
-    // r <<= 1（含第 9 limb）
-    let carry: u32 = 0;
-    for (let k = 0; k < 9; k++) {
-      const hi = (r[k] >>> 31) & 1;
-      r[k] = ((r[k] << 1) | carry) & 0xffffffff;
-      carry = hi;
+  const r = new StaticArray<u32>(9); // 余数（< m · 2^32，故 9 limb 足够）
+  const t = new StaticArray<u32>(9); // q · m
+  const mhi = m[7];
+  for (let i = 15; i >= 0; i--) {
+    // r = r * 2^32 + x[i]
+    for (let k = 8; k > 0; k--) r[k] = r[k - 1];
+    r[0] = x[i];
+
+    // 估商 q = floor((r[8]·2^32 + r[7]) / m[7])，上限 2^32-1
+    const num = (u64(r[8]) << 32) | u64(r[7]);
+    const qq = num / u64(mhi);
+    let q: u32 = qq > u64(0xffffffff) ? 0xffffffff : <u32>qq;
+
+    // 试减 r - q·m；若借位（q 高估）则恢复 r、q-- 重试（≤2 次）
+    let tries = 0;
+    while (true) {
+      let carry: u64 = 0;
+      for (let j = 0; j < 8; j++) {
+        const cur = u64(q) * u64(m[j]) + carry;
+        t[j] = <u32>(cur & 0xffffffff);
+        carry = cur >>> 32;
+      }
+      t[8] = <u32>carry;
+
+      let borrow: i64 = 0;
+      for (let k = 0; k < 9; k++) {
+        const d: i64 = i64(r[k]) - i64(t[k]) - borrow;
+        if (d < 0) {
+          r[k] = <u32>(d + 0x100000000);
+          borrow = 1;
+        } else {
+          r[k] = <u32>d;
+          borrow = 0;
+        }
+      }
+      if (borrow === 0) break;
+
+      // 恢复 r（加回 t），q 减 1 重试
+      let c: u64 = 0;
+      for (let k = 0; k < 9; k++) {
+        const s = u64(r[k]) + u64(t[k]) + c;
+        r[k] = <u32>(s & 0xffffffff);
+        c = s >>> 32;
+      }
+      q = (q - 1) & 0xffffffff;
+      tries++;
+      if (tries > 4) break; // 安全阀（不应触发）
     }
-    // r |= bit(x, i)
-    const b = (x[i >> 5] >>> (i & 31)) & 1;
-    r[0] = (r[0] | b) & 0xffffffff;
-    // if r >= m: r -= m
-    if (r[8] !== 0 || cmp9(r, m) >= 0) {
+
+    // 兜底：确保 r < m
+    while (r[8] !== 0 || cmp9(r, m) >= 0) {
       sub9(r, m);
     }
   }
