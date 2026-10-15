@@ -1,0 +1,229 @@
+/**
+ * Playground 的共享样式。
+ *
+ * 只用 VitePress 默认主题暴露的 CSS 变量，保证亮/暗色主题下都能看。
+ */
+
+.pg {
+  margin: 20px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+}
+
+.pg__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg__head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  padding: 0;
+}
+
+.pg__tag {
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 9px;
+  color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+}
+
+.pg__desc {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--vp-c-text-2);
+}
+
+.pg__body {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.pg__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.pg__run {
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-button-brand-text);
+  background: var(--vp-button-brand-bg);
+  border: 1px solid var(--vp-button-brand-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.pg__run:hover:not(:disabled) {
+  background: var(--vp-button-brand-hover-bg);
+}
+
+.pg__run:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.pg__elapsed {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  color: var(--vp-c-text-3);
+}
+
+.pg__err {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--vp-c-danger-soft);
+  color: var(--vp-c-danger-1);
+  overflow-wrap: anywhere;
+}
+
+.pg__err b {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+}
+
+.pg__out {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.pg__out:empty {
+  margin: 0;
+}
+
+.pg__code {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.pg__code summary {
+  cursor: pointer;
+  color: var(--vp-c-text-2);
+}
+
+.pg__code pre {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: var(--vp-code-block-bg);
+}
+
+.pg__code code {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* 单个字段 */
+.pgf {
+  display: grid;
+  gap: 4px;
+}
+
+.pgf__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vp-c-text-2);
+}
+
+.pgf__label em {
+  margin-left: 6px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--vp-c-text-3);
+}
+
+.pgf input,
+.pgf textarea,
+.pgf select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-text-1);
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+}
+
+.pgf select {
+  width: auto;
+  min-width: 120px;
+}
+
+.pgf textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.pgf__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.pgf__row > * {
+  flex: 1 1 160px;
+}
+
+.pgf__row > .pgf--auto {
+  flex: 0 0 auto;
+}
+
+/* 结果行 */
+.pgr {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+}
+
+.pgr__k {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
+}
+
+.pgr__v {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.pgr__v--ok {
+  color: var(--vp-c-green-1);
+}
+
+.pgr__v--bad {
+  color: var(--vp-c-danger-1);
+}
+
+.pgr--empty .pgr__v {
+  color: var(--vp-c-text-3);
+}

@@ -2,6 +2,8 @@
 
 [🇨🇳 中文](#zh-阅读下面的中文文档) · [🇺🇸 English](#en-english-documentation) · [🇷🇺 Русский](#ru-документация-на-русском)
 
+> 📖 **完整文档（含每个算法的参数表与可交互 Playground）**：<https://jktantan.github.io/sm-crypto-wasm/>
+
 Chinese cryptography standards (**SM2 / SM3 / SM4 / SM9 / ZUC**) implemented in
 **AssemblyScript → WebAssembly**. Works on Node 18+ and modern browsers (incl.
 Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
@@ -20,6 +22,8 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 ## zh 阅读下面的中文文档
 
 # sm-crypto-wasm
+
+> 📖 **完整文档**（每个算法的参数表、用法与**可交互 Playground**）：<https://jktantan.github.io/sm-crypto-wasm/>
 
 国密算法（SM2 / SM3 / SM4 / SM9 / ZUC）的 **AssemblyScript → WebAssembly** 实现，Node 18+ 与现代浏览器（含 Web Worker）均可使用，按算法分包、按需懒加载。
 
@@ -76,8 +80,8 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 要点：
 
-- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.8~2.3×，SM4 六种模式
-  3.6~11.2×，SM2 快 1.8~7.6×；
+- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.8\~2.3×，SM4 六种模式
+  3.6\~11.2×，SM2 快 1.8\~7.6×；
 - **SM4 的 CFB / OFB 曾比纯 JS 慢 1.4~1.5×**：这两种模式原先在 TS 侧逐块调用
   wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
   同款的批量导出后降到 10 µs 一带，反过来快 3.6~3.8×；
@@ -113,7 +117,7 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
      局部变量（256 位恰好 4 个 u64 装下），每轮零内存往返，单次求逆 12.8 µs → 2.3 µs
      （SM2 与 SM9 共用这条路径，故 SM9 一并受益）；
   8. **`sign` 的公钥派生走进程内缓存**——公钥与 Z 值只依赖私钥，而原先每次签名都要
-     重做一遍固定基点标量乘（实测 105 µs，占一次签名 ~250 µs 的 41%）；缓存以私钥的
+     重做一遍固定基点标量乘（实测 105 µs，占一次签名 \~250 µs 的 41%）；缓存以私钥的
      hex 为键、上限 32 条 FIFO 淘汰，命中即跳过派生。实测 `sign` 252 → 142 µs。
   第 1~7 项在 wasm 计算层、第 8 项在 TS 门面层：前七项的 A/B（min-of-5，同机、同 probe）
   是标量乘 G 138 → 105 µs、求逆 12.8 → 2.3 µs、签名 156 → 122 µs、验签 474 → 424 µs、
@@ -396,6 +400,8 @@ pnpm typecheck      # tsc --noEmit
 <summary><h2 id="en-english-documentation" style="display:inline-block">🇺🇸 English</h2></summary>
 
 # sm-crypto-wasm
+
+> 📖 **Full documentation** (per-algorithm parameter tables, usage and **interactive Playgrounds**): <https://jktantan.github.io/sm-crypto-wasm/en/>
 
 An **AssemblyScript → WebAssembly** implementation of Chinese cryptography
 standards (**SM2 / SM3 / SM4 / SM9 / ZUC**). Runs on Node 18+ and modern
@@ -852,6 +858,8 @@ the following Apache-2.0 projects; attribution details are in [`NOTICE`](./NOTIC
 <summary><h2 id="ru-документация-на-русском" style="display:inline-block">🇷🇺 Русский</h2></summary>
 
 # sm-crypto-wasm
+
+> 📖 **Полная документация** (таблицы параметров, примеры и **интерактивные Playground**): <https://jktantan.github.io/sm-crypto-wasm/ru/>
 
 Реализация китайских криптографических стандартов (**SM2 / SM3 / SM4 / SM9 /
 ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ и в

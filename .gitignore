@@ -26,3 +26,6 @@ tmp-*.log
 
 # 第三方参考源码（gmkit 上游，仅本地参考用，不提交）
 view/
+
+# 文档站（VitePress）的开发缓存；构建产物 website/.vitepress/dist 已由上面的 dist/ 规则覆盖
+website/.vitepress/cache/

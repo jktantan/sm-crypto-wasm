@@ -84,6 +84,9 @@
     "format": "biome format --write src tests bench",
     "typecheck": "tsc --noEmit",
     "bench": "node --import tsx bench/run.ts",
+    "docs:dev": "pnpm build:wasm:all && vitepress dev website",
+    "docs:build": "pnpm build:wasm:all && vitepress build website",
+    "docs:preview": "vitepress preview website",
     "prepack": "pnpm build && pnpm test"
   },
   "devDependencies": {
@@ -97,6 +100,7 @@
     "release-it": "^21.1.1",
     "tsx": "^4.19.2",
     "typescript": "^7.0.2",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.11"
   },
   "publishConfig": {

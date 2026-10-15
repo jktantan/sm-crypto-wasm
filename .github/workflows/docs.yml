@@ -1,0 +1,53 @@
+name: Docs
+
+# 触发：main 分支的推送（含文档与库代码 —— Playground 依赖 dist/*.wasm），
+# 以及手动触发。
+#
+# 前置条件：仓库 Settings → Pages → Build and deployment → Source 选
+# "GitHub Actions"。站点配置里的 base 是 /sm-crypto-wasm/，与项目页地址一致。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次未完成的部署。
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # docs:build = build:wasm:all（5 个 .wasm，Playground 要用真实构建产物）+ vitepress build
+      - run: pnpm docs:build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/.vitepress/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
