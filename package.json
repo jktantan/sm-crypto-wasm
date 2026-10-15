@@ -84,8 +84,8 @@
     "format": "biome format --write src tests bench",
     "typecheck": "tsc --noEmit",
     "bench": "node --import tsx bench/run.ts",
-    "docs:dev": "pnpm build:wasm:all && vitepress dev website",
-    "docs:build": "pnpm build:wasm:all && vitepress build website",
+    "docs:dev": "pnpm build && vitepress dev website",
+    "docs:build": "pnpm build && vitepress build website",
     "docs:preview": "vitepress preview website",
     "prepack": "pnpm build && pnpm test"
   },
