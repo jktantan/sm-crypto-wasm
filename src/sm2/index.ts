@@ -114,13 +114,6 @@ function getModule(): Sm2Module {
   return mod;
 }
 
-/** 把 32/64 字节数据写进 wasm 内存。 */
-function _putHex(hex: string, ptr: number, len: number): void {
-  const mem = new Uint8Array(getModule().memory.buffer);
-  mem.set(Buffer.from(hex, 'hex'), ptr);
-  void len;
-}
-
 /**
  * 从私钥派生公钥。
  *

@@ -11,6 +11,7 @@
  * 本仓库只支持"parameters = NULL"这一类算法（SM2 / SM9 都符合）。
  */
 
+import { base64ToBytes, bytesToBase64 } from '../runtime/convert.js';
 import { InvalidKeyError } from '../runtime/errors.js';
 import { asn1Int, asn1Null, asn1Octets, asn1Oid, asn1Seq, parseDer } from './asn1.js';
 
@@ -197,21 +198,6 @@ function encodeLen(n: number): Uint8Array {
   return new Uint8Array([0x80 | bytes.length, ...bytes]);
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof btoa === 'function') {
-    let bin = '';
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0);
-    return btoa(bin);
-  }
-  return Buffer.from(bytes).toString('base64');
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  if (typeof atob === 'function') {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-  return new Uint8Array(Buffer.from(b64, 'base64'));
-}
+// base64 编解码统一走 `../runtime/convert.js` 的跨运行时实现（Node 走 Buffer
+// 快路径、浏览器回落 btoa/atob）；本文件原先自带一份，其 Node 分支直接引用了
+// `Buffer`，在浏览器里会 ReferenceError。

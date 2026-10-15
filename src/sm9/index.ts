@@ -29,6 +29,7 @@ import {
   parseSm9PrivateKeyPem,
   parseSm9PublicKeyPem,
 } from '../pem/sm9.js';
+import { bytesToHex, hexToBytes } from '../runtime/convert.js';
 import {
   CiphertextError,
   DecryptionError,
@@ -217,7 +218,7 @@ function toBytes(input: string | Uint8Array, label: string): Uint8Array {
   if (input.startsWith('0x') || /^[0-9a-fA-F]+$/.test(input)) {
     const s = input.startsWith('0x') ? input.slice(2) : input;
     if (s.length % 2 !== 0) throw new TypeError(`sm9: ${label} hex 长度必须为偶数`);
-    return new Uint8Array(Buffer.from(s, 'hex'));
+    return hexToBytes(s, label);
   }
   return new TextEncoder().encode(input);
 }
@@ -244,7 +245,7 @@ function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Arr
   // 标量范围：SM9（GM/T 0044）要求 1 ≤ k ≤ n−1。
   // 越界值不会崩，但 wasm 侧的 addModN → modAdd 只做一次条件减、要求输入已
   // 约化（h1 + k < 2n），k ≥ n 时 k + h1 可能 ≥ 2n 而静默产出错值，故在此显式拒绝。
-  const k = BigInt(`0x${Buffer.from(bytes).toString('hex')}`);
+  const k = BigInt(`0x${bytesToHex(bytes)}`);
   if (k < 1n || k >= N) {
     throw new InvalidKeyError(`sm9: ${label} 必须在 [1, n−1] 范围内（SM9 主私钥标量）`);
   }
@@ -321,7 +322,7 @@ function _allocBytes(n: number): number {
 }
 
 function putHex(hex: string, ptr: number): void {
-  mem().set(Buffer.from(hex, 'hex'), ptr);
+  mem().set(hexToBytes(hex), ptr);
 }
 
 function putBytes(b: Uint8Array, ptr: number): void {
@@ -329,7 +330,7 @@ function putBytes(b: Uint8Array, ptr: number): void {
 }
 
 function readHex(ptr: number, len: number): string {
-  return Buffer.from(mem().subarray(ptr, ptr + len)).toString('hex');
+  return bytesToHex(mem().subarray(ptr, ptr + len));
 }
 
 function randomRHex(): string {
@@ -416,7 +417,7 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
     // 调用后重新取 buffer 视图：WASM 内存可能在分配后增长。
     const memView = mem();
     return {
-      masterPrivatePem: encodeSm9PrivateKeyPem(Buffer.from(masterHex, 'hex')),
+      masterPrivatePem: encodeSm9PrivateKeyPem(hexToBytes(masterHex)),
       masterPublicPem: encodeSm9PublicKeyPem(
         new Uint8Array(memView.buffer, pubPtr, pubLen).slice(),
       ),
@@ -944,7 +945,7 @@ export async function createExchangeInitiator(
       if (rA !== null) throw new Error('sm9.exch: initiate() 只能调用一次');
       rA = r32(options);
       RA = exchEphemeral(keB, peerIdB, rA);
-      return { ephemeral: Buffer.from(RA).toString('hex') };
+      return { ephemeral: bytesToHex(RA) };
     },
     confirm(msg: Sm9ResponderMessage): Sm9InitiatorConfirm {
       const selfR = rA;
@@ -954,8 +955,7 @@ export async function createExchangeInitiator(
       const SB = toBytes(msg.confirm, 'SB');
       requireLen(SB, 32, 'SB', 'cipher');
       const all = exchAll(keB, true, selfIdB, peerIdB, selfR, selfRA, RB, defaultKL);
-      if (!ctEq(SB, Buffer.from(all.sb, 'hex')))
-        throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
+      if (!ctEq(SB, hexToBytes(all.sb))) throw new Error('sm9.exch: 响应方确认值 S_B 校验失败');
       cached = { all, kLen: defaultKL };
       return { confirm: all.sa };
     },
@@ -1003,7 +1003,7 @@ export async function createExchangeResponder(
       const all = exchAll(keB, false, selfIdB, peerIdB, rB, RB, incomingRA, defaultKL);
       RA = incomingRA;
       cached = { all, kLen: defaultKL };
-      return { ephemeral: Buffer.from(RB).toString('hex'), confirm: all.sb };
+      return { ephemeral: bytesToHex(RB), confirm: all.sb };
     },
     getSharedKey(msg: Sm9InitiatorConfirm, kLen = defaultKL): string {
       const selfR = rB;
@@ -1017,8 +1017,7 @@ export async function createExchangeResponder(
         cached !== null && cached.kLen === kLen
           ? cached.all
           : exchAll(keB, false, selfIdB, peerIdB, selfR, selfRB, selfRA, kLen);
-      if (!ctEq(SA, Buffer.from(all.sa, 'hex')))
-        throw new Error('sm9.exch: 发起方确认值 S_A 校验失败');
+      if (!ctEq(SA, hexToBytes(all.sa))) throw new Error('sm9.exch: 发起方确认值 S_A 校验失败');
       return all.key;
     },
   };
