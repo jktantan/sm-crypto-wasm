@@ -65,7 +65,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm build:wasm:all && pnpm build:ts",
+    "build": "pnpm clean && pnpm build:wasm:all && pnpm build:ts",
     "build:wasm": "pnpm run build:wasm:sm3",
     "build:wasm:sm3": "asc src/sm3/assembly/index.ts --outFile dist/sm3/sm3.wasm --optimize",
     "build:wasm:sm2": "asc src/sm2/assembly/index.ts --outFile dist/sm2/sm2.wasm --optimize",
@@ -74,6 +74,7 @@
     "build:wasm:zuc": "asc src/zuc/assembly/index.ts --outFile dist/zuc/zuc.wasm --optimize",
     "build:wasm:all": "pnpm run build:wasm:sm2 && pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:sm9 && pnpm run build:wasm:zuc",
     "build:ts": "tsc -p tsconfig.build.json",
+    "build:ts:debug": "tsc -p tsconfig.build.debug.json",
     "clean": "rm -rf dist",
     "pretest": "pnpm run build:wasm:all",
     "test": "vitest run --config vitest.config.ts",

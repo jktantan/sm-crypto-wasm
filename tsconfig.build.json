@@ -5,8 +5,11 @@
     "outDir": "./dist",
     "noEmit": false,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    // 发布构建不产出 source map：包内只有 dist/，而 map 的 sources 指向未随包发布的
+    // ../src/*.ts（且不含 sourcesContent），下游既拿不到源码、也跳不到定义，却要为此
+    // 多付约 35% 体积。需要源码映射时改用 tsconfig.build.debug.json（pnpm build:ts:debug）。
+    "declarationMap": false,
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/assembly/**", "tests", "node_modules", "dist"]

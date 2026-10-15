@@ -1,0 +1,9 @@
+{
+  // 本地排障用的构建配置：产出 .js.map / .d.ts.map（map 的 sources 指向 ../src/*.ts，
+  // 在仓库内可解析）。此配置不参与发布——`pnpm build`（发布路径）不带 source map。
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}

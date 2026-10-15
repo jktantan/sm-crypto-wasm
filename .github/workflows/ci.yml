@@ -58,3 +58,21 @@ jobs:
           echo "sm9.wasm = $(wc -c < dist/sm9/sm9.wasm) bytes（含 pairing 表，仅记录）"
       # 打包演练：确认 files 白名单与 exports 字段正确（会触发 prepack = build + test）
       - run: pnpm pack --dry-run
+      # 发布包不得携带 source map：包内只有 dist/，map 的 sources 指向未发布的 src/，
+      # 只有体积开销、没有调试价值（残留的 sourceMappingURL 注释也会让 devtools 空跑 404）。
+      - name: 发布产物不得含 source map
+        run: |
+          set -euo pipefail
+          maps=$(find dist -name '*.map' | sort)
+          if [ -n "$maps" ]; then
+            echo "::error::dist 中出现 source map 文件："
+            echo "$maps"
+            exit 1
+          fi
+          stale=$(grep -rl 'sourceMappingURL' dist --include='*.js' --include='*.d.ts' || true)
+          if [ -n "$stale" ]; then
+            echo "::error::产物中残留 sourceMappingURL 注释："
+            echo "$stale"
+            exit 1
+          fi
+          echo "OK: dist 无 .map 文件，也无 sourceMappingURL 残留"

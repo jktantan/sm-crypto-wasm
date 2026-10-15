@@ -352,13 +352,20 @@ try {
 
 ```bash
 pnpm install
-pnpm build          # asc（5 个 .wasm）+ tsc → dist/
+pnpm build          # clean + asc（5 个 .wasm）+ tsc → dist/（无 source map）
+pnpm build:ts:debug # 需要调试时：带 .js.map / .d.ts.map 重编译 TS 到 dist/
 pnpm test           # Node runner（vitest）
 pnpm test:browser   # 浏览器 runner（happy-dom）
 pnpm bench          # mitata 微型基准（5 大块算法）
 pnpm lint           # biome（lint + format）
 pnpm typecheck      # tsc --noEmit
 ```
+
+`pnpm build` 是发布路径：先清空 `dist/`，且 `tsconfig.build.json` 关掉了 `sourceMap` /
+`declarationMap`，所以产物里既没有 `.map`，也没有 `//# sourceMappingURL=` 注释。原因：发布包
+只带 `dist/`，map 的 `sources` 指向未随包发布的 `../src/*.ts`（且不含 `sourcesContent`），
+下游既拿不到源码、编辑器也跳不到定义，却要多付约 35% 体积。仓库内调试改用
+`pnpm build:ts:debug`（`tsconfig.build.debug.json`），它把 map 产出到 `dist/`。
 
 **所有 wasm 模块都只带 `--optimize`，不含 `--enable simd`**：SM4 的加速走的是标量
 多块交错，不依赖任何 SIMD 指令集。因此五个算法模块对运行时的要求一致，`sm4.wasm`
@@ -788,13 +795,22 @@ try {
 
 ```bash
 pnpm install
-pnpm build          # asc (5 .wasm files) + tsc → dist/
+pnpm build          # clean + asc (5 .wasm files) + tsc → dist/ (no source maps)
+pnpm build:ts:debug # for debugging: recompile TS to dist/ with .js.map / .d.ts.map
 pnpm test           # Node runner (vitest)
 pnpm test:browser   # browser runner (happy-dom)
 pnpm bench          # mitata micro-benchmarks (5 algorithm blocks)
 pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
+
+`pnpm build` is the release path: it empties `dist/` first, and `tsconfig.build.json` turns off
+`sourceMap` / `declarationMap`, so the output carries neither `.map` files nor
+`//# sourceMappingURL=` comments. The reason: the published package ships only `dist/`, while a
+map's `sources` point at `../src/*.ts`, which is not published (and the maps embed no
+`sourcesContent`) — downstream can neither read the sources nor jump to definitions, yet pays
+roughly 35% extra size for it. For in-repo debugging use `pnpm build:ts:debug`
+(`tsconfig.build.debug.json`), which emits maps into `dist/`.
 
 **Every wasm module is built with `--optimize` only, no `--enable simd`**: SM4's speed
 comes from scalar multi-block interleaving and depends on no SIMD instruction set. All
@@ -1243,13 +1259,22 @@ try {
 
 ```bash
 pnpm install
-pnpm build          # asc (5 .wasm-файлов) + tsc → dist/
+pnpm build          # clean + asc (5 .wasm-файлов) + tsc → dist/ (без source map)
+pnpm build:ts:debug # для отладки: пересборка TS в dist/ с .js.map / .d.ts.map
 pnpm test           # Node-раннер (vitest)
 pnpm test:browser   # браузерный раннер (happy-dom)
 pnpm bench          # микро-бенчмарки mitata (5 блоков алгоритмов)
 pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
 ```
+
+`pnpm build` — это путь релиза: он сначала очищает `dist/`, а `tsconfig.build.json` отключает
+`sourceMap` / `declarationMap`, поэтому в артефактах нет ни `.map`, ни комментариев
+`//# sourceMappingURL=`. Причина: в пакет попадает только `dist/`, а `sources` в map указывают
+на `../src/*.ts`, которых в пакете нет (и `sourcesContent` не встроен) — потребитель не получит ни
+исходников, ни перехода к определениям, но заплатит примерно +35% размера. Для отладки внутри
+репозитория используйте `pnpm build:ts:debug` (`tsconfig.build.debug.json`) — он кладёт map в
+`dist/`.
 
 **Все wasm-модули собираются только с `--optimize`, без `--enable simd`**: скорость SM4
 даёт скалярное чередование блоков, которое не зависит ни от какого набора SIMD-инструкций.

@@ -128,6 +128,13 @@ sm-crypto-wasm/
 
 发布到 npm 时 `dist/` 是主体，`src/` 作为 source map 引用保留但不强制要求消费者使用。
 
+> **更新（2026-10-15）：发布构建不再产出 source map。** 包内只有 `dist/`，而 map 的 `sources`
+> 指向不随包发布的 `../src/*.ts`（且未内嵌 `sourcesContent`），下游既拿不到源码也跳不到定义，
+> 却要多付约 35% 体积（`.js.map` 148 KB + `.d.ts.map` 72 KB，占 `dist` 624 KB 的三分之一强）。
+> 现由 `tsconfig.build.json` 关闭 `sourceMap` / `declarationMap`；仓库内调试用
+> `pnpm build:ts:debug`（`tsconfig.build.debug.json`）。CI 在打包演练后断言 `dist` 既无 `.map`
+> 也无 `//# sourceMappingURL=` 残留。
+
 ---
 
 ## 6. API 形态（预览）
