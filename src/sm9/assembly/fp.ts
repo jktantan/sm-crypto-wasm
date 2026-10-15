@@ -112,7 +112,8 @@ function montMulInto(out: U256, a: U256, b: U256): void {
     uv = u64(load<u32>(t)) + u64(m) * u64(load<u32>(p));
     c = uv >>> 32;
     for (let j = 1; j < 8; j++) {
-      uv = u64(load<u32>(t + ((<usize>j) << 2))) + u64(m) * u64(load<u32>(p + ((<usize>j) << 2))) + c;
+      uv =
+        u64(load<u32>(t + ((<usize>j) << 2))) + u64(m) * u64(load<u32>(p + ((<usize>j) << 2))) + c;
       store<u32>(t + ((<usize>(j - 1)) << 2), <u32>(uv & 0xffffffff));
       c = uv >>> 32;
     }

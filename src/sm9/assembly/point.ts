@@ -89,7 +89,9 @@ export class G2 {
 // 或赋给新建点的字段），共享同一份 U256 是安全的。
 
 const U256_ONE = fpMontOne(); // 「1」在 Montgomery 域中 = R mod p
-const U256_THREE = fpToMont(u256fromHex('0000000000000000000000000000000000000000000000000000000000000003'));
+const U256_THREE = fpToMont(
+  u256fromHex('0000000000000000000000000000000000000000000000000000000000000003'),
+);
 
 // G1 点运算的 U256 工作区（fp 层 To 算子用，零堆分配；非重入：*Into 是叶子）。
 const GE0 = u256zero();
@@ -105,12 +107,24 @@ const GE9 = u256zero();
 const GE10 = u256zero();
 const GE11 = u256zero();
 // 基点坐标：标准域常量，进 Montgomery 域各转一次（模块初始化时做，只此一次）。
-const G1_GX = fpToMont(u256fromHex('93DE051D62BF718FF5ED0704487D01D6E1E4086909DC3280E8C4E4817C66DDDD'));
-const G1_GY = fpToMont(u256fromHex('21FE8DDA4F21E607631065125C395BBC1C1C00CBFA6024350C464CD70A3EA616'));
-const G2_GX0 = fpToMont(u256fromHex('3722755292130b08d2aab97fd34ec120ee265948d19c17abf9b7213baf82d65b'));
-const G2_GX1 = fpToMont(u256fromHex('85aef3d078640c98597b6027b441a01ff1dd2c190f5e93c454806c11d8806141'));
-const G2_GY0 = fpToMont(u256fromHex('a7cf28d519be3da65f3170153d278ff247efba98a71a08116215bba5c999a7c7'));
-const G2_GY1 = fpToMont(u256fromHex('17509b092e845c1266ba0d262cbee6ed0736a96fa347c8bd856dc76b84ebeb96'));
+const G1_GX = fpToMont(
+  u256fromHex('93DE051D62BF718FF5ED0704487D01D6E1E4086909DC3280E8C4E4817C66DDDD'),
+);
+const G1_GY = fpToMont(
+  u256fromHex('21FE8DDA4F21E607631065125C395BBC1C1C00CBFA6024350C464CD70A3EA616'),
+);
+const G2_GX0 = fpToMont(
+  u256fromHex('3722755292130b08d2aab97fd34ec120ee265948d19c17abf9b7213baf82d65b'),
+);
+const G2_GX1 = fpToMont(
+  u256fromHex('85aef3d078640c98597b6027b441a01ff1dd2c190f5e93c454806c11d8806141'),
+);
+const G2_GY0 = fpToMont(
+  u256fromHex('a7cf28d519be3da65f3170153d278ff247efba98a71a08116215bba5c999a7c7'),
+);
+const G2_GY1 = fpToMont(
+  u256fromHex('17509b092e845c1266ba0d262cbee6ed0736a96fa347c8bd856dc76b84ebeb96'),
+);
 
 // ---------- G1 ----------
 
