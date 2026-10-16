@@ -7,8 +7,8 @@
 
 | 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
 |---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.04 µs / 6.27 µs / 330 µs | 13.7 µs（1 KB） | 快 2.2× |
-| SM3 | hmac 1 KB | 10.1 µs | 17.9 µs | 快 1.8× |
+| SM3 | hash 32 B / 1 KB / 64 KB | 872 ns / 4.75 µs / 245 µs | 14.7 µs（1 KB） | 快 3.1× |
+| SM3 | hmac 1 KB | 5.58 µs | 19.4 µs | 快 3.5× |
 | SM4 | ECB 16 B / 1 KB | 0.94 µs / 6.98 µs | 37.3 µs（1 KB） | 快 5.3× |
 | SM4 | CBC 1 KB | 10.5 µs | 41.6 µs | 快 4.0× |
 | SM4 | CTR 1 KB | 7.43 µs | 36.5 µs | 快 4.9× |
@@ -41,13 +41,63 @@ CSPRNG），实测在多次运行之间波动可达 **±20%**，远大于 SM3 / 
 上表 SM2 的数字取自同一次运行（`wasm` 与 `gmkitx` 两列同源）。
 :::
 
+## 与另外两个国密库横向对比
+
+上表的参照物是纯 JS 的 `gmkitx`。若换成**另外两个真实的国密库**，在完全相同的参数、
+消息与密钥下：
+
+- **Cubelrti/sm-crypto-wasm** —— Rust + `wasm-bindgen` 编译到 WebAssembly（⚠️ 与本库
+  同名，但不是同一个项目）；
+- **sm-crypto-v2** —— TypeScript + [noble-curves](https://github.com/paulmillr/noble-curves)，
+  当前纯 JS 生态里最快的一档。
+
+三方各自使用**源码的 release 构建**，基准内置自检会逐字节比对三方输出（SM3 / SM4 必须
+完全相等，SM2 交叉验签必须通过），不一致直接抛错。
+
+| 操作 | sm-crypto-wasm | Cubelrti/WASM | sm-crypto-v2 | 对比 |
+|---|---|---|---|---|
+| SM2 签名 64 B | **142 µs** | 4.56 ms | 293 µs | 快 32.0× / 2.1× |
+| SM2 验签 64 B | **401 µs** | 4.65 ms | 2.74 ms | 快 11.6× / 6.8× |
+| SM2 加密 64 B | **508 µs** | 4.57 ms | 2.73 ms | 快 9.0× / 5.4× |
+| SM2 解密 64 B | **339 µs** | 2.24 ms | 2.45 ms | 快 6.6× / 7.2× |
+| SM2 密钥对生成 | **148 µs** | 2.20 ms | 206 µs | 快 14.9× / 1.4× |
+| SM3 hash 1 KB | **4.76 µs** | 25.1 µs | 6.43 µs | 快 5.3× / 1.35× |
+| SM3 hmac 1 KB | **5.65 µs** | 29.4 µs | 9.29 µs | 快 5.2× / 1.64× |
+| SM4 ECB 加密 1 KB | **6.81 µs** | 12.2 µs | 12.5 µs | 快 1.8× / 1.8× |
+| SM4 CBC 加密 1 KB | **10.6 µs** | 19.9 µs | 15.1 µs | 快 1.9× / 1.4× |
+| SM4 CBC 解密 1 KB | **10.9 µs** | 22.4 µs | 14.1 µs | 快 2.1× / 1.3× |
+| SM4 CTR 加密 1 KB | **7.23 µs** | 12.1 µs | —（未实现） | 快 1.7× |
+| SM4 GCM 加密 1 KB | **19.8 µs** | 27.0 µs | 30.2 µs | 快 1.4× / 1.5× |
+
+复现（Cubelrti 侧需要 Docker 在容器内从源码构建）：
+
+```bash
+bash bench/build-cubelrti-wasm.sh   # 产出 bench/.vendor/cubelrti/pkg/
+pnpm bench:cubelrti
+```
+
+::: details 三点值得注意的观察
+- **Rust→WASM 未必更快**：Cubelrti 的 SM2 全线慢于纯 JS 的 `sm-crypto-v2`（签名慢 15×）。
+  它的热点用 `num-bigint`（通用大整数、堆分配）而非定宽字段运算；每次 API 调用都重新
+  派生公钥（其 `keypair` 2.20 ms ≈ `sign` 4.56 ms 的一半，说明 sign 里做了两次标量乘）；
+  另外每个导出函数内部都执行一次 `console::log_1`。
+- **`sm-crypto-v2` 是纯 JS 的天花板**：SM4 上它与 Cubelrti 基本打平，SM3 只比本库慢 1.35×。
+- **批量签名有专门通道**：`sm2.createSignaturePointPool(n)` 把固定基点标量乘（占单次
+  签名 56%）提前摊销，命中时单次签名从 141 µs 降到 **24 µs（5.9×）**。
+:::
+
 ## 为什么是这个形状
 
-- **SM3 / SM4 / ZUC 已到顶**：瓶颈是算法结构与 wasm 指令集共同封死的 ——
-  SM3 是 MD 链式（块间无法并行）且压缩函数 64 轮串行；SM4 与 ZUC 都卡在
-  **8-bit S 盒查表**上，而 WebAssembly 不暴露 ARMv8 的 `SM4E` 或 AES-NI 这类
-  用电路做 S 盒的指令。SM4 一度试过 `v128` SIMD，实测慢于 8 块标量交错（每块 4 条
-  独立依赖链，由乱序执行盖住 L1 延迟），已全部移除。
+- **SM3 又挤出一轮**：`compress` 原本每块单独跑一遍 64 store + 128 load 去物化
+  W′（`W[j] ^ W[j+4]`），改为在轮循环里就地算；轮循环改用指针递增；填充缓冲改模块级复用
+  （原先每次 `hash` 都 `new StaticArray<u8>(totalLen)` 并**清零整个长度**，而真正需要清零的
+  只有 padding 区）。**HMAC 整体下沉进 WASM**（原先 ipad/opad 拼接与两次摘要调用都在
+  JS 层，4 次跨边界 + 3 个临时数组），并新增两段输入接口让 `ipad ‖ msg` 直接参与填充。
+  合计 hash 快 **26%**、hmac 快 **45%**。
+- **SM4 / ZUC 卡在 S 盒**：两者都受限于 **8-bit S 盒查表**，而 WebAssembly 不暴露 ARMv8 的
+  `SM4E` 或 AES-NI 这类用电路做 S 盒的指令。SM4 一度试过 `v128` SIMD，实测慢于 8 块标量
+  交错（每块 4 条独立依赖链，由乱序执行盖住 L1 延迟），已全部移除。SM3 则是 MD 链式
+  （块间无法并行）+ 64 轮串行压缩函数。
 - **SM4 的 CFB / OFB 曾经比纯 JS 慢**：这两个模式原先在 TS 侧逐块调用 wasm（1 KB 要
   64 次跨界）。补上批量导出后降到 10 µs 一带，反过来快 3.6~3.8×。
 - **SM2 的计算层做过八件事**（Solinas 归约、Comba 平方、comb/wNAF 标量乘、点运算原地化、
@@ -61,6 +111,7 @@ CSPRNG），实测在多次运行之间波动可达 **±20%**，远大于 SM3 / 
   快 **27~32%**。
 
 ::: tip 数字随版本与机器变化
-以上为特定机器上的实测值，请以本机 `pnpm bench` 为准。完整的实验记录与"还剩多少空间"
-的评估见仓库 [`docs/performance-ceiling.md`](https://github.com/jktantan/sm-crypto-wasm/blob/main/docs/performance-ceiling.md)。
+以上为特定机器上的实测值，请以本机 `pnpm bench` / `pnpm bench:cubelrti` 为准。
+完整的实验记录与"还剩多少空间"的评估见仓库
+[`docs/performance-ceiling.md`](https://github.com/jktantan/sm-crypto-wasm/blob/main/docs/performance-ceiling.md)。
 :::
