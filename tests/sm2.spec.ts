@@ -46,6 +46,25 @@ describe('SM2 vs gmkitx oracle', () => {
     expect(Buffer.from(pt, 'hex').toString('utf8')).toBe(MSG);
   });
 
+  it('大消息反复加解密/签名验签：memory 增长后视图不失效', () => {
+    // 回归：曾先取 `new Uint8Array(memory.buffer)` 再 alloc —— 大消息触发
+    // memory.grow 后旧视图 detach，抛 "Cannot perform Construct on a detached
+    // ArrayBuffer"。现在每次现取视图。
+    const pub = sm2.getPublicKey(D);
+    const msg = new Uint8Array(2 * 1024 * 1024);
+    for (let i = 0; i < msg.length; i++) msg[i] = (i * 31) & 0xff;
+    const msgHex = Buffer.from(msg).toString('hex');
+
+    for (let i = 0; i < 3; i++) {
+      const ct = sm2.encrypt(pub, msg);
+      expect(sm2.decrypt(D, ct)).toBe(msgHex);
+    }
+
+    const sig = sm2.sign(D, msg);
+    expect(sm2.verify(pub, msg, sig)).toBe(true);
+    expect(sm2.verify(pub, msgHex, sig)).toBe(true);
+  });
+
   it('accepts PEM key inputs across the API', () => {
     const pub = sm2.getPublicKey(D);
     const privPem = encodeSm2PrivateKeyPem(D, pub);

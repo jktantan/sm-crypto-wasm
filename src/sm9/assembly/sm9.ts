@@ -429,7 +429,12 @@ export function sm9Encrypt(
   msgLen: i32,
   r: U256,
   outPtr: usize,
+  outCap: i32,
 ): i32 {
+  // 输出缓冲容量校验：密文 = C1(65) || C3(32) || C2(msgLen)，绝不越界写。
+  const total = 65 + 32 + msgLen;
+  if (total > outCap) return -1;
+
   const id = new StaticArray<u8>(idLen);
   for (let i = 0; i < idLen; i++) id[i] = load<u8>(idPtr + i);
 
@@ -449,7 +454,6 @@ export function sm9Encrypt(
   for (let i = 0; i < 32; i++) K2[i] = K[msgLen + i];
   const C3 = hmacSm3(K2, C2);
 
-  const total = 65 + 32 + msgLen;
   for (let i = 0; i < 65; i++) store<u8>(outPtr + i, C1[i]);
   for (let i = 0; i < 32; i++) store<u8>(outPtr + 65 + i, C3[i]);
   for (let i = 0; i < msgLen; i++) store<u8>(outPtr + 97 + i, C2[i]);

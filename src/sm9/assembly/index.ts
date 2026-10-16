@@ -414,10 +414,11 @@ export function sm9EncryptOut(
   msgLen: i32,
   rPtr: usize,
   outPtr: usize,
+  outCap: i32,
 ): i32 {
   arenaRewind();
   const ppube = encMasterPublic(readU256(kePtr));
-  return sm9Encrypt(ppube, idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr);
+  return sm9Encrypt(ppube, idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr, outCap);
 }
 
 /** 诊断：SM9 解密。输出明文，返回长度；校验失败返回 -1。 */
@@ -632,9 +633,19 @@ export function sm9EncryptPubOut(
   msgLen: i32,
   rPtr: usize,
   outPtr: usize,
+  outCap: i32,
 ): i32 {
   arenaRewind();
-  return sm9Encrypt(readG1Affine(pubPtr), idPtr, idLen, msgPtr, msgLen, readU256(rPtr), outPtr);
+  return sm9Encrypt(
+    readG1Affine(pubPtr),
+    idPtr,
+    idLen,
+    msgPtr,
+    msgLen,
+    readU256(rPtr),
+    outPtr,
+    outCap,
+  );
 }
 
 /** 用户加密公钥 Q = [H1(id, hid=3)]P1 + Ppub-e（G1 仿射 64B）。输入加密主公钥 64B。 */

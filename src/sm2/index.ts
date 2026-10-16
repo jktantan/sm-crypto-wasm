@@ -115,6 +115,27 @@ function getModule(): Sm2Module {
 }
 
 /**
+ * 现取 WASM memory 视图。
+ *
+ * **每次都用**，绝不在多次 `alloc` / wasm 调用之间缓存 `new Uint8Array(memory.buffer)`：
+ * 任何一次分配都可能让 WASM 堆增长（`memory.grow`），旧的 ArrayBuffer 会被 detach，
+ * 复用旧视图会抛 `TypeError: Cannot perform Construct on a detached ArrayBuffer`。
+ */
+function memView(): Uint8Array {
+  return new Uint8Array(getModule().memory.buffer);
+}
+
+/** 写入字节到 WASM 内存（现取视图）。 */
+function putBytes(b: Uint8Array, ptr: number): void {
+  memView().set(b, ptr);
+}
+
+/** 读出 WASM 内存的拷贝（现取视图后 slice，不向上层交出会失效的视图）。 */
+function readBytes(ptr: number, len: number): Uint8Array {
+  return new Uint8Array(getModule().memory.buffer, ptr, len).slice();
+}
+
+/**
  * 从私钥派生公钥。
  *
  * @param privateKey 32 字节私钥（hex / Uint8Array）。
@@ -130,13 +151,13 @@ export function getPublicKey(privateKey: string | Uint8Array): string {
  * `getPublicKey` 与缓存未命中时的 `derivePublicKeyBytes` 都走这里。
  */
 function derivePublicKeyRaw(d: Uint8Array): Uint8Array {
-  const { exports, memory } = getModule();
+  const { exports } = getModule();
   const dp = exports.alloc(32);
   const op = exports.alloc(64);
   try {
-    new Uint8Array(memory.buffer).set(d, dp);
+    putBytes(d, dp);
     exports.publicKeyOut(dp, op);
-    return new Uint8Array(memory.buffer, op, 64).slice();
+    return readBytes(op, 64);
   } finally {
     exports.freeAll();
   }
@@ -302,7 +323,6 @@ export function sign(privateKey: string | Uint8Array, message: string | Uint8Arr
   const m = toBytes(message, 'message');
   const pub = derivePublicKeyBytes(d);
   const { exports } = getModule();
-  const mem = new Uint8Array(getModule().memory.buffer);
   const dp = exports.alloc(32);
   const pxp = exports.alloc(32);
   const pyp = exports.alloc(32);
@@ -310,17 +330,17 @@ export function sign(privateKey: string | Uint8Array, message: string | Uint8Arr
   const kp = exports.alloc(32);
   const op = exports.alloc(64);
   try {
-    mem.set(d, dp);
-    mem.set(pub.subarray(0, 32), pxp);
-    mem.set(pub.subarray(32, 64), pyp);
-    mem.set(m, mp);
+    putBytes(d, dp);
+    putBytes(pub.subarray(0, 32), pxp);
+    putBytes(pub.subarray(32, 64), pyp);
+    putBytes(m, mp);
     // 最多重试几次 k（极小概率 r/s 为 0 或 r+k==n）。
     for (let attempt = 0; attempt < 16; attempt++) {
       const k = randomK();
-      mem.set(k, kp);
+      putBytes(k, kp);
       const rc = exports.signOut(dp, pxp, pyp, mp, m.length, kp, op);
       if (rc === 0) {
-        return fromBytes(new Uint8Array(mem.buffer, op, 64).slice(), 'hex');
+        return fromBytes(readBytes(op, 64), 'hex');
       }
     }
     throw new Error('sm2.sign: failed to produce a valid signature after retries');
@@ -346,16 +366,15 @@ export function verify(
   const sig = toBytes(signature, 'signature');
   if (sig.length !== 64) throw new InvalidCiphertextError('sm2: signature must be 64 bytes');
   const { exports } = getModule();
-  const mem = new Uint8Array(getModule().memory.buffer);
   const pxp = exports.alloc(32);
   const pyp = exports.alloc(32);
   const mp = exports.alloc(m.length);
   const sigp = exports.alloc(64);
   try {
-    mem.set(x, pxp);
-    mem.set(y, pyp);
-    mem.set(m, mp);
-    mem.set(sig, sigp);
+    putBytes(x, pxp);
+    putBytes(y, pyp);
+    putBytes(m, mp);
+    putBytes(sig, sigp);
     return exports.verifyOut(pxp, pyp, mp, m.length, sigp) === 1;
   } finally {
     exports.freeAll();
@@ -385,21 +404,20 @@ export function encrypt(
   }
   const m = toBytes(message, 'message');
   const { exports } = getModule();
-  const mem = new Uint8Array(getModule().memory.buffer);
   const pxp = exports.alloc(32);
   const pyp = exports.alloc(32);
   const mp = exports.alloc(m.length);
   const kp = exports.alloc(32);
   const ctp = exports.alloc(97 + m.length);
   try {
-    mem.set(x, pxp);
-    mem.set(y, pyp);
-    mem.set(m, mp);
+    putBytes(x, pxp);
+    putBytes(y, pyp);
+    putBytes(m, mp);
     for (let attempt = 0; attempt < 16; attempt++) {
-      mem.set(randomK(), kp);
+      putBytes(randomK(), kp);
       const rc = exports.encryptOut(pxp, pyp, mp, m.length, kp, ctp);
       if (rc === 1) {
-        const raw = new Uint8Array(mem.buffer, ctp, 97 + m.length).slice();
+        const raw = readBytes(ctp, 97 + m.length);
         return fromBytes(format === 'C1C2C3' ? c1c3c2ToC1c2c3(raw) : raw, 'hex');
       }
     }
@@ -478,17 +496,16 @@ function decryptUnsafe(
 /** 按 C1C3C2 布局解密（wasm 侧约定的布局）。 */
 function decryptRaw(d: Uint8Array, ct: Uint8Array): string {
   const { exports } = getModule();
-  const mem = new Uint8Array(getModule().memory.buffer);
   const dp = exports.alloc(32);
   const ctp = exports.alloc(ct.length);
   const outLen = ct.length - 97;
   const ptp = exports.alloc(outLen === 0 ? 1 : outLen);
   try {
-    mem.set(d, dp);
-    mem.set(ct, ctp);
+    putBytes(d, dp);
+    putBytes(ct, ctp);
     const rc = exports.decryptOut(dp, ctp, ct.length, ptp);
     if (rc !== 1) throw new DecryptionError('sm2.decrypt: C3 verification failed');
-    return fromBytes(new Uint8Array(mem.buffer, ptp, outLen).slice(), 'hex');
+    return fromBytes(readBytes(ptp, outLen), 'hex');
   } finally {
     exports.freeAll();
   }

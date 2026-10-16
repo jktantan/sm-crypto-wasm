@@ -1,11 +1,12 @@
 /**
- * SM9 集成测试（src/sm9 门面层）。精简版 4 个 it, 总耗时 ≤ 95s, 在 2m0s 主机 cap 内可一次跑完。
+ * SM9 集成测试（src/sm9 门面层）。精简版 5 个 it, 总耗时 ≤ 95s, 在 2m0s 主机 cap 内可一次跑完。
  *
  * 覆盖:
  *  1. 主公钥派生 (getSignPublicKey 对拍 GmSSL C; getEncPublicKey 输出格式; 拒绝坏输入)
  *  2. sign 定 r 跨平台 (产生期望 sig) + verify 接受
  *  3. encrypt 定 r 跨平台 (产生期望 ct) + decrypt 还原
  *  4. sign 缺 r 走 CSPRNG + verify 接受 + verify 接受 Uint8Array msg
+ *  5. 长消息 (10KB) 反复加解密 + 签名验签（密文缓冲越界回归）
  *
  * 超时放宽说明：新增 sm9-kem / sm9-exch / sm9-kem-exch-kat 测试后，多个 SM9
  * 文件并行会争用 CPU，单个 pairing 相关用例耗时上升，故护栏从 20~60s 放宽到 60~120s。
@@ -58,5 +59,23 @@ describe('SM9 facade', () => {
     expect(sm9.verify(SIGN.ks_hex, SIGN.ida, SIGN.msg_hex, sig)).toBe(true);
     const u8 = new Uint8Array(Buffer.from(SIGN.msg_hex, 'hex'));
     expect(sm9.verify(SIGN.ks_hex, SIGN.ida, u8, sig)).toBe(true);
+  }, 120_000);
+
+  it('长消息 (10KB) 反复加解密 + 签名验签：不再内存越界', () => {
+    // 回归：encrypt 的密文缓冲曾硬编码 alloc(4096)，密文 = 97 + |msg| 字节，
+    // 明文超过 3999 字节就写越界、破坏 WASM 堆，几轮后抛
+    // RuntimeError: memory access out of bounds。这里循环多轮以覆盖累积效应。
+    const msg = new Uint8Array(10240);
+    for (let i = 0; i < msg.length; i++) msg[i] = (i * 7) & 0xff;
+    const msgHex = Buffer.from(msg).toString('hex');
+
+    for (let i = 0; i < 8; i++) {
+      const ct = sm9.encrypt(ENC.ke_hex, ENC.idb, msg);
+      expect(ct.length).toBe((97 + msg.length) * 2);
+      expect(sm9.decrypt(ENC.ke_hex, ENC.idb, ct).toLowerCase()).toBe(msgHex);
+    }
+
+    const sig = sm9.sign(SIGN.ks_hex, SIGN.ida, msg);
+    expect(sm9.verify(SIGN.ks_hex, SIGN.ida, msg, sig)).toBe(true);
   }, 120_000);
 });

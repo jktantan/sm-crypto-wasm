@@ -66,6 +66,7 @@ interface Sm9Exports extends WebAssembly.Exports {
     msgLen: number,
     rPtr: number,
     outPtr: number,
+    outCap: number,
   ) => number;
   readonly sm9UserEncPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
   readonly sm9UserSignPubOut: (
@@ -99,6 +100,7 @@ interface Sm9Exports extends WebAssembly.Exports {
     msgLen: number,
     rPtr: number,
     outPtr: number,
+    outCap: number,
   ) => number;
   readonly sm9DecryptOut: (
     kePtr: number,
@@ -579,7 +581,11 @@ export function encrypt(
   const idP = exports.alloc(idB.length);
   const msgP = exports.alloc(msgB.length);
   const rP = exports.alloc(32);
-  const ctP = exports.alloc(4096);
+  // 密文布局 C1(65) || C3(32) || C2(|msg|)，长度随明文增长 —— 按实际长度分配，
+  // 并把容量一并交给 wasm 侧校验。曾硬编码 alloc(4096)：明文超过 3999 字节时
+  // sm9Encrypt 会写越界、破坏 GC 堆（几轮后 RuntimeError: memory access out of bounds）。
+  const ctCap = 65 + 32 + msgB.length;
+  const ctP = exports.alloc(ctCap);
   try {
     putBytes(key.bytes, keyP);
     putBytes(idB, idP);
@@ -587,9 +593,9 @@ export function encrypt(
     putBytes(rB, rP);
     const ctLen =
       key.kind === 'public'
-        ? exports.sm9EncryptPubOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP)
-        : exports.sm9EncryptOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP);
-    if (ctLen < 0) throw new Error('sm9: encrypt 失败');
+        ? exports.sm9EncryptPubOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP, ctCap)
+        : exports.sm9EncryptOut(keyP, idP, idB.length, msgP, msgB.length, rP, ctP, ctCap);
+    if (ctLen < 0) throw new Error('sm9: encrypt 失败（密文缓冲容量不足）');
     return readHex(ctP, ctLen);
   } finally {
     exports.freeAll();
