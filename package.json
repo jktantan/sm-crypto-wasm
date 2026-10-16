@@ -75,7 +75,7 @@
     "build:wasm:all": "pnpm run build:wasm:sm2 && pnpm run build:wasm:sm3 && pnpm run build:wasm:sm4 && pnpm run build:wasm:sm9 && pnpm run build:wasm:zuc",
     "build:ts": "tsc -p tsconfig.build.json",
     "build:ts:debug": "tsc -p tsconfig.build.debug.json",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true,maxRetries:3,retryDelay:100})\"",
     "pretest": "pnpm run build:wasm:all",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
