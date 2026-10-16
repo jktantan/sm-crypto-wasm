@@ -19,10 +19,15 @@
  * spec/plan 对应：plan Task 1；spec §7 跨运行时、§10 测试。
  */
 
-import { existsSync, readFile, readFileSync } from 'node:fs';
-import { readFile as readFileAsync } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// 注意：宿主内置模块一律用 **namespace 导入**（`import * as`），不要用 `import { x }`。
+// 打包器（Vite/Rollup）把 `node:*` 外部化成只有 default 的空 stub 时，具名导入会让
+// 构建**直接失败**（"X is not exported by __vite-browser-external"）；namespace 导入
+// 只产生警告。浏览器分支不会执行到这些函数（见 `isNode`），所以运行时取到 undefined
+// 也无妨 —— 这是一次为「浏览器可打包」付的最小代价。
+import * as nodeFs from 'node:fs';
+import * as nodeFsPromises from 'node:fs/promises';
+import * as nodePath from 'node:path';
+import * as nodeUrl from 'node:url';
 
 /** 算法白名单：确保非法 `name` 在到达文件系统 / 浏览器分支前被拒绝。 */
 const WASM_ALGOS = ['sm2', 'sm3', 'sm4', 'sm9', 'zuc'] as const;
@@ -62,16 +67,16 @@ function wasmPath(name: WasmAlgo): string {
   // 1. cwd/dist（开发/单仓根目录模式）。这是首选路径；日志里
   // 见到 "src/<name>/<name>.wasm" 即说明回退路径被命中，提示开发模式
   // 下应当先 `pnpm build:wasm:<name>`。
-  const cwdPath = resolve(process.cwd(), 'dist', name, `${name}.wasm`);
-  if (existsSync(cwdPath)) return cwdPath;
+  const cwdPath = nodePath.resolve(process.cwd(), 'dist', name, `${name}.wasm`);
+  if (nodeFs.existsSync(cwdPath)) return cwdPath;
   // 2. 源文件相对路径（生产产物 dist/runtime/loadWasm.js → ../<name>/<name>.wasm）。
   let here: string;
   try {
-    here = dirname(fileURLToPath(import.meta.url));
+    here = nodePath.dirname(nodeUrl.fileURLToPath(import.meta.url));
   } catch {
     here = process.cwd();
   }
-  return resolve(here, '..', name, `${name}.wasm`);
+  return nodePath.resolve(here, '..', name, `${name}.wasm`);
 }
 
 /**
@@ -81,7 +86,7 @@ function wasmPath(name: WasmAlgo): string {
  * @returns wasm 二进制 ArrayBuffer；总是一个**拷贝**，不持有 fd 缓存。
  */
 async function nodeReadWasm(name: WasmAlgo): Promise<ArrayBuffer> {
-  const buf = await readFileAsync(wasmPath(name));
+  const buf = await nodeFsPromises.readFile(wasmPath(name));
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
@@ -92,7 +97,7 @@ async function nodeReadWasm(name: WasmAlgo): Promise<ArrayBuffer> {
  * @returns wasm 二进制 ArrayBuffer。
  */
 function nodeReadWasmSync(name: WasmAlgo): ArrayBuffer {
-  const buf = readFileSync(wasmPath(name));
+  const buf = nodeFs.readFileSync(wasmPath(name));
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
@@ -198,6 +203,3 @@ export function getCachedWasm(name: WasmAlgo): Promise<WasmModule> {
 export function _resetCacheForTests(): void {
   cache.clear();
 }
-
-// 引用 readFile 以避免被 unused 误删（运行时仅在动态分支用到）。
-void readFile;

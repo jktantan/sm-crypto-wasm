@@ -10,10 +10,29 @@
  *
  * spec/plan 对应：plan Task 3；spec §9 安全姿态、§6 SM2/SM9 API。
  */
-import { webcrypto } from 'node:crypto';
+// 同 loadWasm.ts：宿主内置模块用 namespace 导入，避免打包器具名导入时构建失败。
+import * as nodeCrypto from 'node:crypto';
 
-/** 宿主 CSPRNG 引用；优先 `globalThis.crypto`（浏览器 / Node 19+）。 */
-const c: Crypto = (globalThis as { crypto?: Crypto }).crypto ?? (webcrypto as unknown as Crypto);
+/**
+ * 解析宿主 CSPRNG。**取不到就抛错，绝不静默降级到非密码学随机源。**
+ *
+ * - 浏览器 / Node 19+：`globalThis.crypto`（WebCrypto）；
+ * - Node 18：`node:crypto` 的 `webcrypto` —— `globalThis.crypto` 直到 Node 19 才
+ *   默认暴露，Node 18 需要 `--experimental-global-webcrypto`，所以回退是必要的。
+ */
+function resolveHostCrypto(): Crypto {
+  const g = (globalThis as { crypto?: Crypto }).crypto;
+  if (g && typeof g.getRandomValues === 'function') return g;
+  const wc = (nodeCrypto as { webcrypto?: Crypto }).webcrypto;
+  if (wc && typeof wc.getRandomValues === 'function') return wc;
+  throw new Error(
+    'sm-crypto-wasm: 找不到宿主 CSPRNG（需要 WebCrypto 的 crypto.getRandomValues）；' +
+      'Node 18 请加 --experimental-global-webcrypto，或先 polyfill globalThis.crypto。',
+  );
+}
+
+/** 宿主 CSPRNG 引用；模块加载时即解析。 */
+const c: Crypto = resolveHostCrypto();
 
 /**
  * 取 `n` 字节 CSPRNG 随机数。
