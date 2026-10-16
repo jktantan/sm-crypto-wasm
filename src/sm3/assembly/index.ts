@@ -10,7 +10,7 @@
 //
 // 公开算法参考：GB/T 32905-2016 / GM/T 0004-2014。
 
-import { sm3HashInto } from './sm3-core';
+import { sm3HashInto, sm3HmacInto } from './sm3-core';
 
 /** 持住已分配缓冲，防止被 AS GC 回收。 */
 const pinned: Array<StaticArray<u8>> = [];
@@ -41,4 +41,23 @@ export function freeAll(): void {
  */
 export function sm3(inputPtr: usize, inputLen: usize, outPtr: usize): void {
   sm3HashInto(inputPtr, inputLen, outPtr);
+}
+
+/**
+ * SM3-HMAC 单块调用入口（RFC 2104）：整段计算在 WASM 内完成。
+ *
+ * @param keyPtr 密钥字节起始地址。
+ * @param keyLen 密钥字节长度。
+ * @param msgPtr 消息字节起始地址。
+ * @param msgLen 消息字节长度。
+ * @param outPtr 输出 32 字节起始地址。
+ */
+export function sm3Hmac(
+  keyPtr: usize,
+  keyLen: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  outPtr: usize,
+): void {
+  sm3HmacInto(keyPtr, keyLen, msgPtr, msgLen, outPtr);
 }
