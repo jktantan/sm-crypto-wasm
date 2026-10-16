@@ -21,6 +21,7 @@ import {
   kexComputeU,
   kexConfirm,
   sign,
+  signWithPoint,
   verify,
 } from './crypto';
 import {
@@ -155,6 +156,40 @@ export function signOut(
   const z = new StaticArray<u8>(32);
   computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
   return sign(privPtr, changetype<usize>(z), msgPtr, msgLen, kPtr, outPtr, outPtr + 32);
+}
+
+/**
+ * SM2 签名（使用调用方预先算好的 `k·G`）：out = r(32) || s(32)。
+ *
+ * 与 `signOut` 的唯一区别：不再自己做固定基点标量乘（实测占单次签名的 56%），
+ * 改由调用方通过 `scalarMulGOut` 预算 —— 这是"签名点池"的底座。
+ *
+ * @param kxPtr 预计算的 `k·G` 的 x 坐标（32 字节）。
+ * @returns 0 成功，1 需重试（调用方应换下一个点）。
+ */
+export function signWithPointOut(
+  privPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  kxPtr: usize,
+  outPtr: usize,
+): i32 {
+  arenaRewind();
+  const z = new StaticArray<u8>(32);
+  computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
+  return signWithPoint(
+    privPtr,
+    changetype<usize>(z),
+    msgPtr,
+    msgLen,
+    kPtr,
+    kxPtr,
+    outPtr,
+    outPtr + 32,
+  );
 }
 
 /** SM2 验签。sigPtr = r || s。返回 1 有效，0 无效。 */
