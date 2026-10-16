@@ -136,9 +136,8 @@ function clearPublicKeyCache(): void
 ### `sm2.createSignaturePointPool(n)`
 
 ```ts
-interface SignaturePoint {
-  readonly k: string;      // 临时私钥 k，32 字节 hex
-  readonly point: string;  // k·G 的仿射坐标 x‖y，64 字节 hex
+class SignaturePoint {
+  readonly point: string; // k·G 的仿射坐标 x‖y（64 字节 hex），公开信息
 }
 async function createSignaturePointPool(n: number): Promise<SignaturePoint[]>
 ```
@@ -155,11 +154,10 @@ for (const msg of messages) {
 }
 ```
 
-::: warning 绝不复用同一个点
-池里的 `k` 取自宿主 CSPRNG，且**一次性使用** —— `sign` 每签一次就把它从数组里 `pop()`
-掉。SM2 下复用同一个 `k` 可**直接解出私钥**，因此不要把同一个 `SignaturePoint` 喂给
-两次签名，也不要跨请求 / 跨进程共享同一个池。
-:::
+**"绝不复用 k" 是结构性保证的，不需要你操心。** 临时私钥 `k` 封在库内部：既不暴露、
+也无法复制（`SignaturePoint` 上只有公开的 `k·G` 坐标），`sign` 取走后立刻从索引摘除并
+抹掉字节。同一个点再喂一次会**当场抛错**，而不是悄悄复用 —— 复用 `k` 在 SM2 下会直接
+解出私钥。伪造一个 `SignaturePoint` 同样无效（索引里没有它）。
 
 池被取空后 `sign` 自动回退到现算路径（不少签、不签错）；`n` 须为非负整数，否则抛
 `RangeError`。

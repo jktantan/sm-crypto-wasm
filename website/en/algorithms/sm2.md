@@ -142,9 +142,8 @@ process memory. If your threat model forbids that, turn it off with
 ### `sm2.createSignaturePointPool(n)`
 
 ```ts
-interface SignaturePoint {
-  readonly k: string;      // nonce k, 32-byte hex
-  readonly point: string;  // k·G in affine x‖y, 64-byte hex
+class SignaturePoint {
+  readonly point: string; // k·G in affine x‖y (64-byte hex); public information
 }
 async function createSignaturePointPool(n: number): Promise<SignaturePoint[]>
 ```
@@ -162,11 +161,12 @@ for (const msg of messages) {
 }
 ```
 
-::: warning Never reuse a point
-Each `k` comes from the host CSPRNG and is **used exactly once** — `sign` `pop()`s it off the
-array. Reusing the same `k` under SM2 **leaks the private key outright**, so never feed the
-same `SignaturePoint` to two signatures, and never share a pool across requests or processes.
-:::
+**"Never reuse `k`" is enforced structurally — you don't have to think about it.** The nonce
+stays inside the library: it is never exposed and cannot be copied (`SignaturePoint` carries
+only the public `k·G` coordinates), and `sign` removes it from the index and zeroes the bytes
+the moment it is used. Feeding the same point twice **throws on the spot** instead of silently
+reusing it — and reusing `k` under SM2 leaks the private key outright. A forged
+`SignaturePoint` is equally useless (it is not in the index).
 
 Once the pool runs dry, `sign` falls back to computing `k` on the fly (no skipped or wrong
 signatures). `n` must be a non-negative integer, otherwise `RangeError`.
