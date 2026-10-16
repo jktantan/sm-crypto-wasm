@@ -31,8 +31,10 @@ node built-ins — Webpack, esbuild, Rspack — no longer fail at resolve time w
 
 | Bundler | Configuration | wasm asset |
 | --- | --- | --- |
-| **Vite 5** | none | archived into the output automatically (`assets/*.wasm`) |
-| **Webpack 5** | none | emitted as an asset automatically |
+| **Vite 5** | none | archived into the output (`assets/*.wasm`) |
+| **Webpack 5** | none | emitted as an asset |
+| **Rspack 2** | none | emitted as an asset (hashed filenames) |
+| **Turbopack** (Next.js 16 default) | none | archived under `static/media/*.wasm` |
 | **esbuild** | one plugin line (below) | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
 | **Node 18+** | none | reads `dist/<algo>/<algo>.wasm` |
 

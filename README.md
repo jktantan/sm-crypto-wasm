@@ -38,116 +38,13 @@ Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
 
 ## 性能
 
-热点（大整数模运算、hash 压缩函数、分组密码轮函数）在 WASM 内执行。下表覆盖本库
-每个算法的**全部公开操作**；`gmkitx` 一列是对应的纯 JS 参考实现（同机、同参数、
-同消息），**它没有的操作留 `—`**。实测环境 AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11，
-`pnpm bench` 可复现：
+热点（大整数模运算、hash 压缩函数、分组密码轮函数、双线性对）在 WASM 内执行。
+所有经过对比的公开操作都快于同机纯 JS 参考实现：SM3 / ZUC 快 1.8\~2.3×，
+SM4 六种模式 3.6\~11.2×，SM2 1.8\~7.6×。
 
-> **关于 SM2 一行**：这一层是 TS 门面 API（签名走公钥派生缓存，加密每次仍要做 hex 与
-> 曲线点编解码、并调用宿主 CSPRNG），实测在多次运行之间波动可达 ±20%，远大于
-> SM3 / SM4 / SM9 / ZUC。表中 SM2 的数字取自同一次运行（`wasm` 与 `gmkitx` 两列同源）；
-> **本轮优化在 wasm 计算层的净收益**（更稳定，min-of-5 采样）见下方「要点」。
-
-| 算法 | 操作 | sm-crypto-wasm | 纯 JS 参考（gmkitx） | 对比 |
-|---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.04 µs / 6.27 µs / 330 µs | 13.7 µs（1 KB） | 快 2.2× |
-| SM3 | hmac 1 KB | 10.1 µs | 17.9 µs | 快 1.8× |
-| SM4 | ECB 16 B / 1 KB | 0.94 µs / 6.98 µs | 37.3 µs（1 KB） | 快 5.3× |
-| SM4 | CBC 1 KB | 10.5 µs | 41.6 µs | 快 4.0× |
-| SM4 | CTR 1 KB | 7.43 µs | 36.5 µs | 快 4.9× |
-| SM4 | CFB 1 KB | 10.0 µs | 37.9 µs | 快 3.8× |
-| SM4 | OFB 1 KB | 9.98 µs | 36.3 µs | 快 3.6× |
-| SM4 | GCM 1 KB | 19.8 µs | 221 µs | 快 11.2× |
-| SM2 | 密钥对生成 | 151 µs | — | — |
-| SM2 | 公钥派生 | 110 µs | 197 µs | 快 1.8× |
-| SM2 | 签名 64 B | 142 µs | 446 µs | 快 3.1× |
-| SM2 | 验签 64 B | 402 µs | 2.85 ms | 快 7.1× |
-| SM2 | 加密 64 B | 499 µs | 2.96 ms | 快 5.9× |
-| SM2 | 解密 64 B | 343 µs | 2.59 ms | 快 7.6× |
-| SM2 | 密钥交换（完整 A↔B） | 1.52 ms | 11.4 ms | 快 7.5× |
-| SM9 | 主密钥对生成（签名 / 加密） | 2.07 / 1.73 ms | — | — |
-| SM9 | 主公钥派生（签名 / 加密） | 97.1 / 49.1 µs | — | — |
-| SM9 | 用户公钥派生 | 563 µs | — | — |
-| SM9 | 签名 32 B | 4.11 ms | — | — |
-| SM9 | 验签 32 B | 8.00 ms | — | — |
-| SM9 | 加密 32 B | 3.69 ms | — | — |
-| SM9 | 解密 32 B | 5.40 ms | — | — |
-| SM9 | KEM 封装 / 解封装 | 3.42 / 4.92 ms | — | — |
-| SM9 | 密钥交换（完整 A↔B） | 19.6 ms | — | — |
-| ZUC | EEA3 加密 1 KB | 9.07 µs | 20.5 µs | 快 2.3× |
-| ZUC | EEA3 密钥流 1 KB | 6.15 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
-
-要点：
-
-- **所有经过对比的操作都快于纯 JS 参考**：SM3 / ZUC 快 1.8\~2.3×，SM4 六种模式
-  3.6\~11.2×，SM2 快 1.8\~7.6×；
-- **SM4 的 CFB / OFB 曾比纯 JS 慢 1.4~1.5×**：这两种模式原先在 TS 侧逐块调用
-  wasm（每 16 字节一次 alloc + 调用 + 取值，1 KB 要 64 次跨界）；补上与 CBC/CTR
-  同款的批量导出后降到 10 µs 一带，反过来快 3.6~3.8×；
-- **SM4 的瓶颈是每轮 4 次 S 盒查表**：把 S 盒与 L 变换合成 T-table 只换来 8~10%
-  （查表次数不变），因为成本不在 ALU 而在内存访问。查表次数既然降不下来，就改用
-  指令级并行把它藏起来：ECB 的多块循环做成 **8 块标量交错**（每块 4 条独立依赖链，
-  由乱序执行盖住 L1 延迟），CTR / GCM 的密钥流生成同路数，不足 8 块时退到 4 块交错、
-  再退到单块。之所以不走 WASM SIMD：`v128` 既没有 AVX2 的 gather（无法并行查
-  8→32 位表），也没有 AES-NI，而 `i8x16.swizzle` 只够 4-bit S 盒、够不着 SM4 的
-  8-bit S 盒——查表次数不降，收益只剩异或链的 lane 并行，实测反而不如标量交错。
-  这也解释了为什么仍追不上 C：它靠 ARMv8 的 `SM4E` 指令用电路做 S 盒、**根本不查表**，
-  而 WebAssembly 不暴露该指令集（通用 SIMD 也只给通用算子）；
-- **SM9 没有可比实现**（纯 JS 生态普遍如此，pairing 在纯 JS 里成本过高），故只给
-  本库的绝对耗时；
-- **SM2 的 wasm 大整数是线性内存裸指针**（`U256` 即 `usize`，配模块级 bump arena 与
-  每次导出调用回卷），在这一层之上做了八件事：
-  1. **素域 p 的归约走 Solinas**——p = 2^256−2^224−2^96+2^64−1 是伪 Mersenne，展开
-     2^256 ≡ 2^224+2^96−2^64+1 后归约只需加减移位、没有乘法（实测归约仅 0.03 µs，
-     比通用长除法快一个数量级）；
-  2. **平方改 Comba（列扫描）+ 统一进位**——旧实现每对 (i,j) 要跑两遍完整的进位传播
-     循环（共 56 次内存循环），是整个库最贵的单个函数；
-  3. **标量乘分两条路**：固定基点走 comb 预计算表（w=5、32 项；51 次倍点 + 52 次点加），
-     任意点走 wNAF（w=5，点加从 ~128 次降到 ~43 次）。表惰性构造一次，缓存在 arena
-     之外的永久区；
-  4. **点运算全程原地**：倍点 / 点加写模块级 scratch，不再逐次 `new U256` + `new JPoint`
-     （一次倍点原本 ~11 次堆分配，而标量乘要调用它几百次）；
-  5. **点加走混合坐标**——comb 表与 G 的 wNAF 表在构建时用一次 **Montgomery 批量求逆**
-     转成仿射（n 次求逆 → 1 次求逆 + 3n 次乘法，32 项表约 25 µs、且只做一次），于是
-     循环里每次点加由 12M+4S 降到 **8M+3S**（省约 1/3）；
-  6. **验签改联合标量乘**——`s·G + t·P` 用两条共享同一串倍点的 wNAF（G 的 16 项预计算
-     表同样仿射缓存、走混合坐标），省掉 comb 那条路的 51 次倍点；
-  7. **求逆改局部字级二进制扩展欧几里得**——`u`、`v` 与两个 Bezout 系数全部放进 wasm
-     局部变量（256 位恰好 4 个 u64 装下），每轮零内存往返，单次求逆 12.8 µs → 2.3 µs
-     （SM2 与 SM9 共用这条路径，故 SM9 一并受益）；
-  8. **`sign` 的公钥派生走进程内缓存**——公钥与 Z 值只依赖私钥，而原先每次签名都要
-     重做一遍固定基点标量乘（实测 105 µs，占一次签名 \~250 µs 的 41%）；缓存以私钥的
-     hex 为键、上限 32 条 FIFO 淘汰，命中即跳过派生。实测 `sign` 252 → 142 µs。
-  第 1~7 项在 wasm 计算层、第 8 项在 TS 门面层：前七项的 A/B（min-of-5，同机、同 probe）
-  是标量乘 G 138 → 105 µs、求逆 12.8 → 2.3 µs、签名 156 → 122 µs、验签 474 → 424 µs、
-  加密 487 → 449 µs、密钥交换 563 → 511 µs；在此之前的历史累积（Solinas + Comba +
-  comb/wNAF + 原地化）已把签名从 6.10 ms 降下来；
-  **取舍**：公开的 `getPublicKey` 仍每次真算（保持"派生公钥"的语义与基准可测性），
-  而缓存让"私钥的派生结果"（以及私钥本身的 hex 形态）在进程内存里驻留 —— 不接受
-  这一点的场景用 `configurePublicKeyCache({ enabled: false })` 关掉，即回到每次重算。
-  `encrypt` 只收公钥、不涉及派生，门面开销未动；
-- **代价与取舍**：comb 只适用于固定基点，Solinas 只适用于伪 Mersenne 模数——SM2 的
-  标量模 n 与 SM9 的 p/n 都不是这个形状，SM9 的基域因而改走 Montgomery（见下条）；
-  **混合坐标**要求表项是
-  仿射，所以每张预计算表都要先付一次批量求逆——G 的两张表缓存在永久区、只摊一次，而
-  任意点的 wNAF 表每次现算，批量求逆与节省的点加基本抵消，因此仍留 Jacobian；
-  **联合标量乘**只在 `s·G + t·P` 这种「一个固定基点 + 一个任意点」的组合上成立，
-  单点标量乘用不上；
-- SM9 由 pairing 主导。基域 Fp 已改用 **Montgomery 域**（CIOS，R = 2²⁵⁶）：SM9 的 p 是
-  BN 参数、不是伪 Mersenne，原先一次模乘要付 Barrett 的 64 次部分积 + 约 153 次归约
-  乘法，CIOS 只要 2×64 次；元素在域内一律是 a·R，只在 wasm 边界（字节 ↔ 元素、模块
-  常量）转换一次。单次模乘 179 → 98 ns（1.8×），端到端 sign / verify / encrypt /
-  decrypt / KEM / 密钥交换全面快 **1.6~1.8×**；扩域元素（Fp2/Fp4/Fp12）改用连续内存
-  表示则让 sign / verify 相对更早的版本快约 2.6×；
-- **hex 编解码一度是端到端的大头**：SM4 4 KB ECB 的耗时里 hex **输出**曾占 69%
-  （`bytesToHex` 逐字节 `toString(16).padStart` 拼字符串）。改走 Node 的
-  `Buffer.toString('hex')`（浏览器回落查表）后编码快约 27×（4 KB：52.6 → 1.9 µs）；
-  输入侧把「正则校验 + 解析」两趟合并成一趟——`Buffer.from(s, 'hex')` 遇到非法字符会
-  提前停止，比对「解析出的字节数 × 2 == 输入长度」即完成校验（8192 字符 14.1 → 3.5 µs）。
-  两者合计让 **hex 入参的 SM3 / SM4 / ZUC 端到端快 27~32%**（SM4 4 KB：35.8 → 25.1 µs），
-  `Uint8Array` 入参不受影响；SM2 / SM9 本体在毫秒级，这部分在其总耗时里体现不出来；
-- 数字随版本与机器变化，请以本机 `pnpm bench` 为准。
+完整的逐项操作表、与 `gmkitx` 的对比，以及「为什么是这个形状」的分析，见
+**[性能页](https://jktantan.github.io/sm-crypto-wasm/performance)**。本机复现：
+`pnpm bench`。
 
 ## 安装
 
@@ -324,6 +221,8 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 |---|---|---|
 | **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
 | **Webpack 5** | 零配置 | 作为 asset 自动产出 |
+| **Rspack 2** | 零配置 | 作为 asset 自动产出（带 hash 文件名） |
+| **Turbopack**（Next.js 16 默认） | 零配置 | 归档到 `static/media/*.wasm` |
 | **esbuild** | 加一行插件（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
 | **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
 
@@ -458,153 +357,14 @@ lazy-loaded on demand.
 
 ## Performance
 
-Hot paths (bignum modular arithmetic, hash compression, block-cipher rounds) run
-inside WASM. The table below covers **every public operation of every algorithm**
-in this library; the `gmkitx` column is the corresponding pure-JS reference (same
-machine, same parameters, same messages), and **operations it does not offer are
-left as `—`**. Measured on AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11, reproducible
-with `pnpm bench`:
+Hot paths (bignum modular arithmetic, hash compression, block-cipher rounds,
+pairings) run inside WASM. **Every operation with a pure-JS counterpart is faster
+than it**: SM3 / ZUC by 1.8–2.3×, the six SM4 modes by 3.6–11.2×, SM2 by 1.8–7.6×.
 
-| Algorithm | Operation | sm-crypto-wasm | pure-JS reference (gmkitx) | |
-|---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.04 µs / 6.27 µs / 330 µs | 13.7 µs (1 KB) | 2.2× faster |
-| SM3 | hmac 1 KB | 10.1 µs | 17.9 µs | 1.8× faster |
-| SM4 | ECB 16 B / 1 KB | 0.94 µs / 6.98 µs | 37.3 µs (1 KB) | 5.3× faster |
-| SM4 | CBC 1 KB | 10.5 µs | 41.6 µs | 4.0× faster |
-| SM4 | CTR 1 KB | 7.43 µs | 36.5 µs | 4.9× faster |
-| SM4 | CFB 1 KB | 10.0 µs | 37.9 µs | 3.8× faster |
-| SM4 | OFB 1 KB | 9.98 µs | 36.3 µs | 3.6× faster |
-| SM4 | GCM 1 KB | 19.8 µs | 221 µs | 11.2× faster |
-| SM2 | generateKeyPair | 151 µs | — | — |
-| SM2 | public key derive | 110 µs | 197 µs | 1.8× faster |
-| SM2 | sign 64 B | 142 µs | 446 µs | 3.1× faster |
-| SM2 | verify 64 B | 402 µs | 2.85 ms | 7.1× faster |
-| SM2 | encrypt 64 B | 499 µs | 2.96 ms | 5.9× faster |
-| SM2 | decrypt 64 B | 343 µs | 2.59 ms | 7.6× faster |
-| SM2 | key exchange (full A↔B) | 1.52 ms | 11.4 ms | 7.5× faster |
-| SM9 | master key pair (sign / enc) | 2.07 / 1.73 ms | — | — |
-| SM9 | master public key (sign / enc) | 97.1 / 49.1 µs | — | — |
-| SM9 | user public key (derive) | 563 µs | — | — |
-| SM9 | sign 32 B | 4.11 ms | — | — |
-| SM9 | verify 32 B | 8.00 ms | — | — |
-| SM9 | encrypt 32 B | 3.69 ms | — | — |
-| SM9 | decrypt 32 B | 5.40 ms | — | — |
-| SM9 | KEM encapsulate / decapsulate | 3.42 / 4.92 ms | — | — |
-| SM9 | key exchange (full A↔B) | 19.6 ms | — | — |
-| ZUC | EEA3 encrypt 1 KB | 9.07 µs | 20.5 µs | 2.3× faster |
-| ZUC | EEA3 keystream 1 KB | 6.15 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
-
-> **On the SM2 rows**: this layer is the TS facade API (signing goes through the
-> public-key derivation cache; encryption still does the hex and curve-point codecs
-> and calls the host CSPRNG on every call), and it fluctuates up to ±20% between
-> runs — far more than SM3 / SM4 / SM9 / ZUC. The SM2 numbers in the table come from
-> a single run (the `wasm` and `gmkitx` columns are same-source); the **net gain at
-> the wasm compute layer** (more stable, min-of-5 sampled) is in the Notes below.
-
-Notes:
-
-- **Every operation with a counterpart beats the pure-JS reference**: SM3 / ZUC by
-  1.8–2.3×, the six SM4 modes by 3.6–11.2×, SM2 by 1.8–7.6×;
-- **SM4's CFB / OFB used to be 1.4–1.5× *slower* than pure JS**: those two modes
-  were driven block-by-block from the TS side (alloc + call + copy back every 16
-  bytes — 64 wasm crossings per KB). With the same batched export CBC/CTR already
-  had, they now land at ~10 µs, i.e. **3.6–3.8× faster** than the reference;
-- **SM4's bottleneck is the four S-box lookups per round**: merging the S-box and L
-  transform into T-tables bought only 8–10% (the lookup count is unchanged), because
-  the cost is memory access, not ALU work. Since the lookup count cannot be reduced,
-  the library hides it behind instruction-level parallelism instead: ECB's multi-block
-  loop is **8 blocks interleaved in scalar code** (each block keeps four independent
-  dependency chains, and out-of-order execution covers the L1 latency), CTR / GCM
-  keystream generation uses the same width, and shorter remainders fall back to 4-way
-  then single-block. Why not WASM SIMD: `v128` has neither AVX2's gather (so 8→32-bit
-  tables cannot be looked up in parallel) nor AES-NI, and `i8x16.swizzle` only reaches
-  4-bit S-boxes, not SM4's 8-bit one — the lookup count stays the same, leaving only
-  lane parallelism for the XOR chain, which in practice measured slower than the
-  scalar interleave. This also explains the remaining gap to C: OpenSSL uses ARMv8's
-  `SM4E` instruction to implement the S-box in circuitry with **no table lookup at
-  all**, and WebAssembly does not expose that instruction set (generic SIMD only
-  offers generic operators);
-- **SM9 has no comparable implementation** (as usual for pure JS, where pairing is
-  prohibitively expensive), so only this library's absolute timings are given;
-- **SM2's wasm big integers are linear-memory raw pointers** (`U256` is a `usize`
-  backed by a module-level bump arena that rewinds at every exported entry), and
-  on top of that eight things changed:
-  1. **Reduction in the prime field p uses Solinas** — p = 2^256−2^224−2^96+2^64−1
-     is pseudo-Mersenne, so expanding 2^256 ≡ 2^224+2^96−2^64+1 makes reduction
-     pure add/subtract/shift with no multiplication at all (one reduction measures
-     0.03 µs, an order of magnitude below generic long division);
-  2. **Squaring was rewritten as Comba (column scan) with a single carry pass** —
-     the old version ran two full carry-propagation loops per (i,j) pair (56 memory
-     loops in total), making it the single most expensive function in the library;
-  3. **Scalar multiplication takes two routes**: fixed-base uses a comb table
-     (w=5, 32 entries; 51 doublings + 52 additions), arbitrary-point uses wNAF
-     (w=5, cutting additions from ~128 to ~43). The table is built lazily once and
-     cached in a permanent area outside the arena;
-  4. **Point arithmetic is fully in-place**: doubling and addition write
-     module-level scratch instead of allocating a fresh `U256` per operation plus
-     a `JPoint` (a single doubling used to cost ~11 heap allocations, and scalar
-     multiplication calls it hundreds of times);
-  5. **Point addition uses mixed coordinates** — the comb table and G's wNAF table
-     are converted to affine at build time with one **Montgomery batch inversion**
-     (n inversions → one inversion + 3n multiplications; the 32-entry table costs
-     ~25 µs, once), which drops the per-addition cost inside the loop from 12M+4S
-     to **8M+3S** (about a third off);
-  6. **Verification uses a joint scalar multiplication** — `s·G + t·P` runs two
-     wNAFs that share one chain of doublings (G's 16-entry precomputed table is
-     cached affine as well and uses mixed coordinates), saving the 51 doublings
-     the comb route would spend;
-  7. **Inversion uses a local word-level binary extended Euclid** — `u`, `v` and
-     both Bézout coefficients live in wasm locals (256 bits fit exactly 4 u64s),
-     so each round makes zero memory round-trips; one inversion went 12.8 → 2.3 µs
-     (SM2 and SM9 share this path, so SM9 benefits too);
-  8. **`sign` derives its public key through an in-process cache** — the public key
-     and the Z value depend only on the private key, yet every signing used to redo
-     the fixed-base scalar multiplication (measured 105 µs, 41% of a ~250 µs
-     signing); the cache is keyed by the private key's hex, bounded at 32 entries
-     with FIFO eviction, and a hit skips the derivation. `sign` went 252 → 142 µs.
-  Items 1–7 are at the wasm compute layer, item 8 is in the TS facade; their A/B
-  tests (min-of-5, same machine, same probe) give scalar multiplication of G
-  138 → 105 µs, inversion 12.8 → 2.3 µs, signing 156 → 122 µs, verification
-  474 → 424 µs, encryption 487 → 449 µs, key exchange 563 → 511 µs; the earlier
-  accumulation (Solinas + Comba + comb/wNAF + in-placing) is what brought signing
-  down from 6.10 ms;
-  **trade-off**: the public `getPublicKey` still always computes (keeping the
-  "derive a public key" semantics and its benchmark measurable), while the cache
-  leaves the private key's derived result (and the key's own hex form) resident in
-  process memory — call `configurePublicKeyCache({ enabled: false })` to turn it
-  off and go back to recomputing every time. `encrypt` only takes a public key, so
-  no derivation is involved there;
-- **Trade-offs**: comb applies only to the fixed base point and Solinas only to
-  pseudo-Mersenne moduli — SM2's scalar modulus n and SM9's p/n are not of that
-  shape, so SM9's base field now runs in the Montgomery domain (next bullet);
-  **mixed coordinates** require affine table entries, so
-  every precomputed table pays one batch inversion up front — G's two tables are
-  cached in the permanent area and amortized, while an arbitrary point's wNAF table
-  is rebuilt each time, where the batch inversion roughly cancels the additions it
-  saves, so it stays Jacobian; **joint scalar multiplication** only applies to the
-  "one fixed base + one arbitrary point" shape of `s·G + t·P`, not to a plain
-  single-point scalar multiplication;
-- SM9 is dominated by pairings. Its base field Fp now runs in the **Montgomery
-  domain** (CIOS, R = 2²⁵⁶): SM9's p is a BN parameter, not pseudo-Mersenne, so one
-  modular multiply used to pay Barrett's 64 partial products plus ~153 reduction
-  multiplies, where CIOS needs only 2×64. Elements are a·R throughout the field,
-  converted once at the wasm boundary (bytes ↔ elements, module constants). A
-  single modular multiply went 179 → 98 ns (1.8×), which carries through end to
-  end as **1.6–1.8×** on sign / verify / encrypt / decrypt / KEM / key exchange;
-  laying the extension-field elements (Fp2/Fp4/Fp12) out as contiguous memory is
-  what made sign / verify ~2.6× faster than earlier versions;
-- **hex codecs used to be a large part of the end-to-end cost**: hex *output* once
-  accounted for 69% of SM4's 4 KB ECB time (`bytesToHex` built the string byte by
-  byte with `toString(16).padStart`). Routing to Node's `Buffer.toString('hex')`
-  (browser falls back to a lookup table) made encoding ~27× faster (4 KB: 52.6 →
-  1.9 µs); on the input side, "regex validation + parse" collapsed into a single
-  pass — `Buffer.from(s, 'hex')` stops at the first invalid character, so comparing
-  "parsed bytes × 2 == input length" *is* the validation (8192 chars: 14.1 →
-  3.5 µs). Together they make **SM3 / SM4 / ZUC with hex input 27–32% faster
-  end-to-end** (SM4 4 KB: 35.8 → 25.1 µs), while `Uint8Array` input is unaffected;
-  SM2 / SM9 take milliseconds, so this is invisible in their totals;
-- Numbers vary with version and machine — run `pnpm bench` locally.
+The full per-operation table, the head-to-head against `gmkitx`, and the
+"why it looks like this" notes live on the
+**[performance page](https://jktantan.github.io/sm-crypto-wasm/en/performance)**.
+Reproduce locally with `pnpm bench`.
 
 ## Installation
 
@@ -794,6 +554,8 @@ resolve time with `Can't resolve 'node:fs'`.
 |---|---|---|
 | **Vite 5** | none | archived into the output (`assets/*.wasm`) |
 | **Webpack 5** | none | emitted as an asset |
+| **Rspack 2** | none | emitted as an asset (hashed filenames) |
+| **Turbopack** (Next.js 16 default) | none | archived under `static/media/*.wasm` |
 | **esbuild** | one plugin line (below) | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
 | **Node 18+** | none | reads `dist/<algo>/<algo>.wasm` |
 
@@ -956,153 +718,13 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 ## Производительность
 
 Горячие пути (модульная арифметика больших чисел, сжатие хэша, раунды блочного
-шифра) выполняются внутри WASM. Таблица ниже покрывает **все публичные операции
-каждого алгоритма**; столбец `gmkitx` — соответствующая чистая JS-реализация
-(та же машина, те же параметры, те же сообщения), а **операции, которых у неё
-нет, оставлены как `—`**. Измерено на AMD Ryzen 7 7800X3D / Node 24.15 / Windows 11,
-воспроизводится через `pnpm bench`:
+шифра, спаривания) выполняются внутри WASM. **Каждая операция, у которой есть
+чистый JS-аналог, быстрее его**: SM3 / ZUC — в 1.8–2.3×, шесть режимов SM4 —
+в 3.6–11.2×, SM2 — в 1.8–7.6×.
 
-| Алгоритм | Операция | sm-crypto-wasm | чистая JS (gmkitx) | |
-|---|---|---|---|---|
-| SM3 | hash 32 B / 1 KB / 64 KB | 1.04 µs / 6.27 µs / 330 µs | 13.7 µs (1 KB) | в 2.2× быстрее |
-| SM3 | hmac 1 KB | 10.1 µs | 17.9 µs | в 1.8× быстрее |
-| SM4 | ECB 16 B / 1 KB | 0.94 µs / 6.98 µs | 37.3 µs (1 KB) | в 5.3× быстрее |
-| SM4 | CBC 1 KB | 10.5 µs | 41.6 µs | в 4.0× быстрее |
-| SM4 | CTR 1 KB | 7.43 µs | 36.5 µs | в 4.9× быстрее |
-| SM4 | CFB 1 KB | 10.0 µs | 37.9 µs | в 3.8× быстрее |
-| SM4 | OFB 1 KB | 9.98 µs | 36.3 µs | в 3.6× быстрее |
-| SM4 | GCM 1 KB | 19.8 µs | 221 µs | в 11.2× быстрее |
-| SM2 | generateKeyPair | 151 µs | — | — |
-| SM2 | вывод открытого ключа | 110 µs | 197 µs | в 1.8× быстрее |
-| SM2 | подпись 64 B | 142 µs | 446 µs | в 3.1× быстрее |
-| SM2 | проверка 64 B | 402 µs | 2.85 ms | в 7.1× быстрее |
-| SM2 | шифрование 64 B | 499 µs | 2.96 ms | в 5.9× быстрее |
-| SM2 | расшифрование 64 B | 343 µs | 2.59 ms | в 7.6× быстрее |
-| SM2 | обмен ключами (полный A↔B) | 1.52 ms | 11.4 ms | в 7.5× быстрее |
-| SM9 | главная пара ключей (sign / enc) | 2.07 / 1.73 ms | — | — |
-| SM9 | главный открытый ключ (sign / enc) | 97.1 / 49.1 µs | — | — |
-| SM9 | открытый ключ пользователя | 563 µs | — | — |
-| SM9 | подпись 32 B | 4.11 ms | — | — |
-| SM9 | проверка 32 B | 8.00 ms | — | — |
-| SM9 | шифрование 32 B | 3.69 ms | — | — |
-| SM9 | расшифрование 32 B | 5.40 ms | — | — |
-| SM9 | KEM инкапсуляция / декапсуляция | 3.42 / 4.92 ms | — | — |
-| SM9 | обмен ключами (полный A↔B) | 19.6 ms | — | — |
-| ZUC | EEA3 шифрование 1 KB | 9.07 µs | 20.5 µs | в 2.3× быстрее |
-| ZUC | EEA3 гамма 1 KB | 6.15 µs | — | — |
-| ZUC | EIA3 MAC 1 KB | 11.2 µs | — | — |
-
-> **О строках SM2**: этот слой — фасадный API на TS (подпись идёт через кэш вывода
-> открытого ключа, а шифрование по-прежнему выполняет кодек hex и точек кривой и
-> вызывает CSPRNG хоста на каждом вызове), и между запусками он колеблется до ±20% —
-> намного сильнее, чем SM3 / SM4 / SM9 / ZUC. Числа SM2 в таблице взяты из одного
-> запуска (столбцы `wasm` и `gmkitx` из одного источника); **чистый выигрыш на уровне
-> вычислений wasm** (стабильнее, выборка min-of-5) приведён в примечаниях ниже.
-
-Примечания:
-
-- **Каждая операция, у которой есть аналог, быстрее чистой JS-реализации**:
-  SM3 / ZUC — в 1.8–2.3×, шесть режимов SM4 — в 3.6–11.2×, SM2 — в 1.8–7.6×;
-- **CFB / OFB у SM4 раньше были в 1.4–1.5× _медленнее_ чистой JS**: эти два режима
-  вызывались поблочно со стороны TS (alloc + вызов + копирование на каждые 16 байт —
-  64 пересечения границы на 1 KB). С тем же пакетным экспортом, что уже был у CBC/CTR,
-  они теперь ~10 µs, то есть **в 3.6–3.8× быстрее** аналога;
-- **Узкое место SM4 — четыре обращения к S-блоку за раунд**: объединение S-блока и
-  L-преобразования в T-таблицы дало лишь 8–10% (число обращений не меняется), потому что
-  стоимость — это доступ к памяти, а не работа ALU. Раз число обращений снизить нельзя,
-  библиотека прячет их за параллелизмом на уровне инструкций: цикл по блокам в ECB сделан
-  как **8 блоков с чередованием в скалярном коде** (у каждого блока четыре независимые
-  цепочки зависимостей, а внеочередное исполнение скрывает задержку L1), генерация гаммы в
-  CTR / GCM использует ту же ширину, а короткие остатки переходят на 4 блока, затем на один.
-  Почему не WASM SIMD: у `v128` нет ни gather из AVX2 (нельзя параллельно индексировать
-  таблицы 8→32 бита), ни AES-NI, а `i8x16.swizzle` дотягивается лишь до 4-битных S-блоков,
-  но не до 8-битного S-блока SM4 — число обращений не меняется, остаётся только параллелизм
-  полос для цепочки XOR, и на практике это оказалось медленнее скалярного чередования. Это же
-  объясняет оставшийся разрыв с C: OpenSSL использует инструкцию ARMv8 `SM4E`, реализующую
-  S-блок схемой **вообще без обращений к таблицам**, а WebAssembly этого набора инструкций
-  не предоставляет (общий SIMD даёт только общие операторы);
-- **У SM9 нет сопоставимой реализации** (обычная ситуация для чистого JS, где
-  спаривания запредельно дороги), поэтому приведены только абсолютные времена
-  этой библиотеки;
-- **Большие числа в wasm-части SM2 — сырые указатели в линейной памяти** (`U256` —
-  это `usize` поверх bump-арены уровня модуля, которая откатывается на каждом входе
-  в экспортируемую функцию); поверх этого сделано восемь вещей:
-  1. **Приведение в простом поле p по схеме Солинаса** — p = 2^256−2^224−2^96+2^64−1
-     псевдо-мерсенново, поэтому после разложения 2^256 ≡ 2^224+2^96−2^64+1 приведение
-     состоит только из сложений, вычитаний и сдвигов, без умножений вообще (одно
-     приведение — 0.03 µs, на порядок меньше общего длинного деления);
-  2. **Возведение в квадрат переписано по схеме Comba (сканирование по столбцам) с
-     одним проходом переносов** — старая версия выполняла два полных цикла
-     распространения переносов на каждую пару (i,j) (56 циклов по памяти), из-за чего
-     это была самая дорогая функция в библиотеке;
-  3. **Скалярное умножение идёт двумя путями**: для фиксированной базовой точки —
-     comb-таблица (w=5, 32 записи; 51 удвоение + 52 сложения), для произвольной точки —
-     wNAF (w=5, сложений ~128 → ~43). Таблица строится лениво один раз и кэшируется в
-     постоянной области вне арены;
-  4. **Операции над точками полностью на месте**: удвоение и сложение пишут в
-     модульные scratch-буферы вместо `new U256` на каждую операцию плюс `JPoint`
-     (одно удвоение стоило ~11 выделений в куче, а скалярное умножение вызывает его
-     сотни раз);
-  5. **Сложение точек использует смешанные координаты** — comb-таблица и wNAF-таблица
-     для G переводятся в аффинные один раз при построении **пакетным обращением
-     Монтгомери** (n обращений → одно обращение + 3n умножений; таблица на 32 записи
-     стоит ~25 µs и только один раз), поэтому стоимость одного сложения в цикле падает
-     с 12M+4S до **8M+3S** (примерно на треть);
-  6. **Проверка подписи использует совместное скалярное умножение** — `s·G + t·P`
-     выполняется двумя wNAF, разделяющими одну цепочку удвоений (предвычисленная
-     таблица G на 16 записей тоже кэшируется аффинной и использует смешанные
-     координаты), что экономит 51 удвоение пути comb;
-  7. **Обращение переписано на локальный пословный двоичный расширенный алгоритм
-     Евклида** — `u`, `v` и оба коэффициента Безу живут в локальных переменных wasm
-     (256 бит — ровно 4 u64), поэтому каждый раунд обходится без обращений к памяти;
-     одно обращение 12.8 → 2.3 µs (SM2 и SM9 используют этот путь совместно, поэтому
-     SM9 тоже выигрывает);
-  8. **`sign` выводит открытый ключ через внутрипроцессный кэш** — открытый ключ и
-     значение Z зависят только от закрытого ключа, но каждая подпись заново выполняла
-     умножение на скаляр с фиксированной базой (измерено 105 µs — 41% от ~250 µs
-     подписи); кэш использует в качестве ключа hex закрытого ключа, ограничен 32
-     записями с вытеснением FIFO, а попадание пропускает вывод. `sign` 252 → 142 µs.
-  Пункты 1–7 — на уровне вычислений wasm, пункт 8 — в фасаде TS; их A/B (min-of-5,
-  та же машина, тот же probe): скалярное умножение G 138 → 105 µs, обращение
-  12.8 → 2.3 µs, подпись 156 → 122 µs, проверка 474 → 424 µs, шифрование 487 → 449 µs,
-  обмен ключами 563 → 511 µs; накопленное ранее (Солинас + Comba + comb/wNAF +
-  на месте) и снизило подпись с 6.10 ms;
-  **компромисс**: публичный `getPublicKey` по-прежнему считает каждый раз (сохраняя
-  семантику «вывести открытый ключ» и измеримость бенчмарка), а кэш оставляет
-  производный результат закрытого ключа (и его hex-форму) в памяти процесса — отключить
-  можно через `configurePublicKeyCache({ enabled: false })`, вернувшись к пересчёту
-  каждый раз. `encrypt` принимает только открытый ключ, вывода там нет;
-- **Компромиссы**: comb применим только к фиксированной базовой точке, Солинас — только
-  к псевдо-мерсенновым модулям: скалярный модуль n у SM2 и p/n у SM9 не такой формы,
-  поэтому базовое поле SM9 теперь работает в области Монтгомери (следующий пункт);
-  **смешанные координаты** требуют аффинных записей таблиц, поэтому каждая
-  предвычисленная таблица сначала платит одно пакетное обращение — обе таблицы G
-  кэшируются в постоянной области и амортизируются, а wNAF-таблица произвольной точки
-  строится каждый раз, где пакетное обращение примерно компенсирует сэкономленные
-  сложения, поэтому там остаётся якобиан; **совместное скалярное умножение** работает
-  только для формы «одна фиксированная база + одна произвольная точка» (`s·G + t·P`),
-  но не для обычного умножения на скаляр одной точки;
-- SM9 определяется спариваниями. Его базовое поле Fp теперь работает в
-  **области Монтгомери** (CIOS, R = 2²⁵⁶): p у SM9 — параметр BN, а не
-  псевдо-мерсенново число, поэтому одно модульное умножение платило 64 частичных
-  произведения Барретта плюс ~153 умножения на этапе приведения, тогда как CIOS
-  требует только 2×64. Элементы внутри поля всюду имеют вид a·R и преобразуются
-  один раз на границе wasm (байты ↔ элементы, константы модуля). Одно модульное
-  умножение ускорилось с 179 до 98 нс (1.8×), что переносится в сквозной результат
-  **1.6–1.8×** на sign / verify / encrypt / decrypt / KEM / обмене ключами; а переход
-  элементов расширения (Fp2/Fp4/Fp12) на непрерывную память — это то, что дало
-  ускорение sign / verify примерно в 2.6× относительно более ранних версий;
-- **Кодеки hex раньше были большой частью сквозной стоимости**: вывод hex когда-то
-  занимал 69% времени SM4 4 KB ECB (`bytesToHex` собирал строку побайтово через
-  `toString(16).padStart`). После перехода на `Buffer.toString('hex')` в Node (в
-  браузере — таблица поиска) кодирование стало примерно в 27× быстрее (4 KB: 52.6 →
-  1.9 µs); на входе «проверка регулярным выражением + разбор» слились в один проход —
-  `Buffer.from(s, 'hex')` останавливается на первом недопустимом символе, поэтому
-  сравнение «разобранных байт × 2 == длина входа» *и есть* проверка (8192 символа:
-  14.1 → 3.5 µs). Вместе это делает **SM3 / SM4 / ZUC с hex-входом на 27–32% быстрее
-  сквозным образом** (SM4 4 KB: 35.8 → 25.1 µs), а вход `Uint8Array` не затрагивается;
-  SM2 / SM9 измеряются миллисекундами, поэтому там это не видно;
-- Цифры зависят от версии и машины — запускайте `pnpm bench` локально.
+Полная таблица по операциям, сравнение с `gmkitx` и разбор «почему именно так» —
+на **[странице производительности](https://jktantan.github.io/sm-crypto-wasm/ru/performance)**.
+Локально воспроизводится через `pnpm bench`.
 
 ## Установка
 
@@ -1292,6 +914,8 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 |---|---|---|
 | **Vite 5** | нет | автоматически попадает в вывод (`assets/*.wasm`) |
 | **Webpack 5** | нет | автоматически выдаётся как asset |
+| **Rspack 2** | нет | выдаётся как asset (имена с hash) |
+| **Turbopack** (по умолчанию в Next.js 16) | нет | попадает в `static/media/*.wasm` |
 | **esbuild** | одна строка плагина (ниже) | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
 | **Node 18+** | нет | читает `dist/<algo>/<algo>.wasm` |
 

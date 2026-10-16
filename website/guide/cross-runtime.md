@@ -32,6 +32,8 @@ sm3.hash('616263');
 | --- | --- | --- |
 | **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
 | **Webpack 5** | 零配置 | 作为 asset 自动产出 |
+| **Rspack 2** | 零配置 | 作为 asset 自动产出（带 hash 文件名） |
+| **Turbopack**（Next.js 16 默认） | 零配置 | 归档到 `static/media/*.wasm` |
 | **esbuild** | 加一行插件（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
 | **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
 
