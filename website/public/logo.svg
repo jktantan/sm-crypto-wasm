@@ -1,13 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="sm-crypto-wasm">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 22 316 422" role="img" aria-label="sm-crypto-wasm">
+  <!--
+    亮色（白底）版。深色发光那版见 logo-dark.svg，由 theme/styles/logo.css 在
+    暗色模式切换过去。注意：XML 注释里不能出现连续两个连字符，所以下面提到
+    CSS 变量时省掉了前缀横线。
+
+    白底上不能靠 feGaussianBlur 外发光立形：那圈光在浅色背景里会变成灰绿色的
+    脏晕，多层半透明叠加也会发灰。所以这版把盾牌压成实色靛蓝、三角提成纯白，
+    用大色块而不是光效来保证 24px 导航栏尺寸下依然辨得出轮廓。
+
+    配色取 VitePress 默认主题的靛蓝族：主色 indigo 1 #3451b2、渐变上端
+    indigo 2 #3a5ccc、点缀 indigo 1 的暗色位 #a8b1ff。
+
+    viewBox 贴着盾牌轮廓收紧（不是原本的 0 0 512 512）：导航栏的 logo 是
+    height 24px 加宽度自适应，画布留白越多、图形显示得越小 —— 原画布里盾牌
+    只占 48% 宽，24px 下只剩 11.6px，糊成一团。收紧后盾牌占画布约八成。
+    这里与 logo-dark.svg 用同一组 viewBox，切换主题时不会出现尺寸跳变。
+  -->
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#14b8a6"/>
-      <stop offset="1" stop-color="#0f766e"/>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3a5ccc" />
+      <stop offset="100%" stop-color="#3451b2" />
     </linearGradient>
   </defs>
-  <rect width="128" height="128" rx="30" fill="url(#g)"/>
-  <path d="M64 22 32 37v28c0 19 13 32 32 41 19-9 32-22 32-41V37L64 22Z"
-        fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-opacity="0.55" stroke-width="4"/>
-  <text x="64" y="79" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
-        font-size="42" font-weight="700" fill="#ffffff">SM</text>
+
+  <!-- 盾牌主体 -->
+  <path d="M256,60 L380,110 V230 C380,315 315,385 256,410 C197,385 132,315 132,230 V110 Z" fill="url(#shieldGrad)" />
+
+  <!-- 内盾：一层高光，给实色盾牌留出层次，避免变成一块死板的色块 -->
+  <path d="M256,100 L340,140 V220 C340,285 295,340 256,365 C217,340 172,285 172,220 V140 Z" fill="#ffffff" opacity="0.1" />
+
+  <!-- Vue 三角 -->
+  <polygon points="256,120 310,200 202,200" fill="#ffffff" />
+  <polygon points="256,145 285,190 227,190" fill="#3451b2" />
+  <polygon points="256,160 270,185 242,185" fill="#a8b1ff" />
+
+  <!-- 锁孔 -->
+  <circle cx="256" cy="265" r="24" fill="none" stroke="#a8b1ff" stroke-width="8" />
+  <rect x="248" y="280" width="16" height="24" rx="4" fill="#a8b1ff" />
+  <circle cx="256" cy="265" r="8" fill="#ffffff" />
+
+  <!-- 节点 -->
+  <circle cx="172" cy="140" r="9" fill="#a8b1ff" />
+  <circle cx="340" cy="140" r="9" fill="#a8b1ff" />
+  <circle cx="256" cy="410" r="9" fill="#a8b1ff" />
 </svg>

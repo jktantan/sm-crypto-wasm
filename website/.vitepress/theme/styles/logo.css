@@ -1,0 +1,24 @@
+/**
+ * 亮 / 暗两套 logo。
+ *
+ * 只有暗色版带 feGaussianBlur 外发光和网格底纹 —— 那套东西在深色底上才成立，
+ * 放到白底会变成一圈灰绿的脏晕。VitePress 的 themeConfig.logo 只接受单个 src，
+ * 所以暗色模式在这里换图。
+ *
+ * 站点上有两处渲染 logo，类名不同，两处都要覆盖：
+ *   - 导航栏      <img class="VPImage logo">
+ *   - 首页 hero   <img class="VPImage image-src">
+ * 漏掉后者时切到暗色不会有报错，页面中央那个大 logo 只是静静停在白底那版 ——
+ * 是很容易漏看的一种坏法，改动这里时两处都要实测。
+ *
+ * `content` 替换 <img> 的图片：Chromium 实测生效（computed 值与实际渲染都验证过）。
+ * 其他浏览器未逐一实测；万一不生效，退化结果是显示亮色版 —— 在暗底上仍是一只
+ * 亮靛蓝的盾牌，不是空白，所以这个降级是安全的。
+ *
+ * 路径写成 /logo-dark.svg 就够了：VitePress 构建时会把 base 前缀补上（产物里
+ * 是 url(/sm-crypto-wasm/logo-dark.svg)），不需要在这里手写 base。
+ */
+.dark .VPImage.logo,
+.dark .VPImage.image-src {
+  content: url('/logo-dark.svg');
+}

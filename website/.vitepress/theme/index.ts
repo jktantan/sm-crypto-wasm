@@ -7,6 +7,7 @@ import Sm3Playground from './components/Sm3Playground.vue';
 import Sm4Playground from './components/Sm4Playground.vue';
 import Sm9Playground from './components/Sm9Playground.vue';
 import ZucPlayground from './components/ZucPlayground.vue';
+import './styles/logo.css';
 import './styles/playground.css';
 
 /**

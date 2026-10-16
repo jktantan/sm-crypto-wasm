@@ -1,5 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#0f766e"/>
-  <text x="16" y="22" text-anchor="middle" font-family="ui-monospace,Menlo,monospace"
-        font-size="13" font-weight="700" fill="#ffffff">SM</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="sm-crypto-wasm">
+  <!--
+    favicon 与 logo 分工不同，不能共用一张图：logo 的细节（内盾、锁孔、节点、
+    网格）在 16px 的标签页上会全部糊掉，实测只剩一团深色。
+
+    这里只留这个标志最核心的两笔 —— 盾牌轮廓加中间的三角。三角放大到盾宽
+    65%（logo 里是 43%）并下移到盾牌的视觉中心：logo 里锁孔占着盾牌下半部分，
+    这里去掉锁孔后，若沿用原来的偏上位置，下半部分会空掉一大半，整个构图重心
+    偏上。放大加下移同时解决 16px 下的可辨面积和构图平衡。
+    圆角底板保证在浅色和深色两种标签栏上都有对比。
+
+    配色取 VitePress 靛蓝族：浅色标签栏用 indigo 1 #3451b2，深色标签栏换
+    indigo 3 的暗色位 #3e63dd（#3451b2 在深色栏上偏暗）。favicon 只跟随系统
+    主题，不跟随站内的亮暗切换，所以这里用 prefers-color-scheme 是对的。
+  -->
+  <style>
+    .bg { fill: #3451b2; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #3e63dd; }
+    }
+  </style>
+
+  <rect class="bg" width="32" height="32" rx="7" />
+
+  <!-- 盾牌轮廓，按 512 到 32 缩放并把中心对到 (16,16) -->
+  <g transform="translate(16 16) scale(0.0625) translate(-256 -235)">
+    <path d="M256,60 L380,110 V230 C380,315 315,385 256,410 C197,385 132,315 132,230 V110 Z" fill="#eef1fd" />
+    <polygon points="256,126 336,244 176,244" fill="#3451b2" />
+  </g>
 </svg>

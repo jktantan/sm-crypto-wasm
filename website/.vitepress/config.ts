@@ -151,7 +151,8 @@ export default defineConfig({
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${BASE}favicon.svg` }],
-    ['meta', { name: 'theme-color', content: '#0f766e' }],
+    // 与 logo 及 VitePress 的 --vp-c-brand-*（默认为靛蓝 #3451b2）保持一致。
+    ['meta', { name: 'theme-color', content: '#3451b2' }],
   ],
 
   sitemap: { hostname: 'https://jktantan.github.io/sm-crypto-wasm/' },

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 22 316 422" role="img" aria-label="sm-crypto-wasm">
+  <!--
+    暗色版，只在 VitePress 的 dark 模式使用（切换见 theme/styles/logo.css）。
+
+    保留发光盾牌的原始构图：外发光、网格底纹、多层叠加在深色背景上成立，
+    也正是白底上出问题的那几样，所以它们被限定在这个文件里。
+
+    配色同样取 VitePress 靛蓝族：描边渐变用 indigo 1 的暗色位 #a8b1ff 到
+    indigo 2 的暗色位 #5c73e7，外发光用 indigo 3 的暗色位 #3e63dd。
+    盾牌底色 #2b3a8f 是 #3451b2 压暗一档，比纯黑多一层靛蓝倾向，24px 下也还是
+    一块可辨的盾形，不会糊进背景。
+
+    viewBox 与 logo.svg 取同一组值：既给外发光留出余量（收紧过度会把光裁出硬边），
+    也让两版在切换主题时尺寸一致。网格路径仍按 512 画布绘制，超出部分被裁，
+    看上去就是网格延伸出画面。
+  -->
+  <defs>
+    <filter id="logoGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="20" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a8b1ff" />
+      <stop offset="100%" stop-color="#5c73e7" />
+    </linearGradient>
+  </defs>
+
+  <g opacity="0.12">
+    <path d="M0,100 L512,100 M0,200 L512,200 M0,300 L512,300 M0,400 L512,400" stroke="#5c73e7" stroke-width="1" stroke-dasharray="4 4" />
+    <path d="M100,0 L100,512 M200,0 L200,512 M300,0 L300,512 M400,0 L400,512" stroke="#5c73e7" stroke-width="1" stroke-dasharray="4 4" />
+  </g>
+
+  <circle cx="256" cy="210" r="140" fill="#3e63dd" opacity="0.3" filter="url(#logoGlow)" />
+
+  <g filter="url(#logoGlow)">
+    <path d="M256,60 L380,110 V230 C380,315 315,385 256,410 C197,385 132,315 132,230 V110 Z" fill="#2b3a8f" stroke="url(#shieldGrad)" stroke-width="8" stroke-linejoin="round" />
+
+    <path d="M256,100 L340,140 V220 C340,285 295,340 256,365 C217,340 172,285 172,220 V140 Z" fill="#3451b2" opacity="0.22" />
+
+    <polygon points="256,120 310,200 202,200" fill="#a8b1ff" />
+    <polygon points="256,145 285,190 227,190" fill="#2b3a8f" />
+    <polygon points="256,160 270,185 242,185" fill="#5c73e7" />
+
+    <circle cx="256" cy="265" r="24" fill="none" stroke="#5c73e7" stroke-width="8" />
+    <rect x="248" y="280" width="16" height="24" rx="4" fill="#5c73e7" />
+    <circle cx="256" cy="265" r="8" fill="#a8b1ff" />
+
+    <circle cx="172" cy="140" r="9" fill="#5c73e7" />
+    <circle cx="340" cy="140" r="9" fill="#5c73e7" />
+    <circle cx="256" cy="410" r="9" fill="#5c73e7" />
+  </g>
+</svg>
