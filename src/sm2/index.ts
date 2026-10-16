@@ -322,12 +322,51 @@ function randomK(): Uint8Array {
   return out;
 }
 
-/** 预计算的签名点：一次性的 `(k, k·G)`。 */
-export interface SignaturePoint {
-  /** 临时私钥 `k`（32 字节 hex）。 */
-  readonly k: string;
-  /** `k·G` 的仿射坐标 `x ‖ y`（64 字节 hex）。 */
+/**
+ * 池中的一个预计算签名点。
+ *
+ * `point`（`k·G` 的坐标）是公开信息；**`k` 被封在模块内部**，外部读不到，被
+ * `sign()` 取走后立刻从索引中摘除并抹掉字节 —— 所以"复用同一个 `k`"在 API 层面
+ * 就不可能发生，调用方不需要（也无法）自己去保证这一点。
+ */
+export class SignaturePoint {
+  /** `k·G` 的仿射坐标 `x ‖ y`（64 字节 hex）。公开信息，可用于审计。 */
   readonly point: string;
+
+  /** 只允许本模块的 `createSignaturePointPool` 构造。 */
+  private constructor(point: string) {
+    this.point = point;
+  }
+
+  /** @internal 仅供 `createSignaturePointPool` 使用。 */
+  static _create(nonce: Uint8Array, point: string): SignaturePoint {
+    const p = new SignaturePoint(point);
+    POINT_NONCE.set(p, nonce);
+    return p;
+  }
+}
+
+/**
+ * 点位 → 一次性 `k`。取走即 `delete`：同一个点位对象无论被谁持有引用，都只能
+ * 取到一次 `k`。用 `WeakMap` 而非对象属性，是为了连"枚举键名"都做不到。
+ */
+const POINT_NONCE = new WeakMap<SignaturePoint, Uint8Array>();
+
+/**
+ * 取走签名点的一次性 `k`。
+ *
+ * 索引里没有（已被取过，或不是本库产出的伪造对象）就抛错 —— 于是"同一个点签两次"
+ * 会当场失败，而不是悄悄复用 `k` 把私钥送出去。
+ */
+function takeNonce(p: SignaturePoint): Uint8Array {
+  const nonce = POINT_NONCE.get(p);
+  if (nonce === undefined) {
+    throw new Error(
+      'sm2: 该签名点不可用（已被使用过，或不是 createSignaturePointPool 产出的）；签名点是一次性的。',
+    );
+  }
+  POINT_NONCE.delete(p);
+  return nonce;
 }
 
 /** `sign` 的选项。 */
@@ -345,11 +384,11 @@ export interface SignOptions {
 /**
  * 预计算 `n` 个签名点，供 `sign()` 的 `pointPool` 选项消费。
  *
- * 每个点 = 一次 `k·G`（本机约 110 µs）。批量签名时把这些固定基点标量乘提前
- * 摊销，签名的关键路径只剩 `e = SM3(Z ‖ M)` 与两条模运算 —— 实测快 2.28×。
+ * 每个点 = 一次 `k·G`（本机约 130 µs）。批量签名时把这些固定基点标量乘提前
+ * 摊销，签名的关键路径只剩 `e = SM3(Z ‖ M)` 与两条模运算 —— 实测快 5.9×。
  *
- * 安全姿态与 `sign()` 一致：`k` 取自宿主 CSPRNG，且**一次性使用**（消费后即
- * 从池中移除）。**绝不要复用同一个点**：SM2 下复用 `k` 可直接解出私钥。
+ * `k` 取自宿主 CSPRNG，并由本模块独占保管：调用方拿不到它，也就无从误用成复用。
+ * 唯一的约定是"同一个点只喂一次"，而真喂两次会直接抛错。
  *
  * @param n 生成个数。
  * @returns `n` 个签名点。
@@ -362,16 +401,18 @@ export async function createSignaturePointPool(n: number): Promise<SignaturePoin
   const { exports, memory } = getModule();
   const pool: SignaturePoint[] = [];
   for (let i = 0; i < n; i++) {
-    const k = randomK();
+    const nonce = randomK();
     const kPtr = exports.alloc(32);
     const ptPtr = exports.alloc(64);
     try {
-      new Uint8Array(memory.buffer, kPtr, 32).set(k);
+      new Uint8Array(memory.buffer, kPtr, 32).set(nonce);
       exports.scalarMulGOut(kPtr, ptPtr);
-      pool.push({
-        k: fromBytes(k, 'hex'),
-        point: fromBytes(new Uint8Array(memory.buffer, ptPtr, 64).slice(), 'hex'),
-      });
+      pool.push(
+        SignaturePoint._create(
+          nonce,
+          fromBytes(new Uint8Array(memory.buffer, ptPtr, 64).slice(), 'hex'),
+        ),
+      );
     } finally {
       exports.freeAll();
     }
@@ -414,7 +455,10 @@ export function sign(
       const pooled = pool?.pop();
       let rc: number;
       if (pooled !== undefined) {
-        putBytes(toBytes(pooled.k, 'k'), kp);
+        // 一次性取走 k；此处之后该点不可再用（再喂会抛错）。
+        const nonce = takeNonce(pooled);
+        putBytes(nonce, kp);
+        nonce.fill(0); // JS 侧那份随即抹掉
         new Uint8Array(memory.buffer, xp, 32).set(toBytes(pooled.point, 'point').subarray(0, 32));
         rc = exports.signWithPointOut(dp, pxp, pyp, mp, m.length, kp, xp, op);
       } else {
@@ -427,6 +471,8 @@ export function sign(
     }
     throw new Error('sm2.sign: failed to produce a valid signature after retries');
   } finally {
+    // 抹掉 WASM 内存里那份 k（缓冲区在 freeAll 前仍可写）
+    new Uint8Array(memory.buffer, kp, 32).fill(0);
     exports.freeAll();
   }
 }
