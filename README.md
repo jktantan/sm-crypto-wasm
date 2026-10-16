@@ -307,14 +307,39 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 
 ## 跨运行时
 
-| 环境 | 说明 |
+| 环境 | 加载路径 |
 |---|---|
-| Node 18+ | `fs/promises` 读取 `dist/<algo>/<algo>.wasm` |
-| 浏览器 / Vite / Webpack | `fetch(new URL('./<algo>.wasm', import.meta.url))`，打包器负责重写 URL |
+| Node 18+ | `fs/promises` 读取 `dist/<algo>/<algo>.wasm`，可用 `loadWasmSync()` 同步预热 |
+| 浏览器（经打包器） | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`，由打包器归档并重写 URL |
 | Web Worker | 加载器不依赖 DOM，Worker 内可用 |
 | Deno / Bun | 走 Node 同路径 |
 
-Cloudflare Workers / Vercel Edge 这类"严格流式 WASM"环境**不在当前范围**。
+### 打包器支持
+
+包内按环境提供两份实现（Node 版读文件 / 浏览器版 `fetch`），由 `package.json` 的
+`browser` 字段在打包时自动切换。因此**浏览器产物里不会出现 `node:*`** —— 不做 node 内置
+模块外部化的打包器（Webpack、esbuild、Rspack）也不会在解析期报 `Can't resolve 'node:fs'`。
+
+| 打包器 | 需要配置吗 | wasm 资源 |
+|---|---|---|
+| **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
+| **Webpack 5** | 零配置 | 作为 asset 自动产出 |
+| **esbuild** | 需手动复制 wasm | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
+| **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
+
+esbuild 的用户需把 wasm 放到产物 JS 的**上级目录**下：
+
+```bash
+# 产物落在 dist/assets/ → 运行时解析 ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
+esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
+cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```
+
+浏览器需要**安全上下文**（`https://` 或 `localhost`）才能拿到 `crypto.getRandomValues`；
+拿不到时库会**抛错**（fail-closed），不会退化成非密码学随机源。
+
+Cloudflare Workers / Vercel Edge 这类"严格流式 WASM"环境**不在当前范围**；
+`<script type="module">` 直载（不经打包器）同样不支持。
 
 ---
 
@@ -740,15 +765,43 @@ Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc
 
 ## Cross-runtime
 
-| Environment | Notes |
+| Environment | Loading path |
 |---|---|
-| Node 18+ | reads `dist/<algo>/<algo>.wasm` via `fs/promises` |
-| Browser / Vite / Webpack | `fetch(new URL('./<algo>.wasm', import.meta.url))`; the bundler rewrites the URL |
+| Node 18+ | reads `dist/<algo>/<algo>.wasm` via `fs/promises`; `loadWasmSync()` available |
+| Browser (via a bundler) | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`; the bundler archives and rewrites it |
 | Web Worker | the loader is DOM-free and works inside a Worker |
 | Deno / Bun | follows the Node path |
 
-Strict-streaming WASM environments such as Cloudflare Workers / Vercel Edge
-are **out of scope**.
+### Bundler support
+
+The package ships two implementations (a Node one reading files, a browser one
+using `fetch`) and `package.json`'s `browser` field switches between them at
+build time. So **`node:*` never appears in a browser bundle** — bundlers that do
+not externalise node built-ins (Webpack, esbuild, Rspack) no longer fail at
+resolve time with `Can't resolve 'node:fs'`.
+
+| Bundler | Configuration | wasm asset |
+|---|---|---|
+| **Vite 5** | none | archived into the output (`assets/*.wasm`) |
+| **Webpack 5** | none | emitted as an asset |
+| **esbuild** | copy the wasm yourself | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
+| **Node 18+** | none | reads `dist/<algo>/<algo>.wasm` |
+
+esbuild users must place the wasm in the **parent** directory of the output JS:
+
+```bash
+# output lands in dist/assets/ → runtime resolves ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
+esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
+cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```
+
+Browsers need a **secure context** (`https://` or `localhost`) for
+`crypto.getRandomValues`; when it is missing the library **throws** (fail-closed)
+rather than falling back to a non-cryptographic source.
+
+Strict-streaming WASM environments such as Cloudflare Workers / Vercel Edge are
+**out of scope**; so is loading the raw ESM output directly via
+`<script type="module">` (without a bundler).
 
 ---
 
@@ -1200,15 +1253,43 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 
 ## Кросс-рантайм
 
-| Среда | Примечания |
+| Среда | Путь загрузки |
 |---|---|
-| Node 18+ | читает `dist/<algo>/<algo>.wasm` через `fs/promises` |
-| Браузер / Vite / Webpack | `fetch(new URL('./<algo>.wasm', import.meta.url))`; бандлер переписывает URL |
+| Node 18+ | читает `dist/<algo>/<algo>.wasm` через `fs/promises`; доступен `loadWasmSync()` |
+| Браузер (через сборщик) | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`; сборщик кладёт файл в вывод и переписывает URL |
 | Web Worker | загрузчик не зависит от DOM и работает внутри Worker'а |
 | Deno / Bun | идут по Node-пути |
 
-Среды со строго потоковой загрузкой WASM, такие как Cloudflare Workers /
-Vercel Edge, **вне области поддержки**.
+### Поддержка сборщиков
+
+Пакет поставляет две реализации (Node-версия читает файлы, браузерная использует
+`fetch`), а поле `browser` в `package.json` переключает их на этапе сборки. Поэтому
+**`node:*` не попадает в браузерный бандл** — сборщики, которые не выносят встроенные
+модули Node наружу (Webpack, esbuild, Rspack), больше не падают на этапе разбора
+с `Can't resolve 'node:fs'`.
+
+| Сборщик | Нужна настройка? | Ресурс wasm |
+|---|---|---|
+| **Vite 5** | нет | автоматически попадает в вывод (`assets/*.wasm`) |
+| **Webpack 5** | нет | автоматически выдаётся как asset |
+| **esbuild** | нужно скопировать wasm | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
+| **Node 18+** | нет | читает `dist/<algo>/<algo>.wasm` |
+
+Пользователям esbuild нужно положить wasm в **родительский** каталог выходного JS:
+
+```bash
+# вывод в dist/assets/ → во время работы разрешается ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
+esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
+cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```
+
+Браузеру нужен **защищённый контекст** (`https://` или `localhost`) для
+`crypto.getRandomValues`; если его нет, библиотека **бросает ошибку** (fail-closed), а не
+откатывается к некриптографическому источнику.
+
+Среды со строго потоковой загрузкой WASM, такие как Cloudflare Workers / Vercel Edge,
+**вне области поддержки**; загрузка «сырого» ESM напрямую через `<script type="module">`
+(без сборщика) — тоже.
 
 ---
 

@@ -6,7 +6,7 @@
 | 环境 | 加载路径 |
 | --- | --- |
 | **Node 18+** | `node:fs/promises` 读 `dist/<algo>/<algo>.wasm`；可用 `loadWasmSync()` 同步预热 |
-| **浏览器 / Vite / Webpack / Rollup** | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`，由打包器负责重写 URL |
+| **浏览器（经打包器）** | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`，由打包器归档并重写 URL |
 | **Web Worker** | 加载器不依赖 DOM，Worker 内可直接用 |
 | **Deno / Bun** | 复用 Node 路径（都暴露 `node:fs`） |
 
@@ -21,8 +21,36 @@ await sm3.ensureLoaded();   // 必须先 await 一次
 sm3.hash('616263');
 ```
 
-打包器需要能解析 `new URL(..., import.meta.url)` 这种资源引用。Vite、Webpack 5、Rollup
-都支持；如果用的是更老的打包器或自定义产物布局，改用显式的加载入口（见下）。
+### 打包器支持
+
+库按环境提供两份实现（Node 版读文件、浏览器版 `fetch`），由 `package.json` 的
+`browser` 字段在打包时**自动切换**。这带来一个重要的性质：**浏览器产物里不会出现
+`node:*`**，所以 Webpack / esbuild / Rspack 这类不做 node 内置模块外部化的打包器也
+不会构建失败（它们会在解析期直接报 `Can't resolve 'node:fs'`）。
+
+| 打包器 | 需要配置吗 | wasm 资源 |
+| --- | --- | --- |
+| **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
+| **Webpack 5** | 零配置 | 作为 asset 自动产出 |
+| **esbuild** | 需手动复制 wasm（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
+| **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
+
+> 浏览器需要**安全上下文**（`https://` 或 `localhost`）才能拿到
+> `crypto.getRandomValues`。拿不到时库会**抛错**（fail-closed），**不会**退化成
+> 非密码学随机源。
+
+#### esbuild：需要自己放 wasm
+
+esbuild 不会把 `new URL('../<algo>/<algo>.wasm', import.meta.url)` 指向的文件搬进产物
+（`--outfile` 和 `--outdir` 都不会）。产物 JS 的**上级目录**下需要有 `<algo>/<algo>.wasm`：
+
+```bash
+# 产物落到 dist/assets/ → 运行时解析 ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
+esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
+cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```
+
+只用到哪个算法就复制哪个（例如只要 SM3，就 `cp -r node_modules/sm-crypto-wasm/dist/sm3 dist/`）。
 
 ## Node
 
@@ -65,5 +93,7 @@ await Promise.all([sm3.ensureLoaded(), sm3.ensureLoaded()]);
 
 ## 不在当前范围
 
-**Cloudflare Workers / Vercel Edge** 这类"严格流式 WASM"环境不在支持范围内 ——
-它们的 WASM 模块加载模型与 `WebAssembly.instantiate(ArrayBuffer)` 不兼容。
+- **Cloudflare Workers / Vercel Edge** 这类"严格流式 WASM"环境不在支持范围内 ——
+  它们的 WASM 模块加载模型与 `WebAssembly.instantiate(ArrayBuffer)` 不兼容。
+- **`<script type="module">` 直载（不经打包器）**不在支持范围内：Node 侧要用
+  `node:*`，无法与浏览器共用一份裸 ESM 产物。请使用上表中的打包器。
