@@ -17,15 +17,20 @@
 #                       后再构建。实测这一步对结果的影响 <3%（落在运行噪声内，
 #                       同批次本库/sm-crypto-v2 的漂移还更大），默认关闭——即
 #                       按上游原样构建，不篡改被测对象。
+#   SM_BUILD_O3=1       改用**速度优先**配置（`opt-level = 3` + `wasm-opt = ["-O3"]`）
+#                       取代上游默认的体积优先（`opt-level = "z"` + `-Oz`）。实测
+#                       可让 Cubelrti 快 26%~53%（SM3 达 53%），代价是 wasm 体积从
+#                       177 KB 涨到 263 KB。**默认关闭**：默认构建忠实复现上游发布配置
+#                       （其仓库提交的预构建产物 175 KB 即 -Oz 版）。
 #
 # 三处与上游源码有关的说明：
 #   1. 其 Cargo.toml 顶部用了 nightly-only 的 `cargo-features = ["trim-paths"]`
 #      与 `trim-paths = "all"`，stable cargo 会直接拒绝解析整个 manifest。这两项
 #      只影响二进制里的路径重映射（不改变生成代码），故在**构建副本**中剔除，
 #      不动上游源码。
-#   2. `SM_STRIP_LOGS=1` 时同样只改构建副本。
-#   3. 构建镜像里有 binaryen，wasm-opt 会被执行（`-Oz`，来自上游 Cargo.toml 的
-#      `[package.metadata.wasm-pack.profile.release]`）；产物约 176.9 KB。
+#   2. `SM_STRIP_LOGS` 与 `SM_BUILD_O3` 同样只改构建副本。
+#   3. 构建镜像里有 binaryen，wasm-opt 会被执行（参数来自上游 Cargo.toml 的
+#      `[package.metadata.wasm-pack.profile.release]`，即 `-Oz`）。
 set -euo pipefail
 
 REPO_URL="https://github.com/Cubelrti/sm-crypto-wasm.git"
@@ -33,6 +38,7 @@ WASM_PACK_VERSION="${WASM_PACK_VERSION:-0.13.1}"
 # Docker Hub 的 auth 端点在部分网络下会超时，默认使用 AWS Public ECR 的官方镜像副本。
 IMAGE="${SM_BUILD_IMAGE:-public.ecr.aws/docker/library/rust:1.83-slim-bookworm}"
 STRIP_LOGS="${SM_STRIP_LOGS:-0}"
+BUILD_O3="${SM_BUILD_O3:-0}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/bench/.vendor/cubelrti/pkg"
@@ -73,9 +79,10 @@ mkdir -p "$WORK/wp"
 cp "$WORK/$PB/wasm-pack" "$WORK/wp/"
 chmod +x "$WORK/wp/wasm-pack"
 
-echo "== 容器内构建（镜像：$IMAGE，SM_STRIP_LOGS=$STRIP_LOGS）"
+echo "== 容器内构建（镜像：$IMAGE，SM_STRIP_LOGS=$STRIP_LOGS，SM_BUILD_O3=$BUILD_O3）"
 MSYS_NO_PATHCONV=1 docker run --rm \
   -e SM_STRIP_LOGS="$STRIP_LOGS" \
+  -e SM_BUILD_O3="$BUILD_O3" \
   -v "$(mnt "$WORK/src")":/src \
   -v "$(mnt "$WORK/wp")":/opt/wp \
   -w /src "$IMAGE" bash -c '
@@ -89,6 +96,12 @@ sed -i "/^cargo-features = /d; /^trim-paths = /d" Cargo.toml
 if [ "${SM_STRIP_LOGS:-0}" = "1" ]; then
   echo "== 去掉 console::log_1 =="
   sed -i "/console::log_1/d" src/lib.rs src/crypto/sm2.rs src/crypto/sm3.rs src/crypto/sm4.rs
+fi
+if [ "${SM_BUILD_O3:-0}" = "1" ]; then
+  echo "== 速度优先：opt-level = 3 + wasm-opt -O3 =="
+  sed -i "s/opt-level = \"z\"/opt-level = 3/" Cargo.toml
+  sed -i "s/wasm-opt = \[\"-Oz\"\]/wasm-opt = [\"-O3\"]/" Cargo.toml
+  grep -n "opt-level\|wasm-opt" Cargo.toml
 fi
 wasm-pack build --target nodejs --release
 rm -rf /src/pkg && mkdir -p /src/pkg && cp -r /build/pkg/. /src/pkg/

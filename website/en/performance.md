@@ -56,25 +56,37 @@ Each side is its own **release build from source**, and the benchmark ships a se
 compares all three byte-for-byte (SM3 / SM4 must be identical, SM2 cross-verification must
 pass) — any mismatch throws instead of reporting a bogus number.
 
-| Operation | sm-crypto-wasm | Cubelrti/WASM | sm-crypto-v2 | Ratio |
-|---|---|---|---|---|
-| SM2 sign 64 B | **142 µs** | 4.56 ms | 293 µs | 32.0× / 2.1× faster |
-| SM2 verify 64 B | **401 µs** | 4.65 ms | 2.74 ms | 11.6× / 6.8× faster |
-| SM2 encrypt 64 B | **508 µs** | 4.57 ms | 2.73 ms | 9.0× / 5.4× faster |
-| SM2 decrypt 64 B | **339 µs** | 2.24 ms | 2.45 ms | 6.6× / 7.2× faster |
-| SM2 key pair generation | **148 µs** | 2.20 ms | 206 µs | 14.9× / 1.4× faster |
-| SM3 hash 1 KB | **4.76 µs** | 25.1 µs | 6.43 µs | 5.3× / 1.35× faster |
-| SM3 hmac 1 KB | **5.65 µs** | 29.4 µs | 9.29 µs | 5.2× / 1.64× faster |
-| SM4 ECB encrypt 1 KB | **6.81 µs** | 12.2 µs | 12.5 µs | 1.8× / 1.8× faster |
-| SM4 CBC encrypt 1 KB | **10.6 µs** | 19.9 µs | 15.1 µs | 1.9× / 1.4× faster |
-| SM4 CBC decrypt 1 KB | **10.9 µs** | 22.4 µs | 14.1 µs | 2.1× / 1.3× faster |
-| SM4 CTR encrypt 1 KB | **7.23 µs** | 12.1 µs | — (not implemented) | 1.7× faster |
-| SM4 GCM encrypt 1 KB | **19.8 µs** | 27.0 µs | 30.2 µs | 1.4× / 1.5× faster |
+**⚠️ The Cubelrti column carries two numbers.** Its `Cargo.toml` pins the release profile to
+**size** (`opt-level = "z"` + `wasm-opt = ["-Oz"]`), and the pre-built artifact committed to its
+repo is exactly that build (175 KB, vs the 177 KB I get from the same config). Switch to
+**speed** (`opt-level = 3` + `wasm-opt = ["-O3"]`, 263 KB) and it becomes **26%~53% faster**
+(53% on SM3). So both are given: the default config is "what you actually get", `-O3` is "the
+ceiling of that Rust codebase". Ratio columns read **how many times faster this project is**.
 
-Reproduce (the Cubelrti side builds its Rust/WASM inside a container, hence Docker):
+| Operation | sm-crypto-wasm | Cubelrti<br>default (-Oz) | Cubelrti<br>-O3 | sm-crypto-v2 | vs Cubelrti<br>(-Oz) | vs Cubelrti<br>(-O3) | vs v2 |
+|---|---|---|---|---|---|---|---|
+| SM2 sign 64 B | **143.6 µs** | 4.51 ms | 3.03 ms | 297 µs | 31.4× | 21.1× | 2.07× |
+| SM2 verify 64 B | **406.6 µs** | 4.49 ms | 3.05 ms | 2.83 ms | 11.0× | 7.50× | 6.96× |
+| SM2 encrypt 64 B | **506.5 µs** | 4.43 ms | 2.95 ms | 2.67 ms | 8.75× | 5.82× | 5.27× |
+| SM2 decrypt 64 B | **337.0 µs** | 2.26 ms | 1.51 ms | 2.49 ms | 6.71× | 4.48× | 7.39× |
+| SM2 key pair generation | **147.8 µs** | 2.25 ms | 1.54 ms | 210 µs | 15.2× | 10.4× | 1.42× |
+| SM3 hash 1 KB | **4.75 µs** | 24.7 µs | 11.5 µs | 6.44 µs | 5.19× | 2.42× | 1.36× |
+| SM3 hmac 1 KB | **5.61 µs** | 29.3 µs | 13.7 µs | 9.27 µs | 5.22× | 2.44× | 1.65× |
+| SM4 ECB encrypt 1 KB | **6.78 µs** | 12.6 µs | 8.83 µs | 12.6 µs | 1.85× | 1.30× | 1.85× |
+| SM4 CBC encrypt 1 KB | **10.4 µs** | 19.5 µs | 12.5 µs | 14.9 µs | 1.88× | 1.21× | 1.44× |
+| SM4 CBC decrypt 1 KB | **10.8 µs** | 22.2 µs | 16.3 µs | 14.0 µs | 2.06× | 1.51× | 1.30× |
+| SM4 CTR encrypt 1 KB | **7.09 µs** | 12.6 µs | 10.4 µs | — (not implemented) | 1.77× | 1.46× | — |
+| SM4 GCM encrypt 1 KB | **19.9 µs** | 27.5 µs | 19.7 µs | 30.4 µs | 1.39× | **0.99×** | 1.53× |
+
+Note the last row: **under -O3, Cubelrti essentially ties this project on SM4-GCM**. Per
+operation, the SM4 modes all converge to 1.2~1.5× with -O3; only SM2 (a structural gap, see
+below) and SM3 stay in a different league.
+
+Reproduce:
 
 ```bash
-bash bench/build-cubelrti-wasm.sh   # emits bench/.vendor/cubelrti/pkg/
+bash bench/build-cubelrti-wasm.sh                # upstream default (-Oz)
+SM_BUILD_O3=1 bash bench/build-cubelrti-wasm.sh  # speed-first (-O3), for the 4th column above
 pnpm bench:cubelrti
 ```
 
