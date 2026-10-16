@@ -59,6 +59,10 @@
       "types": "./dist/zuc/index.d.ts",
       "import": "./dist/zuc/index.js"
     },
+    "./esbuild-plugin": {
+      "types": "./dist/esbuild-plugin.d.ts",
+      "import": "./dist/esbuild-plugin.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

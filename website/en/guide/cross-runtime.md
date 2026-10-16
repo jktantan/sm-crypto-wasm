@@ -33,26 +33,39 @@ node built-ins — Webpack, esbuild, Rspack — no longer fail at resolve time w
 | --- | --- | --- |
 | **Vite 5** | none | archived into the output automatically (`assets/*.wasm`) |
 | **Webpack 5** | none | emitted as an asset automatically |
-| **esbuild** | you must copy the wasm yourself (below) | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
+| **esbuild** | one plugin line (below) | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
 | **Node 18+** | none | reads `dist/<algo>/<algo>.wasm` |
 
 > Browsers need a **secure context** (`https://` or `localhost`) for `crypto.getRandomValues`.
 > When it is unavailable the library **throws** (fail-closed) and will **not** fall back to a
 > non-cryptographic source.
 
-#### esbuild: copy the wasm yourself
+#### esbuild: one plugin line
 
 esbuild does not move the files referenced by `new URL('../<algo>/<algo>.wasm',
-import.meta.url)` into your output (neither `--outfile` nor `--outdir` does). The output JS
-needs `<algo>/<algo>.wasm` in its **parent** directory:
+import.meta.url)` into your output (neither `--outfile` nor `--outdir` does). A small
+bundled plugin covers that step:
 
-```bash
-# output lands in dist/assets/ → runtime resolves ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // output JS lands here
+  plugins: [smCryptoWasm()],    // → wasm copied to dist/<algo>/<algo>.wasm
+});
 ```
 
-Copy only the algorithms you use (e.g. just `cp -r node_modules/sm-crypto-wasm/dist/sm3 dist/`).
+The plugin uses the same location the runtime resolves (the `<algo>/` folder under the
+**parent** of the output JS). Point `outdir` at a subfolder (e.g. `dist/assets`) so the wasm
+lands in `dist/<algo>/` rather than one level above the output directory. Pass
+`algorithms: ['sm3']` to copy fewer.
+
+No plugin? Copy `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}` into the **parent**
+directory of the output JS (`dist/` in the example above).
 
 ## Node
 

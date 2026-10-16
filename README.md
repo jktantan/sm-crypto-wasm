@@ -324,16 +324,26 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 |---|---|---|
 | **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
 | **Webpack 5** | 零配置 | 作为 asset 自动产出 |
-| **esbuild** | 需手动复制 wasm | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
+| **esbuild** | 加一行插件（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
 | **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
 
-esbuild 的用户需把 wasm 放到产物 JS 的**上级目录**下：
+esbuild 的用户装一个自带的小插件，它会自动把 wasm 放到运行时能解析到的位置：
 
-```bash
-# 产物落在 dist/assets/ → 运行时解析 ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // 产物 JS 落这里
+  plugins: [smCryptoWasm()],    // → wasm 复制到 dist/<algo>/<algo>.wasm
+});
 ```
+
+不想用插件也可以：把 `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}`
+复制到**产物 JS 的上级目录**（上例即 `dist/`）。
 
 浏览器需要**安全上下文**（`https://` 或 `localhost`）才能拿到 `crypto.getRandomValues`；
 拿不到时库会**抛错**（fail-closed），不会退化成非密码学随机源。
@@ -784,16 +794,26 @@ resolve time with `Can't resolve 'node:fs'`.
 |---|---|---|
 | **Vite 5** | none | archived into the output (`assets/*.wasm`) |
 | **Webpack 5** | none | emitted as an asset |
-| **esbuild** | copy the wasm yourself | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
+| **esbuild** | one plugin line (below) | esbuild does not handle files pointed at by `new URL(..., import.meta.url)` |
 | **Node 18+** | none | reads `dist/<algo>/<algo>.wasm` |
 
-esbuild users must place the wasm in the **parent** directory of the output JS:
+esbuild users add a small bundled plugin that drops the wasm where the runtime looks for it:
 
-```bash
-# output lands in dist/assets/ → runtime resolves ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // output JS lands here
+  plugins: [smCryptoWasm()],    // → wasm copied to dist/<algo>/<algo>.wasm
+});
 ```
+
+Prefer no plugin? Copy `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}`
+into the **parent** directory of the output JS (i.e. `dist/` in the example above).
 
 Browsers need a **secure context** (`https://` or `localhost`) for
 `crypto.getRandomValues`; when it is missing the library **throws** (fail-closed)
@@ -1272,16 +1292,27 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 |---|---|---|
 | **Vite 5** | нет | автоматически попадает в вывод (`assets/*.wasm`) |
 | **Webpack 5** | нет | автоматически выдаётся как asset |
-| **esbuild** | нужно скопировать wasm | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
+| **esbuild** | одна строка плагина (ниже) | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
 | **Node 18+** | нет | читает `dist/<algo>/<algo>.wasm` |
 
-Пользователям esbuild нужно положить wasm в **родительский** каталог выходного JS:
+Пользователи esbuild подключают небольшой встроенный плагин — он кладёт wasm туда,
+откуда его берёт рантайм:
 
-```bash
-# вывод в dist/assets/ → во время работы разрешается ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // сюда попадает выходной JS
+  plugins: [smCryptoWasm()],    // → wasm копируется в dist/<algo>/<algo>.wasm
+});
 ```
+
+Не хотите плагин? Скопируйте `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}`
+в **родительский** каталог выходного JS (в примере выше — `dist/`).
 
 Браузеру нужен **защищённый контекст** (`https://` или `localhost`) для
 `crypto.getRandomValues`; если его нет, библиотека **бросает ошибку** (fail-closed), а не

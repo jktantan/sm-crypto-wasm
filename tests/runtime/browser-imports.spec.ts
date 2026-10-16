@@ -42,14 +42,19 @@ const SRC_DIR = fileURLToPath(new URL('../../src', import.meta.url));
 const RUNTIME_DIR = join(SRC_DIR, 'runtime');
 
 describe('宿主内置模块的导入形式', () => {
-  it('src/ 下不存在 node:* 的具名导入', () => {
+  it('src/ 下不存在 node:* 的具名导入（构建期 Node 工具除外）', () => {
     // 匹配 `import { a, b as c } from 'node:...'`。
     const named = /import\s*\{[^}]*\}\s*from\s*['"]node:[^'"]+['"]/g;
+    // `esbuild-plugin` 是**构建期 Node 工具**：它只在用户的 esbuild 配置文件里被
+    // import（跑在 Node 里），永远不会进浏览器 bundle，所以用 `node:fs` 没有打包问题。
+    const NODE_ONLY = /esbuild-plugin\.ts$/;
     const offenders: string[] = [];
 
     for (const file of walk(SRC_DIR)) {
+      const rel = file.replace(SRC_DIR, 'src');
+      if (NODE_ONLY.test(rel)) continue;
       for (const m of readFileSync(file, 'utf8').matchAll(named)) {
-        offenders.push(`${file.replace(SRC_DIR, 'src')}: ${m[0]}`);
+        offenders.push(`${rel}: ${m[0]}`);
       }
     }
 

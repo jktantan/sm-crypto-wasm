@@ -32,25 +32,37 @@ sm3.hash('616263');
 | --- | --- | --- |
 | **Vite 5** | 零配置 | 自动归档进产物（`assets/*.wasm`） |
 | **Webpack 5** | 零配置 | 作为 asset 自动产出 |
-| **esbuild** | 需手动复制 wasm（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
+| **esbuild** | 加一行插件（见下） | esbuild 不处理 `new URL(..., import.meta.url)` 指向的文件 |
 | **Node 18+** | 零配置 | 读 `dist/<algo>/<algo>.wasm` |
 
 > 浏览器需要**安全上下文**（`https://` 或 `localhost`）才能拿到
 > `crypto.getRandomValues`。拿不到时库会**抛错**（fail-closed），**不会**退化成
 > 非密码学随机源。
 
-#### esbuild：需要自己放 wasm
+#### esbuild：加一行插件
 
 esbuild 不会把 `new URL('../<algo>/<algo>.wasm', import.meta.url)` 指向的文件搬进产物
-（`--outfile` 和 `--outdir` 都不会）。产物 JS 的**上级目录**下需要有 `<algo>/<algo>.wasm`：
+（`--outfile` 和 `--outdir` 都不会）。本包自带一个小插件补上这一步：
 
-```bash
-# 产物落到 dist/assets/ → 运行时解析 ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // 产物 JS 落这里
+  plugins: [smCryptoWasm()],    // → wasm 复制到 dist/<algo>/<algo>.wasm
+});
 ```
 
-只用到哪个算法就复制哪个（例如只要 SM3，就 `cp -r node_modules/sm-crypto-wasm/dist/sm3 dist/`）。
+插件的落点与运行时一致（产物 JS 的**上级目录**下的 `<algo>/`）。建议把 `outdir` 指到
+子目录（如 `dist/assets`），这样 wasm 落在 `dist/<algo>/` 而不是产物目录的上级。
+只用部分算法时可传 `algorithms: ['sm3']` 少复制几个。
+
+不想用插件也行：手动把 `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}`
+复制到产物 JS 的上级目录（上例即 `dist/`）。
 
 ## Node
 

@@ -34,26 +34,39 @@ sm3.hash('616263');
 | --- | --- | --- |
 | **Vite 5** | нет | автоматически попадает в вывод (`assets/*.wasm`) |
 | **Webpack 5** | нет | автоматически выдаётся как asset |
-| **esbuild** | нужно скопировать wasm вручную (ниже) | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
+| **esbuild** | одна строка плагина (ниже) | esbuild не обрабатывает файлы, на которые указывает `new URL(..., import.meta.url)` |
 | **Node 18+** | нет | читает `dist/<algo>/<algo>.wasm` |
 
 > Браузеру нужен **защищённый контекст** (`https://` или `localhost`), чтобы получить
 > `crypto.getRandomValues`. Если его нет, библиотека **бросает ошибку** (fail-closed) и
 > **не** откатывается к некриптографическому источнику.
 
-#### esbuild: скопируйте wasm сами
+#### esbuild: одна строка плагина
 
 esbuild не переносит файлы, на которые указывает `new URL('../<algo>/<algo>.wasm',
-import.meta.url)`, в вывод (ни `--outfile`, ни `--outdir`). Выходному JS нужен
-`<algo>/<algo>.wasm` в его **родительском** каталоге:
+import.meta.url)`, в вывод (ни `--outfile`, ни `--outdir`). Этот шаг закрывает небольшой
+встроенный плагин:
 
-```bash
-# вывод в dist/assets/ → во время работы разрешается ../<algo>/<algo>.wasm → dist/<algo>/<algo>.wasm
-esbuild src/main.ts --bundle --platform=browser --format=esm --outdir=dist/assets
-cp -r node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc} dist/
+```ts
+import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/main.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outdir: 'dist/assets',        // сюда попадает выходной JS
+  plugins: [smCryptoWasm()],    // → wasm копируется в dist/<algo>/<algo>.wasm
+});
 ```
 
-Копируйте только используемые алгоритмы (например, `cp -r node_modules/sm-crypto-wasm/dist/sm3 dist/`).
+Плагин кладёт wasm туда же, откуда его берёт рантайм (каталог `<algo>/` внутри
+**родительского** каталога выходного JS). Указывайте `outdir` на подкаталог (например,
+`dist/assets`), чтобы wasm попал в `dist/<algo>/`, а не на уровень выше выходного каталога.
+Передайте `algorithms: ['sm3']`, чтобы копировать меньше.
+
+Без плагина? Скопируйте `node_modules/sm-crypto-wasm/dist/{sm2,sm3,sm4,sm9,zuc}` в
+**родительский** каталог выходного JS (`dist/` в примере выше).
 
 ## Node
 
