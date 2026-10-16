@@ -1,22 +1,26 @@
 /**
- * 宿主随机数包装（host-backed randomness）。
+ * 宿主随机数包装（**Node 版**）。
+ *
+ * 浏览器打包时本文件被 `random.browser.ts` 替换（package.json 的 `browser` 字段），
+ * 因为 `node:crypto` 会让 Webpack / esbuild / Rspack 在解析期构建失败。
+ * 与宿主无关的拒绝采样逻辑在 `random.core.ts`。
  *
  * 设计要点（spec §9 安全姿态）：
- * - **永远走宿主 CSPRNG**：浏览器 `globalThis.crypto.getRandomValues`、
- *   Node `webcrypto.getRandomValues`。**绝不**实例化本地 RNG。
- * - **拒绝采样（rejection sampling）**：用于 SM2/SM9 椭圆曲线私钥 k；
- *   按 64-bit limb 切分，从 256-bit 候选中重抽直至 < order。
- * - **长度边界**：输入 `n ∈ [0, 65536]`，溢出抛 `RangeError`。
- *
- * spec/plan 对应：plan Task 3；spec §9 安全姿态、§6 SM2/SM9 API。
+ * - **永远走宿主 CSPRNG**：Node 19+ 用 `globalThis.crypto`，Node 18 回退
+ *   `node:crypto` 的 `webcrypto`（`globalThis.crypto` 直到 Node 19 才默认暴露）。
+ * - **取不到就抛错（fail-closed）**：绝不实例化本地 RNG，也绝不静默降级到
+ *   非密码学随机源。
+ * - **长度边界**：输入 `n ∈ [0, 65536]`，溢出抛 `RangeError`
+ *   （65536 是 WebCrypto `getRandomValues` 的规范上限）。
  */
-// 同 loadWasm.ts：宿主内置模块用 namespace 导入，避免打包器具名导入时构建失败。
+
 import * as nodeCrypto from 'node:crypto';
+import { scalarBelowFrom } from './random.core.js';
 
 /**
  * 解析宿主 CSPRNG。**取不到就抛错，绝不静默降级到非密码学随机源。**
  *
- * - 浏览器 / Node 19+：`globalThis.crypto`（WebCrypto）；
+ * - Node 19+：`globalThis.crypto`（WebCrypto）；
  * - Node 18：`node:crypto` 的 `webcrypto` —— `globalThis.crypto` 直到 Node 19 才
  *   默认暴露，Node 18 需要 `--experimental-global-webcrypto`，所以回退是必要的。
  */
@@ -51,25 +55,11 @@ export function randomBytes(n: number): Uint8Array {
 }
 
 /**
- * 在 `[1, order)` 区间均匀取一个随机标量（用于 SM2/SM9 椭圆曲线 k）。
- *
- * 算法：64-bit limb rejection sampling。从 `getRandomValues` 取 4 个 64-bit
- * limb 拼接成 256-bit 候选值；若 ≥ `order` 则重抽。偏置 ≤ 2^-128，足够低。
+ * 在 `[1, order)` 区间均匀取一个随机标量（用于 SM2 / SM9 椭圆曲线 k）。
  *
  * @param order 椭圆曲线子群阶（如 SM2 的 n、SM9 的 BN256 n）。
  * @returns 满足 `1 ≤ k < order` 的大整数。
  */
 export function randomScalarBelow(order: bigint): bigint {
-  if (order <= 1n) throw new RangeError('randomScalarBelow: order must be > 1');
-  // 用 256-bit 候选：4 个 64-bit big-endian limb。
-  while (true) {
-    const buf = randomBytes(32); // 256 bits
-    let candidate = 0n;
-    for (let i = 0; i < 32; i++) {
-      candidate = (candidate << 8n) | BigInt(buf[i] ?? 0);
-    }
-    // 严格 < order（不允许 0）。
-    if (candidate > 0n && candidate < order) return candidate;
-    // 否则重抽；理论上不到一次。
-  }
+  return scalarBelowFrom(order, randomBytes);
 }

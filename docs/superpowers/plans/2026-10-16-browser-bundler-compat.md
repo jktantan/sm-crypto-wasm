@@ -1,72 +1,94 @@
-# 浏览器可分发性：Vite 已通，Webpack 待补 — 后续计划
+# 浏览器可分发性：四打包器全通 — 实施记录与遗留
 
-> **状态：backlog。** 不是当前迭代项；等出现真实 Webpack 用户需求、或发布 1.0 前再动。
->
-> **由来**：2026-10-16 用真 Chromium + Vite 实测浏览器可分发性时发现并**已修复 Vite 侧**（commit `408c36b`）；Webpack 侧当时判定为邻接缺口，用户裁定「记进计划，以后再做」。
+> **状态：已实施。** 原为 backlog（用户先裁定"记进计划"，后在新证据下改判"现在就修"）。
+> 落地于 2026-10-16。**实测**：Node / Vite 5 / esbuild / Webpack 5 全部构建通过，
+> 真 Chromium 端到端跑通；Node 全量 198 用例绿。
 
-**Goal:** 让库在 Vite / Webpack 5 / 原生 ESM 三种消费方式下都能构建并运行，且随机数始终来自宿主 CSPRNG。
+**Goal:** 让库在 Vite / esbuild / Webpack 5 / Node 下都能构建并运行，且随机数始终来自宿主 CSPRNG。
 
 ---
 
-## 现状（2026-10-16 实测）
+## 问题
 
-| 消费方式 | 状态 | 说明 |
+浏览器构建的模块图里出现了 `node:*`。三个打包器在**解析期**就因此构建失败
+（tree-shaking 救不了 —— 解析先于摇树）：
+
+| 打包器 | 修前 | 根因 |
 |---|---|---|
-| Node（ESM） | ✅ | 全量 28 文件 196 用例绿 |
-| **Vite 5** | ✅ | 真 Chromium 端到端通过（`isNode=false` 分支）；wasm 由 Vite 自动归档进 `assets/` |
-| **Webpack 5** | ❌ | 无法解析 `node:fs/path/url/crypto`，`Module not found` 构建失败 |
-| 原生 `<script type="module">` | ❌ | 裸 specifier `node:*` 无法解析（无打包器时本就不支持，见 Non-Goals） |
-| happy-dom（vitest browser runner） | ⚠️ | 不抹掉 `process`，走 **Node 分支**，**不覆盖**真浏览器路径 |
+| Vite 5（Rollup） | ⚠️ 具名导入下失败，namespace 导入可过 | 它把 `node:*` 外部化成只有 default 的空 stub；具名导入找不到导出即中止 |
+| esbuild | ❌ `Could not resolve "node:fs"` | 不做外部化 |
+| Webpack 5 | ❌ `Can't resolve 'node:fs'` | 不做外部化 |
+| 原生 `<script type="module">` | ❌ | 裸 specifier 无法解析（属 Non-Goals，见下） |
 
-已在 `408c36b` 完成的修复：
-
-- `loadWasm.ts` / `random.ts`：`node:*` 改 namespace 导入（`import * as`）—— Vite 由 `build failed` 变 `succeeded`；
-- `random.ts`：取不到宿主 CSPRNG 时**显式抛错**（fail-closed），绝不静默降级到弱随机；
-- `tests/runtime/browser-imports.spec.ts`：禁止 `src/` 下再出现 `node:*` 具名导入。
+关键：**5 个算法入口无一例外都引 `runtime/loadWasm.js`**（sm2/sm9 另引 `runtime/random.js`），
+所以哪怕只用 SM3 也会把 `node:fs` 拉进模块图；而 Vite 恰是唯一容忍这写法的特例，
+不能作为"已经修好了"的依据。
 
 ---
 
-## 缺口：Webpack 5
+## 修法
 
-Webpack 不做 Vite 式的外部化，而是**解析期**直接报 `Can't resolve 'node:path'`。namespace 导入救不了它（具名/namespace 都在解析期失败）。
+拆成 Node / 浏览器两份实现，打包时按条件替换：
 
-**修法（待实施）**：给浏览器一份不含 node 依赖的实现，用 package.json 条件导出切换：
+```
+src/runtime/
+  loadWasm.core.ts       零 node:* —— 类型、ASC_ENV、instantiate、记忆化（两边共用）
+  loadWasm.ts            Node 版：node:fs / node:path / node:url 读文件
+  loadWasm.browser.ts    浏览器版：静态 URL 表 + fetch，零 node:*
+  random.core.ts         零 node:* —— 拒绝采样（两边共用）
+  random.ts              Node 版：node:crypto（Node 19+ 用 globalThis.crypto）
+  random.browser.ts      浏览器版：只认 globalThis.crypto，零 node:*
+```
+
+package.json 用 `browser` 字段做文件替换：
 
 ```json
-"exports": {
-  "./runtime/loadWasm.js": {
-    "browser": "./dist/runtime/loadWasm.browser.js",
-    "default": "./dist/runtime/loadWasm.js"
-  },
-  "./runtime/random.js": {
-    "browser": "./dist/runtime/random.browser.js",
-    "default": "./dist/runtime/random.js"
-  }
+"browser": {
+  "./dist/runtime/loadWasm.js": "./dist/runtime/loadWasm.browser.js",
+  "./dist/runtime/random.js": "./dist/runtime/random.browser.js"
 }
 ```
 
-（或等价的 `"browser"` 字段。）
+要点：
 
-需要的改动：
-
-- [ ] 拆出 `loadWasm.browser.ts` / `random.browser.ts`：浏览器版只用 `globalThis.crypto` + `fetch(new URL(...))`，零 `node:*` 引用；Node 版保持现状。
-- [ ] 构建产出两份并进 `dist/`（`tsc` 两次或按文件覆写）。
-- [ ] 验证：Webpack 5 + 真 Chromium 端到端；Node 全量测试不回归。
-- [ ] 保守项：`loadWasmSync` 是 Node-only 同步 API（依赖 `readFileSync`），浏览器版必须给出明确抛错路径。
+- **`browser` 字段只有在包位于 `node_modules` 时才会被 Vite 应用** —— 库放在普通目录里
+  测会得到假阴性（本次排查踩过这个坑）。
+- 浏览器版的 wasm URL **显式列出** 5 条 `new URL('../<algo>/<algo>.wasm', import.meta.url)`，
+  而不是模板拼路径：打包器只能静态识别字面量形式，才会把 wasm 归档进产物并重写 URL。
+- 两版的**导出面必须一致**，否则替换后调用方拿到 `undefined`（有测试钉住）。
+- 安全姿态两版一致：**取不到宿主 CSPRNG 就抛错（fail-closed）**，绝不降级到非密码学随机源。
 
 ---
 
-## 触发条件（何时值得做）
+## 验证矩阵（2026-10-16 实测）
 
-- 出现真实 Webpack 用户报告；
-- 或发布 `1.0` 前要求「三大打包器全支持」。
+| 消费方式 | 结果 | 证据 |
+|---|---|---|
+| Node（ESM，全量测试） | ✅ | 28 文件 / 198 用例 |
+| **Vite 5** | ✅ | 构建零 `node:*` 警告，5 个 wasm 自动进 `assets/`；真 Chromium 端到端 |
+| **esbuild 0.28.2** | ✅ | `--platform=browser` 产物 `node:` 计数 0 |
+| **Webpack 5.111.1** | ✅ | `compiled successfully`，5 个 wasm 作为 asset 产出 |
+| 真浏览器行为 | ✅ | `hasProcess=undefined`；SM3/SM4-GCM/ZUC/SM2/SM9 全对；`getRandomValues` 计数 6 |
+| 抹掉 WebCrypto | ✅ | 抛错（fail-closed），未静默弱降级 |
 
-在此之前，最小兜底是 **README 注明 Webpack 需配 `resolve.fallback`**（例如 `{ fs: false, path: false, url: false, crypto: false }`）。
+自动化防护：`tests/runtime/browser-imports.spec.ts` 钉住三件事 ——
+`src/` 下无 `node:*` 具名导入、浏览器变体与 core 零 `node:` 引用、两版导出面一致。
+
+---
+
+## 遗留（未做，已知）
+
+1. **esbuild 不复制 wasm**。Vite 与 Webpack 会自动归档 `new URL(..., import.meta.url)`
+   指向的 wasm，esbuild 不改写也不复制 —— 用户需自行把 `dist/<algo>/<algo>.wasm`
+   放到产物中该相对位置，否则运行时 `fetch` 404。**构建本身是通过的。**
+   - 缓解方向：文档写清；或提供"调用方注入 wasm 字节"的入口。
+2. **原生 `<script type="module">` 直载仍不支持** —— 与 Node 侧需要 `node:*` 无法两全，
+   属 Non-Goals。
 
 ---
 
 ## Non-Goals
 
-- **原生 ESM 直载（无打包器）**：与「Node 侧需要 `node:*`」无法两全，除非彻底重构加载器；不在本项范围。
-- **放弃 Node 支持**：Node 是一等公民，不能为浏览器让路。
-- **改随机数策略**：无论哪条路径，都必须「宿主 CSPRNG，取不到就抛错」—— 这条不能因打包器便利而放松。
+- 放弃 Node 支持（Node 是一等公民）。
+- 为打包器便利放松"宿主 CSPRNG，取不到即抛错"这条红线。
+- 原生 ESM 直载（无打包器）支持。

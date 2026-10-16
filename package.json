@@ -30,6 +30,10 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "browser": {
+    "./dist/runtime/loadWasm.js": "./dist/runtime/loadWasm.browser.js",
+    "./dist/runtime/random.js": "./dist/runtime/random.browser.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

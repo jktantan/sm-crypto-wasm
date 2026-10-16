@@ -1,54 +1,35 @@
 /**
- * 跨运行时 WASM 加载器（runtime WASM loader）。
+ * WASM 加载器（**Node 版**）。
  *
- * 支持三种环境：
- * - Node.js 18+：通过 `node:fs/promises` 读取构建产物 `dist/<name>/<name>.wasm`。
- * - 现代浏览器（Vite/Webpack/Rollup）：用 `fetch(new URL(...))`，由打包器解析资源 URL。
- * - Deno/Bun：自动复用 Node 路径（都暴露 `node:fs`）。
+ * 浏览器打包时，本文件会被 `loadWasm.browser.ts` 替换（package.json 的 `browser`
+ * 字段）—— 因为这里的 `node:fs` / `node:path` / `node:url` 会让 Webpack / esbuild /
+ * Rspack 在解析期直接构建失败。共享逻辑（类型、实例化、记忆化）在
+ * `loadWasm.core.ts`。**不要在 core 或 browser 版里 import 本文件。**
  *
  * 设计要点：
- * - **按算法名称记忆化（memoization）**：同一个 `name` 在并发调用下只实例化一次。
- *   缓存键为 `WasmAlgo`，值为 `Promise<WasmModule>`；第一个调用挂上 Promise，
- *   后续调用拿到同一引用。Review-Focus #7 明确要求"并发调用拿到同一模块"。
- * - **同步 / 异步并存**：业务 API 大量使用同步入口（见 spec §12.1 Q2），
- *   但 WASM 加载必须异步；这里同时提供 `loadWasm`（async）与 `loadWasmSync`
- *   （Node 专用），后者内部用 `fs.readFileSync` + `WebAssembly.Module`。
- * - **内存视图返回**：所有从 WASM 内存取出的字节都用 `slice()` 返回拷贝，
- *   绝不让上层持有会因内存增长而失效的视图。Review-Focus #8。
- *
- * spec/plan 对应：plan Task 1；spec §7 跨运行时、§10 测试。
+ * - **按算法名称记忆化**：同名在并发调用下只实例化一次（见 core 的 `memoizeLoad`）。
+ * - **同步 / 异步并存**：业务 API 大量使用同步入口，但 WASM 加载必须异步；
+ *   这里同时提供 `loadWasm`（async）与 `loadWasmSync`（Node 专用，
+ *   每次独立读文件 + instantiate，与异步版不共享实例）。
+ * - **内存视图返回**：所有从 WASM 内存取出的字节都由上层 `slice()` 拷贝，
+ *   绝不让上层持有会因内存增长而失效的视图。
  */
 
-// 注意：宿主内置模块一律用 **namespace 导入**（`import * as`），不要用 `import { x }`。
-// 打包器（Vite/Rollup）把 `node:*` 外部化成只有 default 的空 stub 时，具名导入会让
-// 构建**直接失败**（"X is not exported by __vite-browser-external"）；namespace 导入
-// 只产生警告。浏览器分支不会执行到这些函数（见 `isNode`），所以运行时取到 undefined
-// 也无妨 —— 这是一次为「浏览器可打包」付的最小代价。
 import * as nodeFs from 'node:fs';
 import * as nodeFsPromises from 'node:fs/promises';
 import * as nodePath from 'node:path';
 import * as nodeUrl from 'node:url';
+import {
+  instantiateFromBuffer,
+  isWasmAlgo,
+  memoizeLoad,
+  rejectBadName,
+  resetCacheForTests,
+  type WasmAlgo,
+  type WasmModule,
+} from './loadWasm.core.js';
 
-/** 算法白名单：确保非法 `name` 在到达文件系统 / 浏览器分支前被拒绝。 */
-const WASM_ALGOS = ['sm2', 'sm3', 'sm4', 'sm9', 'zuc'] as const;
-export type WasmAlgo = (typeof WASM_ALGOS)[number];
-
-function isWasmAlgo(name: unknown): name is WasmAlgo {
-  return typeof name === 'string' && (WASM_ALGOS as readonly string[]).includes(name);
-}
-
-function rejectBadName(name: unknown): never {
-  const got = typeof name === 'string' ? `"${name}"` : typeof name;
-  throw new RangeError(
-    `loadWasm: 未知算法 ${got}，期望 ${WASM_ALGOS.map((a) => `"${a}"`).join(' | ')}`,
-  );
-}
-
-/** 加载完成后的 WASM 模块封装。`exports` 已类型化为 `WebAssembly.Exports`。 */
-export interface WasmModule {
-  readonly exports: WebAssembly.Exports;
-  readonly memory: WebAssembly.Memory;
-}
+export type { WasmAlgo, WasmModule } from './loadWasm.core.js';
 
 /** 当前是否在 Node 进程内。CI / Vite SSR / 真浏览器都据此切换加载路径。 */
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
@@ -102,54 +83,6 @@ function nodeReadWasmSync(name: WasmAlgo): ArrayBuffer {
 }
 
 /**
- * 抽象出"按当前环境读 wasm 字节"。
- *
- * @param name 算法名。
- * @returns ArrayBuffer 形式的 wasm 字节。
- */
-async function loadArrayBuffer(name: WasmAlgo): Promise<ArrayBuffer> {
-  if (isNode) return nodeReadWasm(name);
-  // 浏览器：用 import.meta.url 解析同级 wasm 资源；打包器负责重写 URL。
-  const url = new URL(`../${name}/${name}.wasm`, import.meta.url);
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`loadWasm: failed to fetch ${url}: ${res.status} ${res.statusText}`);
-  }
-  return res.arrayBuffer();
-}
-
-/** ASC 默认产物会导入 `env` 模块（abort / trace / __assert_fail）。
- *  这些 stub 与 `loadWasm` 异步路径一致；统一到模块级常量以便 sync/async 共享。 */
-const ASC_ENV: WebAssembly.Imports = {
-  env: {
-    abort: () => {
-      throw new Error('wasm: abort');
-    },
-    trace: () => {},
-    __assert_fail: () => {
-      throw new Error('wasm: assert_fail');
-    },
-  },
-};
-
-/**
- * 同步实例化 wasm（仅 Node）。失败抛 WebAssembly 自身的 CompileError / LinkError。
- *
- * @param buf wasm 字节。
- */
-function instantiateFromBuffer(buf: ArrayBuffer): WasmModule {
-  const mod = new WebAssembly.Module(buf);
-  const inst = new WebAssembly.Instance(mod, ASC_ENV);
-  const exports = inst.exports as WebAssembly.Exports;
-  const memory =
-    (exports.memory as WebAssembly.Memory | undefined) ?? new WebAssembly.Memory({ initial: 1 });
-  return Object.freeze({ exports, memory });
-}
-
-/** 模块缓存。key = 算法名，value = 已 memoize 的 Promise。 */
-const cache = new Map<WasmAlgo, Promise<WasmModule>>();
-
-/**
  * 异步加载并实例化 wasm。**这是业务代码的主入口**。
  *
  * 并发安全：同名的第二次调用复用第一次的 Promise，不会触发额外 instantiate。
@@ -159,22 +92,14 @@ const cache = new Map<WasmAlgo, Promise<WasmModule>>();
  */
 export function loadWasm(name: WasmAlgo): Promise<WasmModule> {
   if (!isWasmAlgo(name)) rejectBadName(name);
-  let p = cache.get(name);
-  if (!p) {
-    p = (async () => {
-      const buf = await loadArrayBuffer(name);
-      return instantiateFromBuffer(buf);
-    })();
-    cache.set(name, p);
-  }
-  return p;
+  return memoizeLoad(name, async (n) => instantiateFromBuffer(await nodeReadWasm(n)));
 }
 
 /**
- * 同步加载 wasm（Node 专用）。浏览器路径不可用，会抛错。
+ * 同步加载 wasm（**Node 专用**）。浏览器路径不可用，会抛错。
  *
- * 用法：在应用启动时先 `await loadWasm('sm3')` 预热缓存，之后业务函数
- * 调用 `loadWasmSync('sm3')` 即可零开销获取引用。
+ * 每次调用独立读文件 + instantiate，**不**复用 `loadWasm` 的缓存实例
+ * （Node 的 Promise 无法被同步等待）。
  *
  * @param name 算法名。
  * @returns 冻结的 WasmModule。
@@ -184,8 +109,7 @@ export function loadWasmSync(name: WasmAlgo): WasmModule {
     throw new Error('loadWasmSync: browser must await loadWasm() first');
   }
   if (!isWasmAlgo(name)) rejectBadName(name);
-  const buf = nodeReadWasmSync(name);
-  return instantiateFromBuffer(buf);
+  return instantiateFromBuffer(nodeReadWasmSync(name));
 }
 
 /**
@@ -201,5 +125,5 @@ export function getCachedWasm(name: WasmAlgo): Promise<WasmModule> {
  * 清空缓存。仅供测试使用 —— 单元测试需要测并发安全场景时必须能重置状态。
  */
 export function _resetCacheForTests(): void {
-  cache.clear();
+  resetCacheForTests();
 }
