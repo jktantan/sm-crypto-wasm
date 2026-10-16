@@ -120,7 +120,7 @@ function withBuffers<T>(
   key: Uint8Array,
   data: Uint8Array,
   outLen: number,
-  fn: (keyPtr: number, inPtr: number, outPtr: number, mem: Uint8Array) => T,
+  fn: (keyPtr: number, inPtr: number, outPtr: number) => T,
 ): T {
   const { exports, memory } = getModule();
   const keyPtr = exports.alloc(16);
@@ -130,7 +130,7 @@ function withBuffers<T>(
     const mem = new Uint8Array(memory.buffer);
     mem.set(key, keyPtr);
     mem.set(data, inPtr);
-    return fn(keyPtr, inPtr, outPtr, new Uint8Array(memory.buffer));
+    return fn(keyPtr, inPtr, outPtr);
   } finally {
     exports.freeAll();
   }
@@ -369,17 +369,14 @@ function withGcmBuffers<T>(
   v: Uint8Array,
   a: Uint8Array,
   data: Uint8Array,
-  fn: (
-    ptrs: {
-      keyPtr: number;
-      ivPtr: number;
-      aadPtr: number;
-      inPtr: number;
-      outPtr: number;
-      tagPtr: number;
-    },
-    mem: Uint8Array,
-  ) => T,
+  fn: (ptrs: {
+    keyPtr: number;
+    ivPtr: number;
+    aadPtr: number;
+    inPtr: number;
+    outPtr: number;
+    tagPtr: number;
+  }) => T,
 ): T {
   const { exports, memory } = getModule();
   const keyPtr = exports.alloc(16);
@@ -394,7 +391,7 @@ function withGcmBuffers<T>(
     mem.set(v, ivPtr);
     if (a.length !== 0) mem.set(a, aadPtr);
     if (data.length !== 0) mem.set(data, inPtr);
-    return fn({ keyPtr, ivPtr, aadPtr, inPtr, outPtr, tagPtr }, mem);
+    return fn({ keyPtr, ivPtr, aadPtr, inPtr, outPtr, tagPtr });
   } finally {
     exports.freeAll();
   }
