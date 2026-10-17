@@ -182,7 +182,7 @@ pairing 是这里的主要成本：一次签名约 4 ms、验签约 8 ms、加�
 
 | 情况 | 抛出的错误 |
 | --- | --- |
-| `id` 为空 | `RangeError` |
+| `generateKeyPair` / `getUserPublicKey` 的 `id` 为空 | `RangeError` |
 | `purpose` 不是 `'sign'` / `'enc'` | `RangeError` |
 | 主私钥长度不是 32 字节 | `InvalidKeyError` |
 | 签名长度不是 96 字节 | `InvalidCiphertextError` |

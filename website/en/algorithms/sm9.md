@@ -190,7 +190,7 @@ an implementation shortcoming — see the [performance page](/en/performance).
 
 | Situation | Thrown |
 | --- | --- |
-| `id` is empty | `RangeError` |
+| `id` is empty in `generateKeyPair` / `getUserPublicKey` | `RangeError` |
 | `purpose` is neither `'sign'` nor `'enc'` | `RangeError` |
 | master private key is not 32 bytes | `InvalidKeyError` |
 | signature length is not 96 bytes | `InvalidCiphertextError` |

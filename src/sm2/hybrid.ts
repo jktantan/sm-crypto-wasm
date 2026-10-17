@@ -76,11 +76,12 @@ export function hybridEncrypt(
   opts: Sm2HybridEncryptOptions = {},
 ): string {
   const iv = resolveIv(opts.iv);
+  // 先校验 message，避免非法输入还白耗一次 SM2 公钥运算与随机数。
+  const msg = toMessageBytes(message, 'message');
   // DEK 来自宿主 CSPRNG，每次调用都新生成；长度固定为 SM4-128 的 16 字节。
   const { key, encapsulation } = kemEncrypt(publicKey, DEM_KEY_LEN);
   const enc = hexToBytes(encapsulation, 'encapsulation');
   // AAD 绑定 KEM 封装段：换掉封装就无法通过 GCM 认证。
-  const msg = toMessageBytes(message, 'message');
   const { ct, tag } = encryptGCM(key, iv, msg, enc);
   return bytesToHex(
     encodeSealed({
@@ -122,6 +123,12 @@ export function hybridDecrypt(
     if (parts.klen !== DEM_KEY_LEN) {
       throw new InvalidCiphertextError(
         `sm2.hybridDecrypt: sealed.klen=${parts.klen}，当前版本只支持 ${DEM_KEY_LEN}`,
+      );
+    }
+    // SM2 KEM 的 encapsulation 是完整 SM2 密文：C1(65) + C3(32) + C2(klen)。
+    if (parts.encapsulation.length !== 97 + parts.klen) {
+      throw new InvalidCiphertextError(
+        `sm2.hybridDecrypt: encapsulation 长度 ${parts.encapsulation.length} 与 klen=${parts.klen} 不符`,
       );
     }
     // KEM 解封装先校验 SM2 C3；失败会抛 DecryptionError，不会进入 GCM。

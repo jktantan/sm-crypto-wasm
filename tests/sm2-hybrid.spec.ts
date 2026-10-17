@@ -117,6 +117,15 @@ describe('SM2 hybrid encryption (KEM + SM4-GCM)', () => {
     for (const bad of cases) {
       expect(() => sm2.hybridDecrypt(D, bad)).toThrow(InvalidCiphertextError);
     }
+
+    // 长度字段合法、但 encapsulation 长度与 klen 不符（113 = 65 + 32 + 16）时也必须拒绝。
+    const obj = sm2.sealedToObject(sealed);
+    const badEncap = sm2.sealedFromObject({
+      ...obj,
+      encapsulation: obj.encapsulation.slice(0, 200),
+    });
+    expect(() => sm2.hybridDecrypt(D, badEncap)).toThrow(InvalidCiphertextError);
+    expect(sm2.hybridDecrypt(D, badEncap, { safeMode: true })).toBeNull();
   });
 
   it('interoperates with a manual KEM + SM4-GCM assembly', () => {

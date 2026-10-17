@@ -99,6 +99,15 @@ describe('SM9 hybrid encryption (KEM + SM4-GCM)', () => {
     for (const bad of cases) {
       expect(() => sm9.hybridDecrypt(KE, ID, bad)).toThrow(InvalidCiphertextError);
     }
+
+    // 长度字段合法、但 encapsulation 不是 65 字节时也必须拒绝。
+    const obj = sm9.sealedToObject(sealed);
+    const badEncap = sm9.sealedFromObject({
+      ...obj,
+      encapsulation: obj.encapsulation.slice(0, 128),
+    });
+    expect(() => sm9.hybridDecrypt(KE, ID, badEncap)).toThrow(InvalidCiphertextError);
+    expect(sm9.hybridDecrypt(KE, ID, badEncap, { safeMode: true })).toBeNull();
   }, 120_000);
 
   it('interoperates with a manual KEM + SM4-GCM assembly', () => {

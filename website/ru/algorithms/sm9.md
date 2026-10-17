@@ -191,7 +191,7 @@ sm9.hybridDecrypt(encKp.masterPrivatePem, id, sealed);             // → '61626
 
 | Ситуация | Бросается |
 | --- | --- |
-| `id` пустой | `RangeError` |
+| `id` пустой в `generateKeyPair` / `getUserPublicKey` | `RangeError` |
 | `purpose` не `'sign'` и не `'enc'` | `RangeError` |
 | главный приватный ключ не 32 байта | `InvalidKeyError` |
 | длина подписи не 96 байт | `InvalidCiphertextError` |

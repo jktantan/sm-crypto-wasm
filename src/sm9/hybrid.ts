@@ -136,6 +136,11 @@ export function hybridDecrypt(
         `sm9.hybridDecrypt: sealed.klen=${parts.klen}，当前版本只支持 ${DEM_KEY_LEN}`,
       );
     }
+    if (parts.encapsulation.length !== 65) {
+      throw new InvalidCiphertextError(
+        `sm9.hybridDecrypt: encapsulation 必须是 65 字节，实际 ${parts.encapsulation.length}`,
+      );
+    }
     // KEM 只算 K；错误 id 不会在这里报错，由下面的 GCM tag 兜底。
     const key = kemDecrypt(ke, id, parts.encapsulation, parts.klen);
     return decryptGCM(key, parts.iv, parts.ct, parts.tag, { aad: parts.encapsulation });
