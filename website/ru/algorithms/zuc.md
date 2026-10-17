@@ -35,7 +35,7 @@ await zuc.ensureLoaded();
 
 ## API
 
-### `zuc.zucKeystream(key, iv, nBytes)`
+### Поток ключей `zuc.zucKeystream(key, iv, nBytes)`
 
 ```ts
 function zucKeystream(
@@ -53,7 +53,7 @@ function zucKeystream(
 
 Сам поток ключей защитой от повтора не покрывается — за его неповторяемость отвечаете вы.
 
-### `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
+### Шифрование EEA3 `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
 
 ```ts
 function zucEncrypt(
@@ -70,7 +70,7 @@ XOR данных с потоком ключей. **Второй вызов с т
 счётчиком), передайте `{ reuseGuard: false }` или отключите глобально через
 `configureReuseGuard({ enabled: false })`.
 
-### `zuc.zucDecrypt(key, iv, data, counter?)`
+### Расшифрование EEA3 `zuc.zucDecrypt(key, iv, data, counter?)`
 
 ```ts
 function zucDecrypt(
@@ -84,7 +84,7 @@ function zucDecrypt(
 EEA3 — инволюция (тот же поток ключей XOR-ится снова). **Путь расшифрования освобождён от
 защиты от повтора** — шифротекст может проверяться или воспроизводиться более одного раза.
 
-### `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
+### EIA3 MAC `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
 
 ```ts
 function zucMac(
@@ -106,7 +106,7 @@ function zucMac(
 
 **Возвращает** тег из 4 байт (32 бита).
 
-### `zuc.zucEia3Iv(count, bearer, direction)`
+### Сборка EIA3 IV `zuc.zucEia3Iv(count, bearer, direction)`
 
 ```ts
 function zucEia3Iv(count: number, bearer: number, direction: number): Uint8Array

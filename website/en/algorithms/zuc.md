@@ -35,7 +35,7 @@ strings). Use the `bytesToHex` helper this library also exports to display them.
 
 ## API
 
-### `zuc.zucKeystream(key, iv, nBytes)`
+### Keystream `zuc.zucKeystream(key, iv, nBytes)`
 
 ```ts
 function zucKeystream(
@@ -53,7 +53,7 @@ function zucKeystream(
 
 The keystream itself is not covered by the reuse guard — you are responsible for never reusing it.
 
-### `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
+### EEA3 encryption `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
 
 ```ts
 function zucEncrypt(
@@ -70,7 +70,7 @@ XORs the data with the keystream. **A second call with the same `(key, iv, count
 external counter), pass `{ reuseGuard: false }` or disable it globally with
 `configureReuseGuard({ enabled: false })`.
 
-### `zuc.zucDecrypt(key, iv, data, counter?)`
+### EEA3 decryption `zuc.zucDecrypt(key, iv, data, counter?)`
 
 ```ts
 function zucDecrypt(
@@ -84,7 +84,7 @@ function zucDecrypt(
 EEA3 is an involution (the same keystream is XORed again). **The decryption path is exempt from
 the reuse guard** — ciphertext may be verified or replayed more than once.
 
-### `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
+### EIA3 MAC `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
 
 ```ts
 function zucMac(
@@ -106,7 +106,7 @@ function zucMac(
 
 **Returns** the 4-byte (32-bit) tag.
 
-### `zuc.zucEia3Iv(count, bearer, direction)`
+### EIA3 IV assembly `zuc.zucEia3Iv(count, bearer, direction)`
 
 ```ts
 function zucEia3Iv(count: number, bearer: number, direction: number): Uint8Array

@@ -33,7 +33,7 @@ ZUC 的四个主函数返回 **`Uint8Array`**（与 SM2 / SM3 / SM4 返回 hex �
 
 ## API
 
-### `zuc.zucKeystream(key, iv, nBytes)`
+### 密钥流 `zuc.zucKeystream(key, iv, nBytes)`
 
 ```ts
 function zucKeystream(
@@ -51,7 +51,7 @@ function zucKeystream(
 
 密钥流本身不参与复用保护 —— 需要自己保证不重复使用。
 
-### `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
+### EEA3 加密 `zuc.zucEncrypt(key, iv, data, counter?, opts?)`
 
 ```ts
 function zucEncrypt(
@@ -67,7 +67,7 @@ function zucEncrypt(
 确有需要（比如密钥/IV 由外部计数器严格管理）可传 `{ reuseGuard: false }`，或用
 `configureReuseGuard({ enabled: false })` 全局关闭。
 
-### `zuc.zucDecrypt(key, iv, data, counter?)`
+### EEA3 解密 `zuc.zucDecrypt(key, iv, data, counter?)`
 
 ```ts
 function zucDecrypt(
@@ -80,7 +80,7 @@ function zucDecrypt(
 
 EEA3 是自反的（异或同样的密钥流）。**解密路径豁免复用保护** —— 密文可能被多次校验或重放处理。
 
-### `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
+### EIA3 MAC `zuc.zucMac(key, iv, msg, bitLengthOrOptions?, tagBits?)`
 
 ```ts
 function zucMac(
@@ -102,7 +102,7 @@ function zucMac(
 
 **返回** 4 字节（32 位）标签。
 
-### `zuc.zucEia3Iv(count, bearer, direction)`
+### EIA3 IV 组装 `zuc.zucEia3Iv(count, bearer, direction)`
 
 ```ts
 function zucEia3Iv(count: number, bearer: number, direction: number): Uint8Array

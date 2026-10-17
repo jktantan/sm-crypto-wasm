@@ -17,7 +17,7 @@ await sm3.ensureLoaded();   // warm up once; everything after it is synchronous
 
 ## API
 
-### `sm3.ensureLoaded()`
+### Warm up WASM `sm3.ensureLoaded()`
 
 ```ts
 function ensureLoaded(): Promise<void>
@@ -26,7 +26,7 @@ function ensureLoaded(): Promise<void>
 Loads and instantiates `sm3.wasm`. **You must `await` it once before `hash` / `hmac`.**
 Repeated calls are cheap (module-level memoisation, concurrent callers share one Promise).
 
-### `sm3.hash(input)`
+### Hash `sm3.hash(input)`
 
 ```ts
 function hash(input: string | Uint8Array): string
@@ -50,7 +50,7 @@ When `input` is a string, its encoding is sniffed in this order:
 well-defined result for the empty string. If you want a missing argument to fail loudly,
 validate it in your own code.
 
-### `sm3.hmac(key, msg)`
+### HMAC `sm3.hmac(key, msg)`
 
 ```ts
 function hmac(key: string | Uint8Array, msg: string | Uint8Array): string

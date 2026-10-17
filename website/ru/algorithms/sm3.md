@@ -18,7 +18,7 @@ await sm3.ensureLoaded();   // прогрев один раз; всё дальш
 
 ## API
 
-### `sm3.ensureLoaded()`
+### Прогрев WASM `sm3.ensureLoaded()`
 
 ```ts
 function ensureLoaded(): Promise<void>
@@ -27,7 +27,7 @@ function ensureLoaded(): Promise<void>
 Загружает и создаёт экземпляр `sm3.wasm`. **Один `await` обязателен до `hash` / `hmac`.**
 Повторные вызовы дешёвы (мемоизация на уровне модуля, конкурентные вызовы делят один Promise).
 
-### `sm3.hash(input)`
+### Хеширование `sm3.hash(input)`
 
 ```ts
 function hash(input: string | Uint8Array): string
@@ -51,7 +51,7 @@ function hash(input: string | Uint8Array): string
 строки у SM3 есть однозначный результат. Если хотите, чтобы пропущенный аргумент падал
 громко, проверяйте его сами.
 
-### `sm3.hmac(key, msg)`
+### HMAC `sm3.hmac(key, msg)`
 
 ```ts
 function hmac(key: string | Uint8Array, msg: string | Uint8Array): string

@@ -17,7 +17,7 @@ await sm3.ensureLoaded();   // 首次使用前预热，之后全部同步
 
 ## API
 
-### `sm3.ensureLoaded()`
+### 预热 WASM `sm3.ensureLoaded()`
 
 ```ts
 function ensureLoaded(): Promise<void>
@@ -26,7 +26,7 @@ function ensureLoaded(): Promise<void>
 加载并实例化 `sm3.wasm`。**必须在使用 `hash` / `hmac` 前 `await` 一次**。
 重复调用廉价（模块级 memoization，并发调用共用同一个 Promise）。
 
-### `sm3.hash(input)`
+### 摘要 `sm3.hash(input)`
 
 ```ts
 function hash(input: string | Uint8Array): string
@@ -49,7 +49,7 @@ function hash(input: string | Uint8Array): string
 **边界**：空输入按零长度消息处理（不是错误）—— SM3 对空串有唯一定义的结果。
 想在"漏填参数"时报错的话，在调用方自己校验。
 
-### `sm3.hmac(key, msg)`
+### HMAC `sm3.hmac(key, msg)`
 
 ```ts
 function hmac(key: string | Uint8Array, msg: string | Uint8Array): string
