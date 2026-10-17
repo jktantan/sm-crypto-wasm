@@ -44,6 +44,15 @@ CSPRNG），实测在多次运行之间波动可达 **±20%**，远大于 SM3 / 
 上表 SM2 的数字取自同一次运行（`wasm` 与 `gmkitx` 两列同源）。
 :::
 
+::: tip SM2 固定公钥：再快 1.9×
+`await sm2.preparePublicKey(pub)` 为公钥预计算 comb 表后，`encrypt` 的 `k·P` 从
+wNAF（256 次倍点）切到 comb（52 次倍点）：64 B 加密 **486 → 260 µs**（本机 mitata）。
+建表约 280 µs，**约 1.2 次加密回本**。缓存默认 **8 槽 + LRU**，8 把公钥轮换加密与
+单把命中同档；只有显式 prepare 才建表，未命中自动回退 wNAF，不会变慢。
+`kemEncrypt` / `hybridEncrypt` 走同一路径。bench 项：`encrypt 64B (prepared pk)`、
+`encrypt 64B (8 prepared keys, rotating)`。
+:::
+
 ## 与另外两个国密库横向对比
 
 上表的参照物是纯 JS 的 `gmkitx`。若换成**另外两个真实的国密库**，在完全相同的参数、
@@ -114,8 +123,8 @@ pnpm bench:cubelrti
   （块间无法并行）+ 64 轮串行压缩函数。
 - **SM4 的 CFB / OFB 曾经比纯 JS 慢**：这两个模式原先在 TS 侧逐块调用 wasm（1 KB 要
   64 次跨界）。补上批量导出后降到 10 µs 一带，反过来快 3.6~3.8×。
-- **SM2 的计算层做过八件事**（Solinas 归约、Comba 平方、comb/wNAF 标量乘、点运算原地化、
-  混合坐标、验签联合标量乘、局部字级求逆、`sign` 的公钥派生缓存），细节见仓库里的
+- **SM2 的计算层做过九件事**（Solinas 归约、Comba 平方、comb/wNAF 标量乘、点运算原地化、
+  混合坐标、验签联合标量乘、局部字级求逆、`sign` 的公钥派生缓存、固定公钥 comb 表），细节见仓库里的
   [性能上限评估](https://github.com/jktantan/sm-crypto-wasm/blob/main/docs/performance-ceiling.md)。
 - **SM9 由 pairing 主导**：基域 Fp 改用 Montgomery 域（CIOS）后，单次模乘 179 → 98 ns，
   端到端 sign / verify / encrypt / decrypt / KEM / 密钥交换全面快 **1.6~1.8×**。

@@ -20,6 +20,7 @@ import {
   modSub,
   modSubInto,
   mul512,
+  permAlloc,
   permU256,
   reduce512,
   U256,
@@ -59,6 +60,7 @@ export {
   u256shr1,
   u256toBytes,
   u256zero,
+  permAlloc,
   permU256,
   arenaRewind,
 };

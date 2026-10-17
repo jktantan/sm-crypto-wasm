@@ -38,7 +38,16 @@ import {
   u256toBytes,
   arenaRewind,
 } from './field';
-import { JPoint, scalarMul, scalarMulG, toAffine } from './point';
+import {
+  JPoint,
+  clearPreparedComb,
+  combSlotKeyOut as combSlotKey,
+  prepareCombFor,
+  scalarMul,
+  scalarMulG,
+  setCombCapacity,
+  toAffine,
+} from './point';
 
 const pinned: Array<StaticArray<u8>> = [];
 
@@ -286,4 +295,27 @@ export function kexConfirmOut(
 ): void {
   arenaRewind();
   kexConfirm(prefix, uPtr, zaPtr, zbPtr, raXYPtr, rbXYPtr, outPtr);
+}
+
+/** 为固定公钥构建 comb 表（多槽 LRU）。返回槽索引。 */
+export function prepareCombOut(pubXPtr: usize, pubYPtr: usize, capacity: i32): i32 {
+  arenaRewind();
+  setCombCapacity(capacity);
+  return prepareCombFor(pubXPtr, pubYPtr);
+}
+
+/** 设置可用槽数（1..8）。 */
+export function setCombCapacityOut(capacity: i32): void {
+  setCombCapacity(capacity);
+}
+
+/** 清空所有槽（encrypt 回退到 wNAF）。 */
+export function clearComb(): void {
+  clearPreparedComb();
+}
+
+/** 读某槽的公钥指纹（64 字节 x||y）；槽无效返回 0。 */
+export function combSlotKeyOut(slot: i32, outPtr: usize): i32 {
+  arenaRewind();
+  return combSlotKey(slot, outPtr);
 }

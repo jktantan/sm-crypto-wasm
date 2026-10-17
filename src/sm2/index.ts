@@ -69,6 +69,10 @@ interface Sm2Exports extends WebAssembly.Exports {
     kPtr: number,
     outPtr: number,
   ) => number;
+  readonly prepareCombOut: (pubXPtr: number, pubYPtr: number, capacity: number) => number;
+  readonly setCombCapacityOut: (capacity: number) => void;
+  readonly clearComb: () => void;
+  readonly combSlotKeyOut: (slot: number, outPtr: number) => number;
   readonly decryptOut: (privPtr: number, ctPtr: number, ctLen: number, outPtr: number) => number;
   readonly memory: WebAssembly.Memory;
 }
@@ -192,6 +196,16 @@ function derivePublicKeyRaw(d: Uint8Array): Uint8Array {
  *   "派生公钥"这个操作的语义，以及 `bench` 里这一项的可测性。
  */
 const PUB_CACHE = new Map<string, Uint8Array>();
+
+/**
+ * 最后一次 `preparePublicKey` 的公钥（hex，x || y），没有则为 `null`。
+ *
+ * 只用于单数查询接口；多槽的真实状态在 wasm 侧（指纹 + LRU），正确性不依赖它。
+ */
+let PREPARED_PUB: string | null = null;
+
+/** 多槽公钥缓存的槽位上限（1..8，默认 8）。wasm 未加载时先记在这里。 */
+let preparedCapacity = 8;
 
 let cacheEnabled = true;
 let cacheCapacity = 32;
@@ -509,6 +523,109 @@ export function verify(
   } finally {
     exports.freeAll();
   }
+}
+
+/** 多槽公钥缓存的配置。 */
+export interface PreparedKeyCacheOptions {
+  /** 槽位上限，1..8，默认 8。 */
+  capacity?: number;
+}
+
+/**
+ * 配置多槽公钥缓存（默认 8 槽，满了按 LRU 淘汰）。
+ *
+ * 缩小容量不会立即清除高槽位，只是之后的查找与 `getPreparedPublicKeys` 不再考虑它们；
+ * 需要释放时调用 `clearPreparedPublicKeys()`。wasm 未加载时只记录，首次
+ * `preparePublicKey` 会应用。
+ */
+export function configurePreparedKeyCache(opts: PreparedKeyCacheOptions = {}): void {
+  const capacity = opts.capacity ?? 8;
+  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 8) {
+    throw new RangeError(
+      `sm2.configurePreparedKeyCache: capacity 必须是 1..8 的整数，收到 ${String(capacity)}`,
+    );
+  }
+  preparedCapacity = capacity;
+  const mod = (globalThis as { __sm2Wasm?: Sm2Module }).__sm2Wasm;
+  if (mod) mod.exports.setCombCapacityOut(capacity);
+}
+
+/**
+ * 为一对**固定公钥**预计算 comb 表（默认 8 槽，满了 LRU 淘汰）。
+ *
+ * 之后 `encrypt` / `kemEncrypt` / `hybridEncrypt` 对该公钥会把 `k·P` 从 wNAF
+ * （256 次倍点）切到 comb（52 次倍点）：本机端到端约 486 → 260 µs。建表一次性
+ * 约 280 µs，**约 1.2 次加密回本**。
+ *
+ * **只有显式 prepare 才会建表**：`encrypt` 命中就走 comb，不命中直接回退 wNAF，
+ * 绝不隐式建表 —— 否则外部可控的公钥能反复触发建表，形成放大面。
+ *
+ * 公钥是公开信息，缓存它不引入新的密钥材料驻留；8 槽共占 wasm 永久区固定 24 KiB。
+ *
+ * @param publicKey 64/65 字节公钥（hex / Uint8Array / PEM）。
+ * @throws {InvalidPublicKeyError} 公钥不在 SM2 曲线上。
+ */
+export async function preparePublicKey(publicKey: string | Uint8Array): Promise<void> {
+  await ensureLoaded();
+  const { x, y } = splitPub(publicKey);
+  if (!isOnCurve(x, y)) {
+    throw new InvalidPublicKeyError(
+      'sm2.preparePublicKey: public key is not a point on the SM2 curve',
+    );
+  }
+  const hexPub = bytesToHex(x) + bytesToHex(y);
+
+  const { exports } = getModule();
+  const pxp = exports.alloc(32);
+  const pyp = exports.alloc(32);
+  try {
+    putBytes(x, pxp);
+    putBytes(y, pyp);
+    exports.setCombCapacityOut(preparedCapacity);
+    exports.prepareCombOut(pxp, pyp, preparedCapacity);
+    PREPARED_PUB = hexPub;
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/** 清空所有公钥预计算槽，之后的 `encrypt` 全部回退到 wNAF。未加载 wasm 时也安全。 */
+export function clearPreparedPublicKeys(): void {
+  PREPARED_PUB = null;
+  const mod = (globalThis as { __sm2Wasm?: Sm2Module }).__sm2Wasm;
+  if (mod) mod.exports.clearComb();
+}
+
+/** @deprecated 用 `clearPreparedPublicKeys()`（保留单数别名）。 */
+export function clearPreparedPublicKey(): void {
+  clearPreparedPublicKeys();
+}
+
+/**
+ * 当前槽位中的公钥（hex，按槽序）。
+ *
+ * wasm 未加载时返回空数组。
+ */
+export function getPreparedPublicKeys(): string[] {
+  const mod = (globalThis as { __sm2Wasm?: Sm2Module }).__sm2Wasm;
+  if (!mod) return [];
+  const out = mod.exports.alloc(64);
+  const keys: string[] = [];
+  try {
+    for (let s = 0; s < preparedCapacity; s++) {
+      if (mod.exports.combSlotKeyOut(s, out) === 1) {
+        keys.push(bytesToHex(new Uint8Array(mod.memory.buffer, out, 64).slice()));
+      }
+    }
+  } finally {
+    mod.exports.freeAll();
+  }
+  return keys;
+}
+
+/** 最后一次 `preparePublicKey` 的公钥（hex）；没有则为 `null`。 */
+export function getPreparedPublicKey(): string | null {
+  return PREPARED_PUB;
 }
 
 /**

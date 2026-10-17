@@ -102,6 +102,31 @@ function encrypt(
 **返回** 密文 hex：`C1(65B) ‖ C3(32B) ‖ C2`（默认），或按 `outputFormat: 'C1C2C3'`
 换成 `C1 ‖ C2 ‖ C3`。公钥不在曲线上抛 `InvalidPublicKeyError`。
 
+### 公钥预计算 `sm2.preparePublicKey(publicKey)`
+
+```ts
+function preparePublicKey(publicKey: string | Uint8Array): Promise<void>
+function configurePreparedKeyCache(opts?: { capacity?: number }): void
+function clearPreparedPublicKeys(): void
+function getPreparedPublicKeys(): string[]
+```
+
+对**固定公钥反复加密**的场景，先为它构建一张 comb 表：之后 `encrypt`（以及
+`kemEncrypt` / `hybridEncrypt`）的 `k·P` 从 wNAF（256 次倍点）切到 comb（52 次倍点）。
+本机 64 B 加密 **486 → 260 µs**；建表约 280 µs，**约 1.2 次加密回本**。
+
+缓存默认 **8 槽**（`configurePreparedKeyCache({ capacity })` 可调到 1..8），满了按
+**LRU** 淘汰最久未用的公钥；8 把公钥轮换加密的实测与单把命中同档。每槽固定 3 KiB，
+8 槽共占 wasm 永久区 24 KiB，不随公钥数量增长。
+
+**只有显式 `preparePublicKey` 才会建表**：`encrypt` 命中走 comb，不命中直接回退
+wNAF，绝不隐式建表 —— 否则外部可控的公钥能反复触发 280 µs 建表。公钥是公开信息，
+缓存它不引入新的密钥材料驻留。公钥不在曲线上抛 `InvalidPublicKeyError`。
+
+`clearPreparedPublicKey()`（单数）保留为 `clearPreparedPublicKeys()` 的兼容别名；
+`getPreparedPublicKey()` 返回最后一次 prepare 的公钥，`getPreparedPublicKeys()` 返回
+当前所有槽位。
+
 ### 解密 `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts

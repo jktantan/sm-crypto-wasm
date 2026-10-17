@@ -106,6 +106,35 @@ function encrypt(
 **Returns** the ciphertext as hex: `C1(65B) ‖ C3(32B) ‖ C2` by default, or `C1 ‖ C2 ‖ C3` when
 `outputFormat: 'C1C2C3'` is passed. A public key off the curve throws `InvalidPublicKeyError`.
 
+### Prepare a public key `sm2.preparePublicKey(publicKey)`
+
+```ts
+function preparePublicKey(publicKey: string | Uint8Array): Promise<void>
+function configurePreparedKeyCache(opts?: { capacity?: number }): void
+function clearPreparedPublicKeys(): void
+function getPreparedPublicKeys(): string[]
+```
+
+For a **public key encrypted repeatedly**, build a comb table first: `encrypt` (and
+`kemEncrypt` / `hybridEncrypt`) then switches `k·P` from wNAF (256 doublings) to comb
+(52 doublings). 64 B encryption: **486 → 260 µs** on this machine; the table costs
+≈ 280 µs, so it pays off after **≈ 1.2 encryptions**.
+
+The cache has **8 slots by default** (`configurePreparedKeyCache({ capacity })`, 1..8) and
+evicts the least-recently-used key when full; rotating 8 keys measures the same as a
+single hit. Each slot occupies a fixed 3 KiB, so all 8 slots use 24 KiB of wasm permanent
+memory and never grow with the number of keys.
+
+**Only an explicit `preparePublicKey` builds a table**: `encrypt` uses comb on a hit and
+falls back to wNAF on a miss, but never builds implicitly — otherwise an
+externally-controlled key could trigger a 280 µs build repeatedly. Public keys are not
+secret, so caching one keeps no extra key material resident. A key not on the curve throws
+`InvalidPublicKeyError`.
+
+`clearPreparedPublicKey()` (singular) remains as a compatibility alias of
+`clearPreparedPublicKeys()`; `getPreparedPublicKey()` returns the last prepared key, while
+`getPreparedPublicKeys()` returns all current slots.
+
 ### Decrypt `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts

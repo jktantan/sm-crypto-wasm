@@ -209,7 +209,7 @@ zuc.zucMac(key, macIv, '616263');               // → 4 字节标签
 
 | 模块 | 函数 |
 |---|---|
-| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
+| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey`(async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB`/`decryptECB` · `encryptCBC`/`decryptCBC` · `encryptCTR`/`decryptCTR` · `encryptCFB`/`decryptCFB` · `encryptOFB`/`decryptOFB` · `encryptGCM`/`decryptGCM` |
 | `sm9` | `generateKeyPair`(async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
@@ -570,7 +570,7 @@ zuc.zucMac(key, macIv, '616263');               // → 4-byte tag
 
 | Module | Functions |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
@@ -965,7 +965,7 @@ zuc.zucMac(key, macIv, '616263');               // → 4-байтовый тег
 
 | Модуль | Функции |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |

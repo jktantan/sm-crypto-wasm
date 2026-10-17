@@ -107,6 +107,37 @@ function encrypt(
 **Возвращает** шифротекст в hex: `C1(65B) ‖ C3(32B) ‖ C2` по умолчанию, либо `C1 ‖ C2 ‖ C3`
 при `outputFormat: 'C1C2C3'`. Открытый ключ не на кривой бросает `InvalidPublicKeyError`.
 
+### Подготовка открытого ключа `sm2.preparePublicKey(publicKey)`
+
+```ts
+function preparePublicKey(publicKey: string | Uint8Array): Promise<void>
+function configurePreparedKeyCache(opts?: { capacity?: number }): void
+function clearPreparedPublicKeys(): void
+function getPreparedPublicKeys(): string[]
+```
+
+Если один и тот же **открытый ключ используется для многократного шифрования**, сначала
+постройте для него comb-таблицу: тогда `encrypt` (а также `kemEncrypt` / `hybridEncrypt`)
+переключает `k·P` с wNAF (256 удвоений) на comb (52 удвоения). Шифрование 64 B —
+**486 → 260 µs** на этой машине; построение таблицы ≈ 280 µs, окупается после
+**≈ 1.2 шифрований**.
+
+По умолчанию кеш имеет **8 слотов** (`configurePreparedKeyCache({ capacity })`, 1..8) и
+при заполнении вытесняет давно не использовавшийся ключ (LRU); ротация 8 ключей
+показывает те же цифры, что и одно попадание. Каждый слот занимает фиксированные 3 КиБ,
+поэтому все 8 слотов используют 24 КиБ постоянной памяти wasm и не растут с числом
+ключей.
+
+**Таблица строится только явным `preparePublicKey`**: при попадании `encrypt` идёт по
+comb, при промахе откатывается к wNAF, но никогда не строит таблицу неявно — иначе
+внешне контролируемый ключ мог бы многократно вызывать построение за 280 µs. Открытый
+ключ не является секретом, поэтому его кеширование не оставляет дополнительного
+ключевого материала. Ключ не на кривой бросает `InvalidPublicKeyError`.
+
+`clearPreparedPublicKey()` (единственное число) остаётся совместимым псевдонимом
+`clearPreparedPublicKeys()`; `getPreparedPublicKey()` возвращает последний
+подготовленный ключ, а `getPreparedPublicKeys()` — все текущие слоты.
+
 ### Расшифрование `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts

@@ -45,6 +45,16 @@ curve-point codecs plus a host CSPRNG call). Run-to-run variation reaches **±20
 larger than SM3 / SM4 / SM9 / ZUC. The table takes the whole SM2 row from a single run.
 :::
 
+::: tip SM2 with a fixed public key: another 1.9×
+After `await sm2.preparePublicKey(pub)` builds a comb table for that key, `encrypt` switches
+`k·P` from wNAF (256 doublings) to comb (52 doublings): 64 B encryption goes **486 → 260 µs**
+(mitata, this machine). The table costs ≈ 280 µs, so it pays off after **≈ 1.2 encryptions**.
+The cache has **8 slots with LRU** by default; rotating 8 keys measures the same as a single
+hit. Only an explicit prepare builds a table; a miss falls back to wNAF without slowing down.
+`kemEncrypt` / `hybridEncrypt` use the same path. Bench: `encrypt 64B (prepared pk)`,
+`encrypt 64B (8 prepared keys, rotating)`.
+:::
+
 ## Head-to-head with two other GM libraries
 
 The table above benchmarks against the pure-JS `gmkitx`. Swapping in **two other real
@@ -124,10 +134,10 @@ pnpm bench:cubelrti
   be parallelised) with a serial 64-round compression function.
 - **SM4's CFB / OFB used to be slower than pure JS** — they called into wasm block-by-block
   (64 crossings per KB). Batch exports brought them to ~10 µs, i.e. 3.6~3.8× faster.
-- **SM2's compute layer went through eight rounds of work** (Solinas reduction, Comba squaring,
+- **SM2's compute layer went through nine rounds of work** (Solinas reduction, Comba squaring,
   comb/wNAF scalar multiplication, in-place point arithmetic, mixed coordinates, joint scalar
   multiplication for verification, word-level inversion, public-key derivation caching for
-  `sign`). Details in
+  `sign`, and a prepared comb table for a fixed public key). Details in
   [`docs/performance-ceiling.md`](https://github.com/jktantan/sm-crypto-wasm/blob/main/docs/performance-ceiling.md).
 - **SM9 is pairing-dominated.** Moving the base field to a Montgomery domain (CIOS) took one
   modular multiplication from 179 ns to 98 ns and sped up every end-to-end operation by

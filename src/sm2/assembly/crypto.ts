@@ -26,9 +26,11 @@ import {
   addPoints,
   isInfinity,
   JPoint,
+  lookupCombSlot,
   scalarMul,
   scalarMulG,
   scalarMulGAnd,
+  scalarMulPrepared,
   toAffine,
 } from './point';
 
@@ -304,7 +306,8 @@ export function encrypt(
   st(c1.y, outPtr + 33);
 
   // (x2, y2) = k·P。
-  const kp = toAffine(scalarMul(k, pub));
+  const slot = lookupCombSlot(pubXPtr, pubYPtr);
+  const kp = toAffine(slot >= 0 ? scalarMulPrepared(k, slot) : scalarMul(k, pub));
 
   // t = KDF(x2 || y2, msgLen)
   const kdfIn = new StaticArray<u8>(64);

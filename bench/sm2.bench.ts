@@ -9,6 +9,7 @@
  */
 import { bench, group } from 'mitata';
 import {
+  clearPreparedPublicKeys,
   createExchangeInitiator,
   createExchangeResponder,
   decrypt,
@@ -20,6 +21,7 @@ import {
   hybridEncrypt,
   kemDecrypt,
   kemEncrypt,
+  preparePublicKey,
   sign,
   verify,
 } from '../src/sm2/index.js';
@@ -38,6 +40,13 @@ export async function benchSm2(): Promise<void> {
   await ensureSm4Loaded();
   const pub = getPublicKey(D);
   const pub2 = getPublicKey(D2);
+  // 多槽轮换用例：8 把互不相同的合法私钥（第 0 把复用 D2）。
+  const rotatingD = Array.from({ length: 8 }, (_, i) =>
+    i === 0 ? D2 : (BigInt('0x1234567890abcdef') * BigInt(i)).toString(16).padStart(64, '0'),
+  );
+  const rotatingPubs = rotatingD.map((d) => getPublicKey(d));
+  const preparedPub = rotatingPubs[0];
+  if (preparedPub === undefined) throw new Error('bench: empty rotating key list');
   const sig = sign(D, MSG);
   verify(pub, MSG, sig);
   const ct = encrypt(pub, MSG);
@@ -60,6 +69,9 @@ export async function benchSm2(): Promise<void> {
   await kex(); // 预热 + 自检
   await generateKeyPair();
 
+  // 固定公钥预计算：填满 8 个槽（不包含 pub，普通 encrypt 仍走 wNAF 基线）。
+  for (const p of rotatingPubs) await preparePublicKey(p);
+
   group('SM2', () => {
     bench('publicKey derive (point mul)', () => {
       getPublicKey(D);
@@ -75,6 +87,18 @@ export async function benchSm2(): Promise<void> {
     });
     bench('encrypt 64B (C1C3C2)', () => {
       encrypt(pub, MSG);
+    });
+    bench('encrypt 64B (prepared pk)', () => {
+      encrypt(preparedPub, MSG);
+    });
+    let rot = 0;
+    bench('encrypt 64B (8 prepared keys, rotating)', () => {
+      const p = rotatingPubs[rot++ & 7];
+      if (p !== undefined) encrypt(p, MSG);
+    });
+    bench('preparePublicKey (build comb table)', async () => {
+      clearPreparedPublicKeys();
+      await preparePublicKey(preparedPub);
     });
     bench('decrypt 64B (auto)', () => {
       decrypt(D, ct);
