@@ -11,6 +11,7 @@
  * G1 点（64B）—— `generateKeyPair` 用 `purpose` 区分两者。
  */
 import { bench, group } from 'mitata';
+import { ensureLoaded as ensureSm4Loaded } from '../src/sm4/index.js';
 import {
   createExchangeInitiator,
   createExchangeResponder,
@@ -21,6 +22,8 @@ import {
   getEncPublicKey,
   getSignPublicKey,
   getUserPublicKey,
+  hybridDecrypt,
+  hybridEncrypt,
   kemDecrypt,
   kemEncrypt,
   sign,
@@ -36,6 +39,7 @@ const R_B = '0202020202020202020202020202020202020202020202020202020202020202';
 
 export async function benchSm9(): Promise<void> {
   await ensureLoaded();
+  await ensureSm4Loaded();
 
   const id = 'bench@x.io';
   const id2 = 'bench2@x.io';
@@ -50,6 +54,9 @@ export async function benchSm9(): Promise<void> {
   decrypt(kpEnc.masterPrivatePem, id, ct);
   const kem = kemEncrypt(KE, id);
   kemDecrypt(KE, id, kem.encapsulation);
+  const msg10k = new Uint8Array(10 * 1024).fill(0x42);
+  const hybridSealed = hybridEncrypt(kpEnc.masterPublicPem, id, msg10k);
+  hybridDecrypt(kpEnc.masterPrivatePem, id, hybridSealed);
   getSignPublicKey(KS);
   getEncPublicKey(KE);
   getUserPublicKey(getSignPublicKey(KS), id);
@@ -98,6 +105,12 @@ export async function benchSm9(): Promise<void> {
     });
     bench('KEM decapsulate', () => {
       kemDecrypt(KE, id, kem.encapsulation);
+    });
+    bench('hybrid encrypt 10KB', () => {
+      hybridEncrypt(kpEnc.masterPublicPem, id, msg10k);
+    });
+    bench('hybrid decrypt 10KB', () => {
+      hybridDecrypt(kpEnc.masterPrivatePem, id, hybridSealed);
     });
     bench('key exchange (full A↔B)', async () => {
       await kex();

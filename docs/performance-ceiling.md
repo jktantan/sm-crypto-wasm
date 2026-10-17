@@ -208,6 +208,35 @@ decrypt             4.66 → 4.06 ms   (−13%)
 
 正确性：`sig` / `ct` 逐字节一致；SM9 39 个用例与全量 193 个用例全过。
 
+### 已落地（四）：SM2 / SM9 混合加密（KEM + SM4-GCM）
+
+**动机**：公钥加密长数据的成本由消息长度主导（计划阶段实测 SM2 1MB ≈ 29 MB/s、
+SM9 10KB ≈ 2 MB/s），而对称加密快一个数量级。hybrid 把公钥运算固定为一次 KEM，
+消息交给 SM4-GCM。
+
+**实测**（同机 mitata，Node 24，`pnpm bench`；数字为 avg）：
+
+| 用例 | 平均 |
+|---|---:|
+| SM2 KEM 封装（16B key） | 496 µs |
+| SM2 KEM 解封装（16B key） | 328 µs |
+| SM2 hybrid 加密 1MB | 37.25 ms（≈ 27 MB/s） |
+| SM2 hybrid 解密 1MB | 36.39 ms（≈ 27 MB/s） |
+| SM9 KEM 封装（32B key） | 2.85 ms |
+| SM9 KEM 解封装（32B key） | 4.42 ms |
+| SM9 hybrid 加密 10KB | 3.21 ms |
+| SM9 hybrid 解密 10KB | 4.77 ms |
+
+**解读**：
+
+- SM2 hybrid 1MB 的 37 ms 里 KEM 只占约 0.5 ms，其余是 SM4-GCM 与 WASM 内存搬运；
+  与直接 SM2 加密 1MB（计划阶段 ≈ 34 ms）相比，当前 GCM 实现下绝对耗时接近，
+  但**封装段固定 113 字节**、公钥运算不再随消息长度增长，消息越大相对优势越明显。
+- SM9 hybrid 10KB 的 3.21 ms 与一次 KEM 封装 2.85 ms 基本持平，SM4-GCM 的 10KB
+  成本被 pairing 掩盖；封装段固定 65 字节。
+- SM9 解封装比封装慢（4.42 vs 2.85 ms）与既有 KEM 基线一致，由解密侧 pairing 主导。
+- 数据仍整段进出 WASM，常驻内存水位由最大消息决定；流式不在本计划范围内。
+
 ### 剩余空间
 
 只剩百分比级，而且已经逐个量过：

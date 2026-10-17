@@ -110,6 +110,31 @@ sm2.decrypt(privateKeyPem, ct, { safeMode: true });     // 失败返回 null 而
 
 密钥也可以用裸 hex / `Uint8Array` 传入（32 字节私钥、64/65 字节公钥）。
 
+### SM2 —— 密钥封装与混合加密
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+await sm2.ensureLoaded();
+
+// KEM：用公钥保护一把随机会话密钥（16 或 32 字节）。
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);       // === key
+
+// 混合加密：一次调用完成 KEM + SM4-GCM，适合大消息。
+// 返回版本化 sealed：version || klen || encapLen || encapsulation || iv || tag || ct
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);               // → '616263'（明文 hex）
+
+// sealed 也可转成自描述对象，便于调试或与手工组装互操作。
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
+- `hybridEncrypt` 每次调用都新生成 16 字节 DEK 与 12 字节 IV；消息字符串按 **hex** 解释（空消息传 `new Uint8Array(0)`）。
+- `hybridDecrypt` 支持 `{ safeMode: true }`，密文支失败返回 `null`。
+- SM2 没有国标定义的独立 KEM；`kemEncrypt` 是“用 SM2 公钥加密随机密钥”的约定做法。
+
 ### SM2 —— 密钥交换协议（GM/T 0003.3）
 
 ```ts
@@ -153,6 +178,10 @@ sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);      // → '616263'
 // 注意第一参数是**加密主私钥**（KEM 需要它派生 Ppub-e，与 encrypt 可传主公钥不同）。
 const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // === key
+
+// 混合加密：主公钥（或主私钥）+ id 封装 16 字节 DEK，再用 SM4-GCM 加密消息。
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
 
 ### ZUC —— EEA3 机密性 + EIA3 完整性
@@ -179,10 +208,10 @@ zuc.zucMac(key, macIv, '616263');               // → 4 字节标签
 
 | 模块 | 函数 |
 |---|---|
-| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
+| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB`/`decryptECB` · `encryptCBC`/`decryptCBC` · `encryptCTR`/`decryptCTR` · `encryptCFB`/`decryptCFB` · `encryptOFB`/`decryptOFB` · `encryptGCM`/`decryptGCM` |
-| `sm9` | `generateKeyPair`(async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
+| `sm9` | `generateKeyPair`(async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
 | `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
 
 文档名别名（与主名指向同一实现）：`sm4.encryptCTR`/`decryptCTR` 等价 `cryptCTR`、`encryptOFB`/`decryptOFB` 等价 `cryptOFB`；`zuc.encrypt`/`decrypt`/`generateKeystream`/`mac`/`eia3` 等价 `zucEncrypt`/`zucDecrypt`/`zucKeystream`/`zucMac`。
@@ -434,6 +463,31 @@ sm2.decrypt(privateKeyPem, ct, { safeMode: true });     // returns null instead 
 Keys may also be passed as raw hex / `Uint8Array` (32-byte private key, 64- or
 65-byte public key).
 
+### SM2 — key encapsulation & hybrid encryption
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+await sm2.ensureLoaded();
+
+// KEM: protect a random symmetric key with the public key (16 or 32 bytes).
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);       // === key
+
+// Hybrid encryption: one call performs KEM + SM4-GCM; suited to large messages.
+// Returns a versioned sealed value: version || klen || encapLen || encapsulation || iv || tag || ct
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);               // → '616263' (plaintext hex)
+
+// The sealed value can also be inspected as a self-describing object.
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
+- Every `hybridEncrypt` call generates a fresh 16-byte DEK and 12-byte IV; message strings are interpreted as **hex** (pass `new Uint8Array(0)` for an empty message).
+- `hybridDecrypt` supports `{ safeMode: true }`, returning `null` for ciphertext-side failures.
+- SM2 has no standardized KEM construction; `kemEncrypt` is the conventional "encrypt a random key with SM2" idiom.
+
 ### SM2 — key exchange (GM/T 0003.3)
 
 ```ts
@@ -479,6 +533,11 @@ sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);      // → '616263'
 // derive Ppub-e; encrypt() above can take a master public key instead).
 const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // === key
+
+// Hybrid encryption: encapsulate a 16-byte DEK with the master public (or private) key + id,
+// then encrypt the message with SM4-GCM.
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
 
 ### ZUC — EEA3 confidentiality + EIA3 integrity
@@ -505,10 +564,10 @@ zuc.zucMac(key, macIv, '616263');               // → 4-byte tag
 
 | Module | Functions |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
-| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
 
 Documented aliases (they point to the same implementation):
@@ -794,6 +853,31 @@ sm2.decrypt(privateKeyPem, ct, { safeMode: true });     // при ошибке �
 Ключи также можно передавать как «сырой» hex или `Uint8Array` (32 байта для
 закрытого ключа, 64 или 65 байт для открытого).
 
+### SM2 — инкапсуляция ключа и гибридное шифрование
+
+```ts
+import { sm2 } from 'sm-crypto-wasm';
+
+await sm2.ensureLoaded();
+
+// KEM: защитить случайный симметричный ключ открытым ключом (16 или 32 байта).
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);       // === key
+
+// Гибридное шифрование: один вызов выполняет KEM + SM4-GCM; подходит для больших сообщений.
+// Возвращает версионированный sealed: version || klen || encapLen || encapsulation || iv || tag || ct
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);               // → '616263' (открытый текст в hex)
+
+// sealed можно представить в виде самоописывающего объекта.
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
+- Каждый вызов `hybridEncrypt` создаёт новые 16-байтовый DEK и 12-байтовый IV; строки сообщений интерпретируются как **hex** (для пустого сообщения передайте `new Uint8Array(0)`).
+- `hybridDecrypt` поддерживает `{ safeMode: true }` и возвращает `null` при ошибках, связанных с шифртекстом.
+- В SM2 нет стандартизованной конструкции KEM; `kemEncrypt` — общепринятый приём «зашифровать случайный ключ открытым ключом SM2».
+
 ### SM2 — протокол обмена ключами (GM/T 0003.3)
 
 ```ts
@@ -839,6 +923,11 @@ sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);      // → '616263'
 // (KEM нуждается в нём, чтобы вывести Ppub-e; для encrypt выше допустим мастер-публичный ключ).
 const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // === key
+
+// Гибридное шифрование: инкапсулировать 16-байтовый DEK мастер-публичным (или приватным)
+// ключом и id, затем зашифровать сообщение через SM4-GCM.
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
 
 ### ZUC — конфиденциальность EEA3 и целостность EIA3
@@ -865,10 +954,10 @@ zuc.zucMac(key, macIv, '616263');               // → 4-байтовый тег
 
 | Модуль | Функции |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
-| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
 
 Документированные алиасы (указывают на ту же реализацию):

@@ -7,6 +7,8 @@
  * - `verify(publicKey, message, signature)`：验签
  * - `encrypt(publicKey, message, options?)`：加密（默认 C1C3C2）
  * - `decrypt(privateKey, ciphertext)`：解密
+ * - `kemEncrypt` / `kemDecrypt`：KEM（用公钥保护随机对称密钥，见 `./kem.ts`）
+ * - `hybridEncrypt` / `hybridDecrypt`：KEM + SM4-GCM 混合加密（见 `./hybrid.ts`）
  *
  * 说明：
  * - 密钥输入同时接受裸字节（hex）与 PEM（PKCS#8/SEC1 私钥、SPKI 公钥）。
@@ -642,3 +644,6 @@ function decryptRaw(d: Uint8Array, ct: Uint8Array): string {
 // SM2 密钥交换协议（GM/T 0003.3-2014）：createExchangeInitiator /
 // createExchangeResponder 由 `./exchange` 提供，在此并入 sm2 命名空间。
 export * from './exchange.js';
+// SM2 KEM（用公钥保护随机对称密钥）与混合加密（KEM + SM4-GCM）。
+export * from './hybrid.js';
+export * from './kem.js';

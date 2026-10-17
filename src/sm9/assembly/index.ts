@@ -450,6 +450,25 @@ export function sm9KemEncryptOut(
   return sm9KemEncrypt(ppube, idPtr, idLen, readU256(rPtr), klen, c1Ptr, kPtr);
 }
 
+/**
+ * 用加密主公钥（G1 仿射 64B）做 KEM 封装。
+ *
+ * 发送方通常只有主公钥，不应持有 KGC 的加密主私钥；此入口与
+ * `sm9EncryptPubOut` 对齐。返回 1 成功；0 需换 r 重试。
+ */
+export function sm9KemEncryptPubOut(
+  pubPtr: usize,
+  idPtr: usize,
+  idLen: i32,
+  rPtr: usize,
+  klen: i32,
+  c1Ptr: usize,
+  kPtr: usize,
+): i32 {
+  arenaRewind();
+  return sm9KemEncrypt(readG1Affine(pubPtr), idPtr, idLen, readU256(rPtr), klen, c1Ptr, kPtr);
+}
+
 /** SM9 KEM 解封装：输入 C1(65B)，输出 K(klen)。返回 1 成功。 */
 export function sm9KemDecryptOut(
   kePtr: usize,

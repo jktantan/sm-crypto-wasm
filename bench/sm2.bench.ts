@@ -16,9 +16,14 @@ import {
   ensureLoaded,
   generateKeyPair,
   getPublicKey,
+  hybridDecrypt,
+  hybridEncrypt,
+  kemDecrypt,
+  kemEncrypt,
   sign,
   verify,
 } from '../src/sm2/index.js';
+import { ensureLoaded as ensureSm4Loaded } from '../src/sm4/index.js';
 
 const D = '3945208f7b2144b13f36e38ac6d39f95889393692860b51a42fb81ef4df7c5b8';
 /** 对端私钥（仅用于基准的密钥交换，合法标量：< n）。 */
@@ -30,12 +35,18 @@ const MSG = new Uint8Array(64).fill(0x5a);
 
 export async function benchSm2(): Promise<void> {
   await ensureLoaded();
+  await ensureSm4Loaded();
   const pub = getPublicKey(D);
   const pub2 = getPublicKey(D2);
   const sig = sign(D, MSG);
   verify(pub, MSG, sig);
   const ct = encrypt(pub, MSG);
   decrypt(D, ct);
+  const kem = kemEncrypt(pub, 16);
+  kemDecrypt(D, kem.encapsulation, 16);
+  const big = new Uint8Array(1024 * 1024).fill(0x5a);
+  const hybridSealed = hybridEncrypt(pub, big);
+  hybridDecrypt(D, hybridSealed);
 
   const kex = async (): Promise<void> => {
     const a = await createExchangeInitiator(D, pub2, { ephemeralPrivateKey: RA });
@@ -67,6 +78,18 @@ export async function benchSm2(): Promise<void> {
     });
     bench('decrypt 64B (auto)', () => {
       decrypt(D, ct);
+    });
+    bench('KEM encapsulate (16B key)', () => {
+      kemEncrypt(pub, 16);
+    });
+    bench('KEM decapsulate (16B key)', () => {
+      kemDecrypt(D, kem.encapsulation, 16);
+    });
+    bench('hybrid encrypt 1MB', () => {
+      hybridEncrypt(pub, big);
+    });
+    bench('hybrid decrypt 1MB', () => {
+      hybridDecrypt(D, hybridSealed);
     });
     bench('key exchange (full A↔B)', async () => {
       await kex();

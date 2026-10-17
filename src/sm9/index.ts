@@ -9,6 +9,8 @@
  * - `verify(ks, id, msg, sig)`：SM9 验签，通过返回 true
  * - `encrypt(ke, id, msg, r?)`：SM9 加密，输出 C1||C3||C2 hex（C1=65B, C3=32B, C2=|msg|）
  * - `decrypt(ke, id, ct)`：SM9 解密，输出明文 hex；C3 HMAC 校验失败抛错
+ * - `kemEncrypt` / `kemDecrypt`：KEM（GM/T 0044.4，见 `./kem.ts`）
+ * - `hybridEncrypt` / `hybridDecrypt`：KEM + SM4-GCM 混合加密（见 `./hybrid.ts`）
  *
  * 输入/输出 hex 全部不带 0x 前缀。
  * r 不传时由宿主 CSPRNG 提供（Node: crypto.randomBytes / 浏览器: crypto.getRandomValues）。
@@ -23,321 +25,23 @@
  * spec/plan 对应：plan Task 10；spec §6 API、§12.1 Q2（同步优先）、Q3（PKCS#8 + SM9 OID）。
  */
 
-import {
-  encodeSm9PrivateKeyPem,
-  encodeSm9PublicKeyPem,
-  parseSm9PrivateKeyPem,
-  parseSm9PublicKeyPem,
-} from '../pem/sm9.js';
+import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem } from '../pem/sm9.js';
 import { bytesToHex, hexToBytes } from '../runtime/convert.js';
+import { CiphertextError, DecryptionError, InvalidCiphertextError } from '../runtime/errors.js';
+import { ensureLoaded, getModule, mem } from './core.js';
 import {
-  CiphertextError,
-  DecryptionError,
-  InvalidCiphertextError,
-  InvalidKeyError,
-} from '../runtime/errors.js';
-import { loadWasm } from '../runtime/loadWasm.js';
-import { randomScalarBelow } from '../runtime/random.js';
+  keyArg,
+  masterPrivateBytes,
+  masterPublicBytes,
+  putBytes,
+  putHex,
+  randomRHex,
+  readHex,
+  requireLen,
+  toBytes,
+} from './input.js';
 
-/** SM9 曲线阶 n。 */
-const N = BigInt('0xb640000002a3a6f1d603ab4ff58ec74449f2934b18ea8beee56ee19cd69ecf25');
-
-/** WASM 导出的最小子集。诊断入口的子集。 */
-interface Sm9Exports extends WebAssembly.Exports {
-  readonly alloc: (n: number) => number;
-  readonly freeAll: () => void;
-  readonly signPubOut: (ksPtr: number, outPtr: number) => void;
-  readonly encPubOut: (kePtr: number, outPtr: number) => void;
-  readonly signDsOut: (ksPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
-  readonly encDeOut: (kePtr: number, idPtr: number, idLen: number, outPtr: number) => void;
-  readonly sm9VerifyPubOut: (
-    pubPtr: number,
-    idPtr: number,
-    idLen: number,
-    msgPtr: number,
-    msgLen: number,
-    sigPtr: number,
-  ) => number;
-  readonly sm9EncryptPubOut: (
-    pubPtr: number,
-    idPtr: number,
-    idLen: number,
-    msgPtr: number,
-    msgLen: number,
-    rPtr: number,
-    outPtr: number,
-    outCap: number,
-  ) => number;
-  readonly sm9UserEncPubOut: (pubPtr: number, idPtr: number, idLen: number, outPtr: number) => void;
-  readonly sm9UserSignPubOut: (
-    pubPtr: number,
-    idPtr: number,
-    idLen: number,
-    outPtr: number,
-  ) => void;
-  readonly sm9SignOut: (
-    ksPtr: number,
-    idPtr: number,
-    idLen: number,
-    msgPtr: number,
-    msgLen: number,
-    rPtr: number,
-    outPtr: number,
-  ) => void;
-  readonly sm9VerifyOut: (
-    ksPtr: number,
-    idPtr: number,
-    idLen: number,
-    msgPtr: number,
-    msgLen: number,
-    sigPtr: number,
-  ) => number;
-  readonly sm9EncryptOut: (
-    kePtr: number,
-    idPtr: number,
-    idLen: number,
-    msgPtr: number,
-    msgLen: number,
-    rPtr: number,
-    outPtr: number,
-    outCap: number,
-  ) => number;
-  readonly sm9DecryptOut: (
-    kePtr: number,
-    idPtr: number,
-    idLen: number,
-    ctPtr: number,
-    ctLen: number,
-    outPtr: number,
-  ) => number;
-  readonly sm9KemEncryptOut: (
-    kePtr: number,
-    idPtr: number,
-    idLen: number,
-    rPtr: number,
-    klen: number,
-    c1Ptr: number,
-    kPtr: number,
-  ) => number;
-  readonly sm9KemDecryptOut: (
-    kePtr: number,
-    idPtr: number,
-    idLen: number,
-    c1Ptr: number,
-    klen: number,
-    kPtr: number,
-  ) => number;
-  readonly sm9ExchEphemeralOut: (
-    kePtr: number,
-    peerIdPtr: number,
-    peerIdLen: number,
-    rPtr: number,
-    outPtr: number,
-  ) => void;
-  readonly sm9ExchKeyOut: (
-    kePtr: number,
-    isInitiator: number,
-    selfIdPtr: number,
-    selfIdLen: number,
-    peerIdPtr: number,
-    peerIdLen: number,
-    rPtr: number,
-    selfRPtr: number,
-    peerRPtr: number,
-    klen: number,
-    outPtr: number,
-  ) => number;
-  readonly sm9ExchConfirmOut: (
-    kePtr: number,
-    isInitiator: number,
-    selfIdPtr: number,
-    selfIdLen: number,
-    peerIdPtr: number,
-    peerIdLen: number,
-    rPtr: number,
-    selfRPtr: number,
-    peerRPtr: number,
-    prefix: number,
-    outPtr: number,
-  ) => void;
-  readonly sm9ExchAllOut: (
-    kePtr: number,
-    isInitiator: number,
-    selfIdPtr: number,
-    selfIdLen: number,
-    peerIdPtr: number,
-    peerIdLen: number,
-    rPtr: number,
-    selfRPtr: number,
-    peerRPtr: number,
-    klen: number,
-    saPtr: number,
-    sbPtr: number,
-    kPtr: number,
-  ) => number;
-  /** 诊断：cyclotomic 平方自测（随机子群元素上 cyc 平方 vs 通用平方）。1=一致。 */
-  readonly sqrCycSelfTestOut: (seed: number) => number;
-  readonly memory: WebAssembly.Memory;
-}
-
-interface Sm9Module {
-  exports: Sm9Exports;
-  memory: WebAssembly.Memory;
-}
-
-/** 预热 WASM 模块。 */
-export async function ensureLoaded(): Promise<void> {
-  if ((globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm) return;
-  const mod = await loadWasm('sm9');
-  (globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm = {
-    exports: mod.exports as unknown as Sm9Exports,
-    memory: mod.memory,
-  };
-}
-
-function getModule(): Sm9Module {
-  const m = (globalThis as { __sm9Wasm?: Sm9Module }).__sm9Wasm;
-  if (!m) throw new Error('sm9: 未初始化，请先 `await ensureLoaded()`。');
-  return m;
-}
-
-// ---------------- 工具 ----------------
-
-/** 任意输入 → Uint8Array。
- *  - Uint8Array: 拷一份
- *  - string 且看起来是 hex（偶数长度 + 全部 0-9a-fA-F）：按 hex 解
- *  - 其他 string：按 UTF-8 编码（用于 id、msg 等人类可读输入）
- * 失败抛 TypeError。 */
-/**
- * 通用输入归一化：Uint8Array 拷贝、hex 解码、其它按 UTF-8。
- *
- * **刻意不做 PEM 嗅探** —— PEM 只可能出现在密钥参数上，由 `masterPrivateBytes`
- * 显式处理；这样 id / msg 里出现 `-----BEGIN` 也不会被误吞。
- */
-function toBytes(input: string | Uint8Array, label: string): Uint8Array {
-  if (input instanceof Uint8Array) return new Uint8Array(input);
-  if (typeof input !== 'string') throw new TypeError(`sm9: ${label} 必须是字符串或 Uint8Array`);
-  if (input.startsWith('0x') || /^[0-9a-fA-F]+$/.test(input)) {
-    const s = input.startsWith('0x') ? input.slice(2) : input;
-    if (s.length % 2 !== 0) throw new TypeError(`sm9: ${label} hex 长度必须为偶数`);
-    return hexToBytes(s, label);
-  }
-  return new TextEncoder().encode(input);
-}
-
-/**
- * 主私钥参数归一化：接受 32 字节（hex / Uint8Array）或 PKCS#8 私钥 PEM
- * （spec §12.1 Q3，算法 OID `1.2.156.10197.1.100`）。
- */
-function masterPrivateBytes(input: string | Uint8Array, label: string): Uint8Array {
-  let bytes: Uint8Array;
-  if (typeof input === 'string' && input.includes('-----BEGIN')) {
-    const parsed = parseSm9PrivateKeyPem(input);
-    if (parsed.length !== 32) {
-      throw new InvalidKeyError(`sm9: ${label} 作为 PEM 主私钥应为 32 字节，实际 ${parsed.length}`);
-    }
-    bytes = parsed;
-  } else {
-    const b = toBytes(input, label);
-    if (b.length !== 32) {
-      throw new InvalidKeyError(`sm9: ${label} 必须是 32 字节主私钥，实际 ${b.length}`);
-    }
-    bytes = b;
-  }
-  // 标量范围：SM9（GM/T 0044）要求 1 ≤ k ≤ n−1。
-  // 越界值不会崩，但 wasm 侧的 addModN → modAdd 只做一次条件减、要求输入已
-  // 约化（h1 + k < 2n），k ≥ n 时 k + h1 可能 ≥ 2n 而静默产出错值，故在此显式拒绝。
-  const k = BigInt(`0x${bytesToHex(bytes)}`);
-  if (k < 1n || k >= N) {
-    throw new InvalidKeyError(`sm9: ${label} 必须在 [1, n−1] 范围内（SM9 主私钥标量）`);
-  }
-  return bytes;
-}
-
-/** 主公钥参数归一化：64（加密 G1）或 128（签名 G2）字节点，或 SPKI 主公钥 PEM。 */
-function masterPublicBytes(input: string | Uint8Array, label: string): Uint8Array {
-  if (typeof input === 'string' && input.includes('-----BEGIN')) {
-    const pub = parseSm9PublicKeyPem(input);
-    if (pub.length !== 64 && pub.length !== 128) {
-      throw new InvalidKeyError(
-        `sm9: ${label} 作为 PEM 主公钥必须是 64 或 128 字节，实际 ${pub.length}`,
-      );
-    }
-    return pub;
-  }
-  const b = toBytes(input, label);
-  if (b.length !== 64 && b.length !== 128) {
-    throw new InvalidKeyError(
-      `sm9: ${label} 必须是 64（加密）或 128（签名）字节主公钥，实际 ${b.length}`,
-    );
-  }
-  return b;
-}
-
-/** `verify` / `encrypt` 第一参数的解析结果。 */
-type KeyArg = { kind: 'secret'; bytes: Uint8Array } | { kind: 'public'; bytes: Uint8Array };
-
-/**
- * 解析 `verify` / `encrypt` 的密钥参数：主私钥（32 字节 / PKCS#8 私钥 PEM）
- * 或主公钥（`publicLen` 字节点 / SPKI 公钥 PEM）。
- *
- * 两者的长度区间不重叠（主私钥恒为 32 字节），因此按长度即可判别。
- */
-function keyArg(input: string | Uint8Array, publicLen: 64 | 128, label: string): KeyArg {
-  if (typeof input === 'string' && input.includes('-----BEGIN')) {
-    if (input.includes('BEGIN PUBLIC KEY')) {
-      const pub = parseSm9PublicKeyPem(input);
-      if (pub.length !== publicLen) {
-        throw new InvalidKeyError(
-          `sm9: ${label} 作为 PEM 主公钥应为 ${publicLen} 字节，实际 ${pub.length}`,
-        );
-      }
-      return { kind: 'public', bytes: pub };
-    }
-    return { kind: 'secret', bytes: masterPrivateBytes(input, label) };
-  }
-  const b = toBytes(input, label);
-  if (b.length === 32) return { kind: 'secret', bytes: b };
-  if (b.length === publicLen) return { kind: 'public', bytes: b };
-  throw new InvalidKeyError(
-    `sm9: ${label} 必须是 32 字节主私钥或 ${publicLen} 字节主公钥，实际 ${b.length}`,
-  );
-}
-
-/**
- * 校验字节长度。默认按**密钥支**（`InvalidKeyError`）抛错 —— SM9 各入口的参数绝大多数
- * 是主私钥 / 标量；密文、签名、协议消息的调用点显式传 `'cipher'`。
- */
-function requireLen(b: Uint8Array, n: number, label: string, kind: 'key' | 'cipher' = 'key'): void {
-  if (b.length === n) return;
-  const msg = `sm9: ${label} 必须是 ${n} 字节，实际 ${b.length}`;
-  if (kind === 'cipher') throw new InvalidCiphertextError(msg);
-  throw new InvalidKeyError(msg);
-}
-
-function mem(): Uint8Array {
-  return new Uint8Array(getModule().memory.buffer);
-}
-
-function _allocBytes(n: number): number {
-  return getModule().exports.alloc(n);
-}
-
-function putHex(hex: string, ptr: number): void {
-  mem().set(hexToBytes(hex), ptr);
-}
-
-function putBytes(b: Uint8Array, ptr: number): void {
-  mem().set(b, ptr);
-}
-
-function readHex(ptr: number, len: number): string {
-  return bytesToHex(mem().subarray(ptr, ptr + len));
-}
-
-function randomRHex(): string {
-  return randomScalarBelow(N).toString(16).padStart(64, '0');
-}
+export { ensureLoaded };
 
 // ---------------- API ----------------
 
@@ -704,90 +408,8 @@ function decryptUnsafe(
   }
 }
 
-// ---------------- KEM（密钥封装机制，GM/T 0044.4） ----------------
-
-/** KEM 封装结果。 */
-export interface KemResult {
-  /** 会话密钥 K（hex，长度为 `2*klen`）。 */
-  key: string;
-  /** 封装点 C1（65 字节未压缩 G1 点 hex：`04 || x || y`）。 */
-  encapsulation: string;
-}
-
-/**
- * SM9 密钥封装（GM/T 0044.4）：用接收方 id 与其加密主公钥 [ke]P1 封装一个会话密钥。
- *
- * @param ke   32 字节加密主私钥 hex（用于派生主公钥 [ke]P1）
- * @param id   接收方标识
- * @param klen 会话密钥字节长度（默认 32）
- * @param r    32 字节随机数 hex（可选；不传则由宿主 CSPRNG 提供）
- * @returns    `{ key, encapsulation }`
- */
-export function kemEncrypt(
-  ke: string | Uint8Array,
-  id: string | Uint8Array,
-  klen = 32,
-  r?: string | Uint8Array,
-): KemResult {
-  const keB = masterPrivateBytes(ke, 'ke');
-  const idB = toBytes(id, 'id');
-  const rB = r !== undefined ? toBytes(r, 'r') : toBytes(randomRHex(), 'r');
-  requireLen(rB, 32, 'r');
-  if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
-
-  const { exports } = getModule();
-  const keP = exports.alloc(32);
-  const idP = exports.alloc(idB.length);
-  const rP = exports.alloc(32);
-  const c1P = exports.alloc(65);
-  const kP = exports.alloc(klen);
-  try {
-    putBytes(keB, keP);
-    putBytes(idB, idP);
-    putBytes(rB, rP);
-    const rc = exports.sm9KemEncryptOut(keP, idP, idB.length, rP, klen, c1P, kP);
-    if (rc !== 1) throw new Error('sm9: kemEncrypt 失败（K 全 0，需换随机数重试）');
-    return { key: readHex(kP, klen), encapsulation: readHex(c1P, 65) };
-  } finally {
-    exports.freeAll();
-  }
-}
-
-/**
- * SM9 密钥解封装：用本端加密主私钥 ke 与 id 从封装点 C1 恢复会话密钥。
- *
- * @param encapsulation 65 字节封装点 C1 hex
- * @returns 会话密钥 hex
- */
-export function kemDecrypt(
-  ke: string | Uint8Array,
-  id: string | Uint8Array,
-  encapsulation: string | Uint8Array,
-  klen = 32,
-): string {
-  const keB = masterPrivateBytes(ke, 'ke');
-  const idB = toBytes(id, 'id');
-  const c1B = toBytes(encapsulation, 'encapsulation');
-  if (c1B.length !== 65)
-    throw new RangeError(`sm9: encapsulation 必须是 65 字节，实际 ${c1B.length}`);
-  if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
-
-  const { exports } = getModule();
-  const keP = exports.alloc(32);
-  const idP = exports.alloc(idB.length);
-  const c1P = exports.alloc(65);
-  const kP = exports.alloc(klen);
-  try {
-    putBytes(keB, keP);
-    putBytes(idB, idP);
-    putBytes(c1B, c1P);
-    const rc = exports.sm9KemDecryptOut(keP, idP, idB.length, c1P, klen, kP);
-    if (rc !== 1) throw new DecryptionError('sm9: kemDecrypt 失败（封装非法 / K 全 0）');
-    return readHex(kP, klen);
-  } finally {
-    exports.freeAll();
-  }
-}
+// KEM 实现拆到 ./kem.ts，供 hybrid.ts 复用且避免循环依赖。
+export { type KemResult, kemDecrypt, kemEncrypt } from './kem.js';
 
 // ---------------- 密钥交换（GM/T 0044.3） ----------------
 
@@ -1028,3 +650,6 @@ export async function createExchangeResponder(
     },
   };
 }
+
+// SM9 混合加密（KEM + SM4-GCM）。
+export * from './hybrid.js';
