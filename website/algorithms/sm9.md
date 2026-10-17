@@ -28,7 +28,7 @@ await sm9.ensureLoaded();
 
 ## API
 
-### `sm9.generateKeyPair(opts)`
+### 生成主密钥对 `sm9.generateKeyPair(opts)`
 
 ```ts
 function generateKeyPair(opts: {

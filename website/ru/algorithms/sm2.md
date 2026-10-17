@@ -41,7 +41,7 @@ await sm2.ensureLoaded();   // асинхронна только generateKeyPair
 
 ## API
 
-### `sm2.generateKeyPair()`
+### Генерация пары ключей `sm2.generateKeyPair()`
 
 ```ts
 function generateKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: string }>
@@ -51,7 +51,7 @@ function generateKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: strin
 **приватный ключ в PEM (PKCS#8)** и **открытый ключ в PEM (SPKI)**, которые читают
 OpenSSL / GmSSL.
 
-### `sm2.getPublicKey(privateKey)`
+### Вывод открытого ключа `sm2.getPublicKey(privateKey)`
 
 ```ts
 function getPublicKey(privateKey: string | Uint8Array): string
@@ -60,7 +60,7 @@ function getPublicKey(privateKey: string | Uint8Array): string
 Выводит открытый ключ из приватного. **Возвращает** 128 hex-символов (64 байта `x‖y`).
 Метод **всегда пересчитывает** (без кеша), сохраняя смысл операции «вывести открытый ключ».
 
-### `sm2.sign(privateKey, message, opts?)`
+### Подпись `sm2.sign(privateKey, message, opts?)`
 
 ```ts
 function sign(
@@ -80,7 +80,7 @@ function sign(
 из CSPRNG хоста; ничтожная вероятность нулевых `r` или `s` вызывает повторный выбор
 (до 16 попыток).
 
-### `sm2.verify(publicKey, message, signature)`
+### Проверка подписи `sm2.verify(publicKey, message, signature)`
 
 ```ts
 function verify(
@@ -94,7 +94,7 @@ function verify(
 «плохой открытый ключ» не путается с «неверной подписью» через два разных пути исключений.
 Подпись длиной не 64 байта бросает `InvalidCiphertextError`.
 
-### `sm2.encrypt(publicKey, message, opts?)`
+### Шифрование `sm2.encrypt(publicKey, message, opts?)`
 
 ```ts
 function encrypt(
@@ -107,7 +107,7 @@ function encrypt(
 **Возвращает** шифротекст в hex: `C1(65B) ‖ C3(32B) ‖ C2` по умолчанию, либо `C1 ‖ C2 ‖ C3`
 при `outputFormat: 'C1C2C3'`. Открытый ключ не на кривой бросает `InvalidPublicKeyError`.
 
-### `sm2.decrypt(privateKey, ciphertext, opts?)`
+### Расшифрование `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts
 function decrypt(
@@ -125,7 +125,7 @@ function decrypt(
 `safeMode` глушит только ошибки **со стороны шифротекста**; ошибки типов аргументов
 (`TypeError` / `RangeError`) всё равно бросаются.
 
-### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+### Инкапсуляция ключа `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
 
 ```ts
 function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
@@ -144,7 +144,7 @@ function kemDecrypt(
 проверкой C3; неверный приватный ключ или подмена данных бросает `DecryptionError`.
 При `safeMode: true` возвращается `null`.
 
-### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+### Гибридное шифрование `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
 
 ```ts
 function hybridEncrypt(
@@ -174,7 +174,7 @@ function hybridDecrypt(
 - При `safeMode: true` ошибки со стороны шифротекста возвращают `null`.
 - Гибридному режиму нужны и `sm2.wasm`, и `sm4.wasm`: перед первым вызовом выполните `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`.
 
-### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+### Преобразование sealed в объект `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
 
 ```ts
 function sealedToObject(sealed: string | Uint8Array): {
@@ -186,7 +186,7 @@ function sealedFromObject(obj: SealedObject): string
 Преобразует `sealed` между hex-строкой и самоописывающим объектом — удобно для отладки
 или для совместимости с ручной сборкой `kemEncrypt` + `sm4.encryptGCM`.
 
-### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
+### Кеш открытого ключа `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
 function configurePublicKeyCache(opts: { enabled?: boolean; capacity?: number }): void
@@ -202,7 +202,7 @@ function clearPublicKeyCache(): void
 процесса. Если ваша модель угроз это запрещает, отключите его через
 `configurePublicKeyCache({ enabled: false })` — вернётесь к пересчёту каждый раз.
 
-### `sm2.createSignaturePointPool(n)`
+### Пул точек подписи `sm2.createSignaturePointPool(n)`
 
 ```ts
 class SignaturePoint {

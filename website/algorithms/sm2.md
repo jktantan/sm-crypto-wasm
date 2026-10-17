@@ -39,7 +39,7 @@ SM2 的密钥参数同时接受三种形态，按需选一种即可：
 
 ## API
 
-### `sm2.generateKeyPair()`
+### 生成密钥对 `sm2.generateKeyPair()`
 
 ```ts
 function generateKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: string }>
@@ -48,7 +48,7 @@ function generateKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: strin
 异步：含 wasm 实例化 + 宿主 CSPRNG 取私钥 `d`。返回 **PKCS#8 私钥 PEM** 与 **SPKI 公钥 PEM**，
 可直接被 OpenSSL / GmSSL 读取。
 
-### `sm2.getPublicKey(privateKey)`
+### 派生公钥 `sm2.getPublicKey(privateKey)`
 
 ```ts
 function getPublicKey(privateKey: string | Uint8Array): string
@@ -57,7 +57,7 @@ function getPublicKey(privateKey: string | Uint8Array): string
 从私钥派生公钥。**返回** 128 字符 hex（64 字节 `x‖y`）。
 这个方法**每次真算**（不做缓存），保持"派生公钥"这个操作的语义。
 
-### `sm2.sign(privateKey, message, opts?)`
+### 签名 `sm2.sign(privateKey, message, opts?)`
 
 ```ts
 function sign(
@@ -76,7 +76,7 @@ function sign(
 **返回** 64 字节签名的 hex（`r‖s`，128 字符）。内部随机 `k` 走宿主 CSPRNG，
 `r`/`s` 为 0 的极小概率会重抽（最多 16 次）。
 
-### `sm2.verify(publicKey, message, signature)`
+### 验签 `sm2.verify(publicKey, message, signature)`
 
 ```ts
 function verify(
@@ -89,7 +89,7 @@ function verify(
 **公钥不在曲线上时直接返回 `false`**（不抛错）—— 这样"公钥非法"不会与"签名不对"混淆成
 两种异常路径。签名长度不是 64 字节则抛 `InvalidCiphertextError`。
 
-### `sm2.encrypt(publicKey, message, opts?)`
+### 加密 `sm2.encrypt(publicKey, message, opts?)`
 
 ```ts
 function encrypt(
@@ -102,7 +102,7 @@ function encrypt(
 **返回** 密文 hex：`C1(65B) ‖ C3(32B) ‖ C2`（默认），或按 `outputFormat: 'C1C2C3'`
 换成 `C1 ‖ C2 ‖ C3`。公钥不在曲线上抛 `InvalidPublicKeyError`。
 
-### `sm2.decrypt(privateKey, ciphertext, opts?)`
+### 解密 `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts
 function decrypt(
@@ -119,7 +119,7 @@ function decrypt(
 
 `safeMode` 只吞"密文支"失败；参数类型错误（`TypeError` / `RangeError`）仍然抛出。
 
-### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+### 密钥封装 `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
 
 ```ts
 function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
@@ -136,7 +136,7 @@ function kemDecrypt(
 `encapsulation` 是完整的 SM2 密文（C1C3C2，长度 `97 + klen` 字节），自带 C3 校验；
 错误私钥或篡改都会抛 `DecryptionError`。`safeMode: true` 时返回 `null`。
 
-### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+### 混合加密 `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
 
 ```ts
 function hybridEncrypt(
@@ -161,7 +161,7 @@ function hybridDecrypt(
 - `safeMode: true` 时密文支失败返回 `null`。
 - hybrid 同时依赖 `sm2.wasm` 与 `sm4.wasm`：首次调用前请 `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`。
 
-### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+### sealed 对象互转 `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
 
 ```ts
 function sealedToObject(sealed: string | Uint8Array): {
@@ -173,7 +173,7 @@ function sealedFromObject(obj: SealedObject): string
 把 `sealed` 在 hex 字符串与自描述对象之间互转，便于调试或与手工
 `kemEncrypt` + `sm4.encryptGCM` 组装互操作。
 
-### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
+### 公钥缓存 `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
 function configurePublicKeyCache(opts: { enabled?: boolean; capacity?: number }): void
@@ -188,7 +188,7 @@ function clearPublicKeyCache(): void
 不接受这一点的安全模型下用 `configurePublicKeyCache({ enabled: false })` 关掉，
 即回到每次都重算的无状态行为。
 
-### `sm2.createSignaturePointPool(n)`
+### 签名点池 `sm2.createSignaturePointPool(n)`
 
 ```ts
 class SignaturePoint {

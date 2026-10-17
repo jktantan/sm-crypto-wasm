@@ -40,7 +40,7 @@ otherwise base64). **There is no "UTF-8 text" key form.**
 
 ## API
 
-### `sm2.generateKeyPair()`
+### Generate key pair `sm2.generateKeyPair()`
 
 ```ts
 function generateKeyPair(): Promise<{ privateKeyPem: string; publicKeyPem: string }>
@@ -50,7 +50,7 @@ Asynchronous: it instantiates the wasm and draws the private key `d` from the ho
 Returns a **PKCS#8 private key PEM** and an **SPKI public key PEM**, both readable by
 OpenSSL / GmSSL.
 
-### `sm2.getPublicKey(privateKey)`
+### Derive public key `sm2.getPublicKey(privateKey)`
 
 ```ts
 function getPublicKey(privateKey: string | Uint8Array): string
@@ -60,7 +60,7 @@ Derives the public key from a private key. **Returns** 128 hex characters (64 by
 This method **always recomputes** (it is not cached), preserving the semantics of "derive the
 public key" as an operation.
 
-### `sm2.sign(privateKey, message, opts?)`
+### Sign `sm2.sign(privateKey, message, opts?)`
 
 ```ts
 function sign(
@@ -79,7 +79,7 @@ function sign(
 **Returns** the 64-byte signature as hex (`r‖s`, 128 characters). The nonce `k` comes from the
 host CSPRNG; the negligible chance that `r` or `s` is zero triggers a redraw (up to 16 attempts).
 
-### `sm2.verify(publicKey, message, signature)`
+### Verify `sm2.verify(publicKey, message, signature)`
 
 ```ts
 function verify(
@@ -93,7 +93,7 @@ function verify(
 key" never gets confused with "bad signature" via two different exception paths. A signature
 whose length is not 64 bytes throws `InvalidCiphertextError`.
 
-### `sm2.encrypt(publicKey, message, opts?)`
+### Encrypt `sm2.encrypt(publicKey, message, opts?)`
 
 ```ts
 function encrypt(
@@ -106,7 +106,7 @@ function encrypt(
 **Returns** the ciphertext as hex: `C1(65B) ‖ C3(32B) ‖ C2` by default, or `C1 ‖ C2 ‖ C3` when
 `outputFormat: 'C1C2C3'` is passed. A public key off the curve throws `InvalidPublicKeyError`.
 
-### `sm2.decrypt(privateKey, ciphertext, opts?)`
+### Decrypt `sm2.decrypt(privateKey, ciphertext, opts?)`
 
 ```ts
 function decrypt(
@@ -124,7 +124,7 @@ function decrypt(
 `safeMode` only swallows **ciphertext-side** failures; argument type errors (`TypeError` /
 `RangeError`) still throw.
 
-### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+### Key encapsulation `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
 
 ```ts
 function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
@@ -142,7 +142,7 @@ symmetric key with SM2" idiom. `encapsulation` is a complete SM2 ciphertext (C1C
 `97 + klen` bytes) with its own C3 check; a wrong private key or tampering throws
 `DecryptionError`. With `safeMode: true` it returns `null`.
 
-### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+### Hybrid encryption `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
 
 ```ts
 function hybridEncrypt(
@@ -170,7 +170,7 @@ keeps long data out of SM2's KDF / point-operation path.
 - With `safeMode: true`, ciphertext-side failures return `null`.
 - Hybrid depends on both `sm2.wasm` and `sm4.wasm`: warm them up with `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])` before the first call.
 
-### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+### sealed object conversion `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
 
 ```ts
 function sealedToObject(sealed: string | Uint8Array): {
@@ -182,7 +182,7 @@ function sealedFromObject(obj: SealedObject): string
 Convert `sealed` between its hex string and a self-describing object — useful for debugging
 or for interoperating with a manual `kemEncrypt` + `sm4.encryptGCM` assembly.
 
-### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
+### Public-key cache `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
 function configurePublicKeyCache(opts: { enabled?: boolean; capacity?: number }): void
@@ -198,7 +198,7 @@ measured at 252 µs → 142 µs for `sign`.
 process memory. If your threat model forbids that, turn it off with
 `configurePublicKeyCache({ enabled: false })` and you are back to recomputing every time.
 
-### `sm2.createSignaturePointPool(n)`
+### Signature point pool `sm2.createSignaturePointPool(n)`
 
 ```ts
 class SignaturePoint {

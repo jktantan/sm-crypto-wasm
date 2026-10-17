@@ -30,7 +30,7 @@ await sm9.ensureLoaded();
 
 ## API
 
-### `sm9.generateKeyPair(opts)`
+### Генерация главной пары ключей `sm9.generateKeyPair(opts)`
 
 ```ts
 function generateKeyPair(opts: {
