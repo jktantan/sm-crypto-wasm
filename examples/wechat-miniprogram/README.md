@@ -41,6 +41,8 @@ SM_ALGOS=sm3,sm4 pnpm example:wechat:prepare
 
 1. 微信开发者工具 → 导入项目 → 选择 `examples/wechat-miniprogram`；
 2. AppID 选「测试号」（`project.config.json` 里是 `touristappid`）；
+   > 开发者工具可能把真实 AppID 回写到 `project.config.json`。提交前请检查并改回
+   > `touristappid`，真实 AppID 不要进仓库。
 3. 详情 → 本地设置 → 调试基础库选 **2.15.0 或更高**；
 4. 编译。首页会自动跑一遍测试，结果显示在页面上。
 
