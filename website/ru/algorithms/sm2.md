@@ -8,6 +8,7 @@ SM2 — китайский национальный алгоритм на элл
 | --- | --- | --- |
 | Цифровая подпись | GM/T 0003.2 | `sign` / `verify` (по умолчанию **SM3withSM2**) |
 | Шифрование открытым ключом | GM/T 0003.4 | `encrypt` / `decrypt` (шифротекст по умолчанию **C1C3C2**) |
+| Инкапсуляция ключа / гибридное шифрование | — (соглашение) | `kemEncrypt` / `kemDecrypt`, `hybridEncrypt` / `hybridDecrypt` |
 | Обмен ключами | GM/T 0003.3 | `createExchangeInitiator` / `createExchangeResponder` |
 | Генерация ключей | — | `generateKeyPair` / `getPublicKey` |
 
@@ -124,6 +125,67 @@ function decrypt(
 `safeMode` глушит только ошибки **со стороны шифротекста**; ошибки типов аргументов
 (`TypeError` / `RangeError`) всё равно бросаются.
 
+### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+
+```ts
+function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
+  { key: string; encapsulation: string }
+function kemDecrypt(
+  privateKey: string | Uint8Array,
+  encapsulation: string | Uint8Array,
+  klen?: number,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+**В SM2 нет стандартизованной отдельной конструкции KEM.** Здесь используется
+общепринятый приём «зашифровать случайный симметричный ключ открытым ключом SM2».
+`encapsulation` — полный шифротекст SM2 (C1C3C2, `97 + klen` байт) с собственной
+проверкой C3; неверный приватный ключ или подмена данных бросает `DecryptionError`.
+При `safeMode: true` возвращается `null`.
+
+### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+
+```ts
+function hybridEncrypt(
+  publicKey: string | Uint8Array,
+  message: string | Uint8Array,
+  opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  privateKey: string | Uint8Array,
+  sealed: string | Uint8Array,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+Один вызов выполняет **KEM + SM4-GCM**: открытый ключ защищает только 16-байтовый DEK,
+а сообщение обрабатывает симметричный алгоритм. Это правильная форма для больших
+сообщений — длинные данные не попадают в KDF / точечные операции SM2.
+
+- Каждый вызов создаёт новые 16-байтовый DEK и 12-байтовый IV; `iv` предназначен только
+  для тестов / совместимости протоколов — в обычном коде его не передавайте.
+- Строки `message` интерпретируются как **hex**; для пустого сообщения передайте
+  `new Uint8Array(0)`.
+- Возвращаемый `sealed` версионирован:
+  `version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`.
+- AAD привязан к `encapsulation`; подмена или неверный приватный ключ бросает
+  `DecryptionError`.
+- При `safeMode: true` ошибки со стороны шифротекста возвращают `null`.
+- Гибридному режиму нужны и `sm2.wasm`, и `sm4.wasm`: перед первым вызовом выполните `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`.
+
+### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+
+```ts
+function sealedToObject(sealed: string | Uint8Array): {
+  v: number; klen: number; encapsulation: string; iv: string; tag: string; ct: string;
+}
+function sealedFromObject(obj: SealedObject): string
+```
+
+Преобразует `sealed` между hex-строкой и самоописывающим объектом — удобно для отладки
+или для совместимости с ручной сборкой `kemEncrypt` + `sm4.encryptGCM`.
+
 ### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
@@ -221,6 +283,22 @@ const ct2 = sm2.encrypt(publicKeyPem, 'abc', { outputFormat: 'C1C2C3' });
 sm2.decrypt(privateKeyPem, ct2, { inputFormat: 'C1C2C3' });
 ```
 
+KEM и гибридное шифрование:
+
+```ts
+// 4) KEM: защитить случайный сессионный ключ открытым ключом
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);        // === key
+
+// 5) Гибридное шифрование: один вызов выполняет KEM + SM4-GCM
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);                 // → '616263'
+
+// sealed можно преобразовать в объект и обратно
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
 Сырые hex-ключи работают так же:
 
 ```ts
@@ -245,5 +323,10 @@ sm2.verify(pub, 'abc', sig);
 | длина подписи не 64 байта | `InvalidCiphertextError` |
 | шифротекст короче 97 байт | `InvalidCiphertextError` |
 | проверка C3 не прошла (несовпадение ключа / шифротекста) | `DecryptionError` |
+| `kemDecrypt`: проверка C3 не прошла / неверный приватный ключ | `DecryptionError` |
+| `hybridDecrypt`: некорректная структура sealed (версия / длина / обрезка) | `InvalidCiphertextError` |
+| `hybridDecrypt`: проверка тега GCM не прошла | `DecryptionError` |
+| `hybridEncrypt`: `iv` не 12 байт | `RangeError` |
+| `kemEncrypt` / `kemDecrypt`: `klen` вне [1, 65536] | `RangeError` |
 | неизвестное значение `outputFormat` / `inputFormat` | `RangeError` |
 | `configurePublicKeyCache({ capacity: 0 })` | `RangeError` |

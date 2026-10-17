@@ -12,10 +12,10 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 
 | 子路径 | 导出 |
 | --- | --- |
-| `sm-crypto-wasm/sm2` | `ensureLoaded` · `generateKeyPair` · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `createExchangeInitiator` · `createExchangeResponder` · `configurePublicKeyCache` · `clearPublicKeyCache` |
+| `sm-crypto-wasm/sm2` | `ensureLoaded` · `generateKeyPair` · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` / `kemDecrypt` · `hybridEncrypt` / `hybridDecrypt` · `sealedToObject` / `sealedFromObject` · `createExchangeInitiator` · `createExchangeResponder` · `configurePublicKeyCache` · `clearPublicKeyCache` |
 | `sm-crypto-wasm/sm3` | `ensureLoaded` · `hash` · `hmac` |
 | `sm-crypto-wasm/sm4` | `ensureLoaded` · `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
-| `sm-crypto-wasm/sm9` | `ensureLoaded` · `generateKeyPair` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` / `kemDecrypt` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` / `createExchangeResponder` |
+| `sm-crypto-wasm/sm9` | `ensureLoaded` · `generateKeyPair` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` / `kemDecrypt` · `hybridEncrypt` / `hybridDecrypt` · `sealedToObject` / `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` / `createExchangeResponder` |
 | `sm-crypto-wasm/zuc` | `ensureLoaded` · `zucKeystream` · `zucEncrypt` / `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` / `resetReuseGuard` |
 
 ## 两种入口的区别

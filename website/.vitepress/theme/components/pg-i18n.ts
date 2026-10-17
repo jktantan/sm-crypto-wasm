@@ -71,7 +71,7 @@ sm4.decryptGCM(key, iv, ct, tag, aad);             // 认证失败抛 Decryption
     },
     sm2: {
       title: 'SM2 密钥对、签名/验签、加密/解密',
-      desc: '一次运行跑完整链路：生成密钥对（首次）→ SM3withSM2 签名 → 验签 → 加密 → 解密。密钥用 PKCS#8 / SPKI PEM，和 openSSL、GmSSL 的互操作格式一致。',
+      desc: '一次运行跑完整链路：生成密钥对（首次）→ SM3withSM2 签名 → 验签 → 加密 → 解密，另跑一次 KEM + SM4-GCM 混合加密。密钥用 PKCS#8 / SPKI PEM，和 openSSL、GmSSL 的互操作格式一致。',
       code: `import { sm2 } from 'sm-crypto-wasm';
 
 const { privateKeyPem, publicKeyPem } = await sm2.generateKeyPair();
@@ -80,7 +80,10 @@ const sig = sm2.sign(privateKeyPem, 'abc');       // 默认 SM3withSM2，输出 
 sm2.verify(publicKeyPem, 'abc', sig);             // → true
 
 const ct = sm2.encrypt(publicKeyPem, 'abc');      // 默认 C1C3C2
-sm2.decrypt(privateKeyPem, ct);                   // 解密端自动识别密文顺序`,
+sm2.decrypt(privateKeyPem, ct);                   // 解密端自动识别密文顺序
+
+const sealed = sm2.hybridEncrypt(publicKeyPem, 'abc');  // KEM + SM4-GCM
+sm2.hybridDecrypt(privateKeyPem, sealed);              // → '616263'`,
       regenLabel: '重新生成密钥对',
       formatLabel: '密文分量顺序',
       msgLabel: '消息',
@@ -91,12 +94,14 @@ sm2.decrypt(privateKeyPem, ct);                   // 解密端自动识别密文
       verifyKey: 'sm2.verify()',
       ctKey: (fmt: string) => `sm2.encrypt() → 密文（${fmt}）`,
       ptKey: 'sm2.decrypt() → 明文',
+      hybridKey: 'sm2.hybridEncrypt() → sealed（KEM + SM4-GCM）',
+      hybridPtKey: 'sm2.hybridDecrypt() → 明文',
       yes: 'true（验签通过）',
       no: 'false（验签失败）',
     },
     sm9: {
       title: 'SM9 标识密码：签名 / 加密 / 密钥封装',
-      desc: '首次运行会生成两套主密钥（签名与加密各一套，共约 4 ms），随后跑签名→验签、加密→解密、KEM 封装→解封装。标识 id 就是公钥，没有证书链。',
+      desc: '首次运行会生成两套主密钥（签名与加密各一套，共约 4 ms），随后跑签名→验签、加密→解密、KEM 封装→解封装，以及一次 KEM + SM4-GCM 混合加密。标识 id 就是公钥，没有证书链。',
       code: `import { sm9 } from 'sm-crypto-wasm';
 
 const signKp = await sm9.generateKeyPair({ id: 'alice@foo.com' });              // purpose 默认 'sign'
@@ -109,7 +114,10 @@ const ct = sm9.encrypt(encKp.masterPublicPem, 'alice@foo.com', 'abc');
 sm9.decrypt(encKp.masterPrivatePem, 'alice@foo.com', ct);
 
 const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, 'alice@foo.com', 32);
-sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);      // === key`,
+sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);      // === key
+
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', 'abc');
+sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);              // → '616263'`,
       idLabel: '用户标识 id',
       idHint: '公钥就是它；改了要重新生成密钥对',
       msgLabel: '消息',
@@ -123,6 +131,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);     
       ptKey: 'sm9.decrypt() → 明文',
       kemKey: 'sm9.kemEncrypt() → 会话密钥 K',
       kemCheckKey: 'sm9.kemDecrypt() → 解封装的 K 是否一致',
+      hybridKey: 'sm9.hybridEncrypt() → sealed（KEM + SM4-GCM）',
+      hybridPtKey: 'sm9.hybridDecrypt() → 明文',
       yes: 'true（验签通过）',
       no: 'false（验签失败）',
       match: '一致 ✓',
@@ -213,7 +223,7 @@ sm4.decryptGCM(key, iv, ct, tag, aad);             // throws DecryptionError on 
     },
     sm2: {
       title: 'SM2 key pair, sign/verify, encrypt/decrypt',
-      desc: 'One run walks the whole path: generate a key pair (first time) → SM3withSM2 signature → verify → encrypt → decrypt. Keys are PKCS#8 / SPKI PEM, the same format OpenSSL and GmSSL read.',
+      desc: 'One run walks the whole path: generate a key pair (first time) → SM3withSM2 signature → verify → encrypt → decrypt, plus one KEM + SM4-GCM hybrid encryption. Keys are PKCS#8 / SPKI PEM, the same format OpenSSL and GmSSL read.',
       code: `import { sm2 } from 'sm-crypto-wasm';
 
 const { privateKeyPem, publicKeyPem } = await sm2.generateKeyPair();
@@ -222,7 +232,10 @@ const sig = sm2.sign(privateKeyPem, 'abc');       // SM3withSM2 by default, r||s
 sm2.verify(publicKeyPem, 'abc', sig);             // → true
 
 const ct = sm2.encrypt(publicKeyPem, 'abc');      // C1C3C2 by default
-sm2.decrypt(privateKeyPem, ct);                   // ciphertext order is auto-detected`,
+sm2.decrypt(privateKeyPem, ct);                   // ciphertext order is auto-detected
+
+const sealed = sm2.hybridEncrypt(publicKeyPem, 'abc');  // KEM + SM4-GCM
+sm2.hybridDecrypt(privateKeyPem, sealed);              // → '616263'`,
       regenLabel: 'Regenerate key pair',
       formatLabel: 'Ciphertext component order',
       msgLabel: 'Message',
@@ -233,12 +246,14 @@ sm2.decrypt(privateKeyPem, ct);                   // ciphertext order is auto-de
       verifyKey: 'sm2.verify()',
       ctKey: (fmt: string) => `sm2.encrypt() → ciphertext (${fmt})`,
       ptKey: 'sm2.decrypt() → plaintext',
+      hybridKey: 'sm2.hybridEncrypt() → sealed (KEM + SM4-GCM)',
+      hybridPtKey: 'sm2.hybridDecrypt() → plaintext',
       yes: 'true (verified)',
       no: 'false (verification failed)',
     },
     sm9: {
       title: 'SM9 identity-based: sign / encrypt / KEM',
-      desc: 'The first run also generates two master key pairs (one for signing, one for encryption, ~4 ms), then exercises sign→verify, encrypt→decrypt and KEM encapsulate→decapsulate. The identity id *is* the public key — there is no certificate chain.',
+      desc: 'The first run also generates two master key pairs (one for signing, one for encryption, ~4 ms), then exercises sign→verify, encrypt→decrypt, KEM encapsulate→decapsulate and one KEM + SM4-GCM hybrid encryption. The identity id *is* the public key — there is no certificate chain.',
       code: `import { sm9 } from 'sm-crypto-wasm';
 
 const signKp = await sm9.generateKeyPair({ id: 'alice@foo.com' });              // purpose defaults to 'sign'
@@ -265,6 +280,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);     
       ptKey: 'sm9.decrypt() → plaintext',
       kemKey: 'sm9.kemEncrypt() → session key K',
       kemCheckKey: 'sm9.kemDecrypt() → does the unwrapped K match?',
+      hybridKey: 'sm9.hybridEncrypt() → sealed (KEM + SM4-GCM)',
+      hybridPtKey: 'sm9.hybridDecrypt() → plaintext',
       yes: 'true (verified)',
       no: 'false (verification failed)',
       match: 'match ✓',
@@ -355,7 +372,7 @@ sm4.decryptGCM(key, iv, ct, tag, aad);             // при подмене — 
     },
     sm2: {
       title: 'SM2: ключевая пара, подпись/проверка, шифрование/расшифрование',
-      desc: 'Один запуск проходит весь путь: генерация ключевой пары (при первом запуске) → подпись SM3withSM2 → проверка → шифрование → расшифрование. Ключи — PKCS#8 / SPKI PEM, тот же формат читают OpenSSL и GmSSL.',
+      desc: 'Один запуск проходит весь путь: генерация ключевой пары (при первом запуске) → подпись SM3withSM2 → проверка → шифрование → расшифрование, плюс гибридное шифрование KEM + SM4-GCM. Ключи — PKCS#8 / SPKI PEM, тот же формат читают OpenSSL и GmSSL.',
       code: `import { sm2 } from 'sm-crypto-wasm';
 
 const { privateKeyPem, publicKeyPem } = await sm2.generateKeyPair();
@@ -364,7 +381,10 @@ const sig = sm2.sign(privateKeyPem, 'abc');       // по умолчанию SM3
 sm2.verify(publicKeyPem, 'abc', sig);             // → true
 
 const ct = sm2.encrypt(publicKeyPem, 'abc');      // по умолчанию C1C3C2
-sm2.decrypt(privateKeyPem, ct);                   // порядок компонент определяется автоматически`,
+sm2.decrypt(privateKeyPem, ct);                   // порядок компонент определяется автоматически
+
+const sealed = sm2.hybridEncrypt(publicKeyPem, 'abc');  // KEM + SM4-GCM
+sm2.hybridDecrypt(privateKeyPem, sealed);              // → '616263'`,
       regenLabel: 'Сгенерировать ключевую пару заново',
       formatLabel: 'Порядок компонент шифротекста',
       msgLabel: 'Сообщение',
@@ -375,12 +395,14 @@ sm2.decrypt(privateKeyPem, ct);                   // порядок компон
       verifyKey: 'sm2.verify()',
       ctKey: (fmt: string) => `sm2.encrypt() → шифротекст (${fmt})`,
       ptKey: 'sm2.decrypt() → открытый текст',
+      hybridKey: 'sm2.hybridEncrypt() → sealed (KEM + SM4-GCM)',
+      hybridPtKey: 'sm2.hybridDecrypt() → открытый текст',
       yes: 'true (проверка пройдена)',
       no: 'false (проверка не пройдена)',
     },
     sm9: {
       title: 'SM9: идентификационная криптография — подпись / шифрование / KEM',
-      desc: 'Первый запуск дополнительно создаёт две главные ключевые пары (для подписи и для шифрования, ~4 мс), затем выполняются подпись→проверка, шифрование→расшифрование и KEM инкапсуляция→декапсуляция. Идентификатор id *и есть* открытый ключ — цепочки сертификатов нет.',
+      desc: 'Первый запуск дополнительно создаёт две главные ключевые пары (для подписи и для шифрования, ~4 мс), затем выполняются подпись→проверка, шифрование→расшифрование, KEM инкапсуляция→декапсуляция и одно гибридное шифрование KEM + SM4-GCM. Идентификатор id *и есть* открытый ключ — цепочки сертификатов нет.',
       code: `import { sm9 } from 'sm-crypto-wasm';
 
 const signKp = await sm9.generateKeyPair({ id: 'alice@foo.com' });              // purpose по умолчанию 'sign'
@@ -407,6 +429,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);     
       ptKey: 'sm9.decrypt() → открытый текст',
       kemKey: 'sm9.kemEncrypt() → сессионный ключ K',
       kemCheckKey: 'sm9.kemDecrypt() → совпадает ли декапсулированный K?',
+      hybridKey: 'sm9.hybridEncrypt() → sealed (KEM + SM4-GCM)',
+      hybridPtKey: 'sm9.hybridDecrypt() → открытый текст',
       yes: 'true (проверка пройдена)',
       no: 'false (проверка не пройдена)',
       match: 'совпадает ✓',

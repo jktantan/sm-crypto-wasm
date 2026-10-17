@@ -13,8 +13,8 @@ AssemblyScript 编译成 `.wasm`，外面只包一层很薄的 TypeScript 胶水
 | --- | --- | --- | --- |
 | **SM3** | GM/T 0004-2012 | 256 位杂凑，与 SHA-256 同级别 | [SM3](/algorithms/sm3) |
 | **SM4** | GM/T 0002-2012 | 128 位分组密码，六种模式 | [SM4](/algorithms/sm4) |
-| **SM2** | GM/T 0003-2012 | 椭圆曲线公钥密码（签名 / 加密 / 密钥交换） | [SM2](/algorithms/sm2) |
-| **SM9** | GM/T 0044-2016 | 标识密码（签发 / 加密 / KEM / 密钥交换） | [SM9](/algorithms/sm9) |
+| **SM2** | GM/T 0003-2012 | 椭圆曲线公钥密码（签名 / 加密 / KEM / 混合加密 / 密钥交换） | [SM2](/algorithms/sm2) |
+| **SM9** | GM/T 0044-2016 | 标识密码（签发 / 加密 / KEM / 混合加密 / 密钥交换） | [SM9](/algorithms/sm9) |
 | **ZUC** | GM/T 0001-2012 | 序列密码，EEA3 机密性 + EIA3 完整性 | [ZUC](/algorithms/zuc) |
 
 ## 设计上的几个取舍

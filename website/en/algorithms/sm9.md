@@ -9,7 +9,7 @@ master secret.
 | --- | --- | --- |
 | Digital signature | GM/T 0044.2 | `sign` / `verify` |
 | Key exchange | GM/T 0044.3 | `createExchangeInitiator` / `createExchangeResponder` |
-| KEM & encryption | GM/T 0044.4 | `encrypt` / `decrypt`, `kemEncrypt` / `kemDecrypt` |
+| KEM, encryption & hybrid encryption | GM/T 0044.4 | `encrypt` / `decrypt`, `kemEncrypt` / `kemDecrypt`, `hybridEncrypt` / `hybridDecrypt` |
 
 ::: warning The two master keys are not interchangeable
 Signing and encryption use **independent** master keys (`purpose: 'sign' | 'enc'`): the signing
@@ -101,6 +101,32 @@ function kemDecrypt(ke, id, encapsulation, klen = 32): string
 | `klen` | session key length in bytes, default 32 |
 | `encapsulation` | the 65-byte encapsulation point (`04 ‖ x ‖ y`) as hex |
 
+### Hybrid encryption (KEM + SM4-GCM)
+
+```ts
+function hybridEncrypt(
+  key, id, msg, opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  ke, id, sealed, opts?: { safeMode?: boolean },
+): string
+```
+
+`key` may be a **64-byte encryption master public key** (SPKI PEM also works) or a
+**32-byte encryption master private key** (PKCS#8 PEM also works) — senders usually only
+have the master public key. One call performs KEM + SM4-GCM: the KEM encapsulates a
+16-byte DEK, and the message goes through SM4-GCM.
+
+- `sealed` uses the same versioned layout as SM2 hybrid:
+  `version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`.
+- Every call generates a fresh DEK and IV; `msg` strings are interpreted as **hex**;
+  pass `new Uint8Array(0)` for an empty message.
+- The SM9 KEM C1 carries no C3/HMAC; integrity comes from the GCM tag. A wrong id /
+  master public key surfaces as `DecryptionError` from `hybridDecrypt`.
+- AAD binds `encapsulation`; with `safeMode: true`, ciphertext-side failures return `null`.
+- Hybrid depends on both `sm9.wasm` and `sm4.wasm`: call `await sm9.ensureLoaded()` and `await sm4.ensureLoaded()` before the first use.
+- `sealedToObject` / `sealedFromObject` are available as well.
+
 ### Key exchange (GM/T 0044.3)
 
 ```ts
@@ -141,6 +167,15 @@ const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, id, 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, id, encapsulation, 32);     // === key
 ```
 
+Hybrid encryption (suited to large messages):
+
+```ts
+// Encapsulate a 16-byte DEK with the master public (or private) key + id,
+// then encrypt the message with SM4-GCM.
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, id, '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, id, sealed);             // → '616263'
+```
+
 ## Playground
 
 <Sm9Playground />
@@ -162,4 +197,7 @@ an implementation shortcoming — see the [performance page](/en/performance).
 | ciphertext is shorter than 97 bytes | `InvalidCiphertextError` |
 | the C3 HMAC check fails | `DecryptionError` |
 | `kemDecrypt` `encapsulation` is not 65 bytes | `RangeError` |
+| `hybridDecrypt` sealed structure is malformed | `InvalidCiphertextError` |
+| `hybridDecrypt` GCM tag check fails (including wrong id / master public key) | `DecryptionError` |
+| `hybridEncrypt` `iv` is not 12 bytes | `RangeError` |
 | `klen` is not a positive integer | `RangeError` |

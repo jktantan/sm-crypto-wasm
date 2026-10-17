@@ -22,6 +22,8 @@ and messages (**operations it does not have are left as `—`**). Measured on AM
 | SM2 | verify 64 B | 402 µs | 2.85 ms | 7.1× faster |
 | SM2 | encrypt 64 B | 499 µs | 2.96 ms | 5.9× faster |
 | SM2 | decrypt 64 B | 343 µs | 2.59 ms | 7.6× faster |
+| SM2 | KEM encapsulate / decapsulate (16 B key) | 496 / 328 µs | — | — |
+| SM2 | hybrid encrypt / decrypt 1 MB | 37.3 / 36.4 ms | — | — |
 | SM2 | key exchange (full A↔B) | 1.52 ms | 11.4 ms | 7.5× faster |
 | SM9 | master key pair (sign / enc) | 2.07 / 1.73 ms | — | — |
 | SM9 | master public key (sign / enc) | 97.1 / 49.1 µs | — | — |
@@ -31,6 +33,7 @@ and messages (**operations it does not have are left as `—`**). Measured on AM
 | SM9 | encrypt 32 B | 3.69 ms | — | — |
 | SM9 | decrypt 32 B | 5.40 ms | — | — |
 | SM9 | KEM encapsulate / decapsulate | 3.42 / 4.92 ms | — | — |
+| SM9 | hybrid encrypt / decrypt 10 KB | 3.21 / 4.77 ms | — | — |
 | SM9 | key exchange (full A↔B) | 19.6 ms | — | — |
 | ZUC | EEA3 encrypt 1 KB | 9.07 µs | 20.5 µs | 2.3× faster |
 | ZUC | EEA3 keystream 1 KB | 6.15 µs | — | — |

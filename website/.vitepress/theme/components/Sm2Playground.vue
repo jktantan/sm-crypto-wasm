@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { sm2 } from 'sm-crypto-wasm';
+import { sm2, sm4 } from 'sm-crypto-wasm';
 import PgField from './PgField.vue';
 import PlaygroundFrame from './PlaygroundFrame.vue';
 import { hexToText } from './pg-input';
@@ -16,6 +16,8 @@ const signature = ref('');
 const verified = ref<boolean | null>(null);
 const ciphertext = ref('');
 const plaintext = ref('');
+const hybridSealed = ref('');
+const hybridPlain = ref('');
 const cipherFormat = ref<'C1C3C2' | 'C1C2C3'>('C1C3C2');
 
 async function generateKeys() {
@@ -25,11 +27,13 @@ async function generateKeys() {
   signature.value = '';
   ciphertext.value = '';
   plaintext.value = '';
+  hybridSealed.value = '';
+  hybridPlain.value = '';
   verified.value = null;
 }
 
 async function run() {
-  await sm2.ensureLoaded();
+  await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()]);
   if (privateKeyPem.value.trim() === '') await generateKeys();
 
   const msg = new TextEncoder().encode(message.value);
@@ -37,6 +41,9 @@ async function run() {
   verified.value = sm2.verify(publicKeyPem.value, msg, signature.value);
   ciphertext.value = sm2.encrypt(publicKeyPem.value, msg, { outputFormat: cipherFormat.value });
   plaintext.value = sm2.decrypt(privateKeyPem.value, ciphertext.value);
+
+  hybridSealed.value = sm2.hybridEncrypt(publicKeyPem.value, msg);
+  hybridPlain.value = sm2.hybridDecrypt(privateKeyPem.value, hybridSealed.value);
 }
 </script>
 
@@ -93,6 +100,14 @@ async function run() {
       <div class="pgr">
         <span class="pgr__k">{{ T.sm2.ptKey }}</span>
         <span class="pgr__v">{{ plaintext ? `${plaintext}（${hexToText(plaintext)}）` : '—' }}</span>
+      </div>
+      <div class="pgr">
+        <span class="pgr__k">{{ T.sm2.hybridKey }}</span>
+        <span class="pgr__v">{{ hybridSealed || '—' }}</span>
+      </div>
+      <div class="pgr">
+        <span class="pgr__k">{{ T.sm2.hybridPtKey }}</span>
+        <span class="pgr__v">{{ hybridPlain ? `${hybridPlain}（${hexToText(hybridPlain)}）` : '—' }}</span>
       </div>
     </template>
   </PlaygroundFrame>

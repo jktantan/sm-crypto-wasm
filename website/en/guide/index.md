@@ -15,8 +15,8 @@ user's machine.
 | --- | --- | --- | --- |
 | **SM3** | GM/T 0004-2012 | 256-bit hash, SHA-256 class | [SM3](/en/algorithms/sm3) |
 | **SM4** | GM/T 0002-2012 | 128-bit block cipher, six modes | [SM4](/en/algorithms/sm4) |
-| **SM2** | GM/T 0003-2012 | Elliptic-curve public key (sign / encrypt / key exchange) | [SM2](/en/algorithms/sm2) |
-| **SM9** | GM/T 0044-2016 | Identity-based crypto (sign / encrypt / KEM / key exchange) | [SM9](/en/algorithms/sm9) |
+| **SM2** | GM/T 0003-2012 | Elliptic-curve public key (sign / encrypt / KEM / hybrid encryption / key exchange) | [SM2](/en/algorithms/sm2) |
+| **SM9** | GM/T 0044-2016 | Identity-based crypto (sign / encrypt / KEM / hybrid encryption / key exchange) | [SM9](/en/algorithms/sm9) |
 | **ZUC** | GM/T 0001-2012 | Stream cipher, EEA3 confidentiality + EIA3 integrity | [ZUC](/en/algorithms/zuc) |
 
 ## Design decisions

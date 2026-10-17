@@ -8,7 +8,7 @@ SM9 是基于双线性对（pairing）的**标识密码**算法（**GM/T 0044-20
 | --- | --- | --- |
 | 数字签名 | GM/T 0044.2 | `sign` / `verify` |
 | 密钥交换 | GM/T 0044.3 | `createExchangeInitiator` / `createExchangeResponder` |
-| 密钥封装与加密 | GM/T 0044.4 | `encrypt` / `decrypt`、`kemEncrypt` / `kemDecrypt` |
+| 密钥封装、加密与混合加密 | GM/T 0044.4 | `encrypt` / `decrypt`、`kemEncrypt` / `kemDecrypt`、`hybridEncrypt` / `hybridDecrypt` |
 
 ::: warning 两套主密钥不能混用
 签名主密钥与加密主密钥是**相互独立**的两套（`purpose: 'sign' | 'enc'`）：
@@ -98,6 +98,30 @@ function kemDecrypt(ke, id, encapsulation, klen = 32): string
 | `klen` | 会话密钥字节数，默认 32 |
 | `encapsulation` | 65 字节封装点（`04 ‖ x ‖ y`）的 hex |
 
+### 混合加密（KEM + SM4-GCM）
+
+```ts
+function hybridEncrypt(
+  key, id, msg, opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  ke, id, sealed, opts?: { safeMode?: boolean },
+): string
+```
+
+`key` 可以是 **64 字节加密主公钥**（SPKI PEM 亦可）或 **32 字节加密主私钥**
+（PKCS#8 PEM 亦可）—— 发送方通常只需要主公钥。一次调用完成 KEM + SM4-GCM：
+KEM 封装 16 字节 DEK，消息交给 SM4-GCM。
+
+- `sealed` 与 SM2 hybrid 采用同一版本化布局：
+  `version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`。
+- 每次调用新生成 DEK 与 IV；`msg` 字符串按 **hex**，空消息传 `new Uint8Array(0)`。
+- SM9 KEM 的 C1 没有 C3/HMAC，完整性由 GCM tag 提供：错误 id / 主公钥会在
+  `hybridDecrypt` 处以 `DecryptionError` 暴露。
+- AAD 绑定 `encapsulation`；`safeMode: true` 时密文支失败返回 `null`。
+- hybrid 同时依赖 `sm9.wasm` 与 `sm4.wasm`：首次调用前请分别 `await sm9.ensureLoaded()` 与 `await sm4.ensureLoaded()`。
+- `sealedToObject` / `sealedFromObject` 同样可用，便于调试或手工组装互操作。
+
 ### 密钥交换（GM/T 0044.3）
 
 ```ts
@@ -137,6 +161,14 @@ const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, id, 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, id, encapsulation, 32);     // === key
 ```
 
+混合加密（适合大消息）：
+
+```ts
+// 主公钥（或主私钥）+ id 封装 16 字节 DEK，再用 SM4-GCM 加密消息
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, id, '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, id, sealed);             // → '616263'
+```
+
 ## Playground
 
 <Sm9Playground />
@@ -157,4 +189,7 @@ pairing 是这里的主要成本：一次签名约 4 ms、验签约 8 ms、加�
 | 密文短于 97 字节 | `InvalidCiphertextError` |
 | C3 HMAC 校验失败 | `DecryptionError` |
 | `kemDecrypt` 的 `encapsulation` 不是 65 字节 | `RangeError` |
+| `hybridDecrypt` 的 sealed 结构错 | `InvalidCiphertextError` |
+| `hybridDecrypt` 的 GCM tag 校验失败（含错误 id / 主公钥） | `DecryptionError` |
+| `hybridEncrypt` 的 `iv` 不是 12 字节 | `RangeError` |
 | `klen` 不是正整数 | `RangeError` |

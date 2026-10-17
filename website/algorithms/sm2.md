@@ -7,6 +7,7 @@ SM2 是国密椭圆曲线公钥密码算法（**GM/T 0003-2012** 系列），曲
 | --- | --- | --- |
 | 数字签名 | GM/T 0003.2 | `sign` / `verify`（默认 **SM3withSM2**） |
 | 公钥加密 | GM/T 0003.4 | `encrypt` / `decrypt`（密文默认 **C1C3C2**） |
+| 密钥封装 / 混合加密 | —（约定做法） | `kemEncrypt` / `kemDecrypt`、`hybridEncrypt` / `hybridDecrypt` |
 | 密钥交换 | GM/T 0003.3 | `createExchangeInitiator` / `createExchangeResponder` |
 | 密钥生成 | — | `generateKeyPair` / `getPublicKey` |
 
@@ -118,6 +119,60 @@ function decrypt(
 
 `safeMode` 只吞"密文支"失败；参数类型错误（`TypeError` / `RangeError`）仍然抛出。
 
+### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+
+```ts
+function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
+  { key: string; encapsulation: string }
+function kemDecrypt(
+  privateKey: string | Uint8Array,
+  encapsulation: string | Uint8Array,
+  klen?: number,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+**SM2 没有国标定义的独立 KEM**；这里用的是“用 SM2 公钥加密一把随机对称密钥”的约定做法。
+`encapsulation` 是完整的 SM2 密文（C1C3C2，长度 `97 + klen` 字节），自带 C3 校验；
+错误私钥或篡改都会抛 `DecryptionError`。`safeMode: true` 时返回 `null`。
+
+### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+
+```ts
+function hybridEncrypt(
+  publicKey: string | Uint8Array,
+  message: string | Uint8Array,
+  opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  privateKey: string | Uint8Array,
+  sealed: string | Uint8Array,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+一次调用完成 **KEM + SM4-GCM**：公钥只保护 16 字节 DEK，消息交给对称算法。适合大消息，
+也避免把长数据塞进 SM2 的 KDF / 点运算路径。
+
+- 每次调用都新生成 16 字节 DEK 与 12 字节 IV；`iv` 只用于测试 / 协议互操作，正常不要传。
+- `message` 字符串按 **hex** 解释；空消息传 `new Uint8Array(0)`。
+- 返回版本化 `sealed`：`version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`。
+- AAD 绑定 `encapsulation`；sealed 被篡改、私钥错误都会抛 `DecryptionError`。
+- `safeMode: true` 时密文支失败返回 `null`。
+- hybrid 同时依赖 `sm2.wasm` 与 `sm4.wasm`：首次调用前请 `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`。
+
+### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+
+```ts
+function sealedToObject(sealed: string | Uint8Array): {
+  v: number; klen: number; encapsulation: string; iv: string; tag: string; ct: string;
+}
+function sealedFromObject(obj: SealedObject): string
+```
+
+把 `sealed` 在 hex 字符串与自描述对象之间互转，便于调试或与手工
+`kemEncrypt` + `sm4.encryptGCM` 组装互操作。
+
 ### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
@@ -211,6 +266,22 @@ const ct2 = sm2.encrypt(publicKeyPem, 'abc', { outputFormat: 'C1C2C3' });
 sm2.decrypt(privateKeyPem, ct2, { inputFormat: 'C1C2C3' });
 ```
 
+KEM 与混合加密：
+
+```ts
+// 4) KEM：用公钥保护一把随机会话密钥
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);        // === key
+
+// 5) 混合加密：一次调用完成 KEM + SM4-GCM，适合大消息
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);                 // → '616263'
+
+// sealed 也可以在 hex 与对象形态之间互转
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
 裸 hex 密钥同样可用：
 
 ```ts
@@ -235,5 +306,10 @@ sm2.verify(pub, 'abc', sig);
 | 签名长度不是 64 字节 | `InvalidCiphertextError` |
 | 密文短于 97 字节 | `InvalidCiphertextError` |
 | C3 校验失败（密钥 / 密文不匹配） | `DecryptionError` |
+| `kemDecrypt` C3 校验失败 / 私钥错误 | `DecryptionError` |
+| `hybridDecrypt` 的 sealed 结构错（版本 / 长度字段 / 截断） | `InvalidCiphertextError` |
+| `hybridDecrypt` GCM tag 校验失败 | `DecryptionError` |
+| `hybridEncrypt` 的 `iv` 不是 12 字节 | `RangeError` |
+| `kemEncrypt` / `kemDecrypt` 的 `klen` 不在 [1, 65536] 内 | `RangeError` |
 | `outputFormat` / `inputFormat` 传了未知值 | `RangeError` |
 | `configurePublicKeyCache({ capacity: 0 })` | `RangeError` |

@@ -9,7 +9,7 @@ SM9 — идентификационная криптосистема на би�
 | --- | --- | --- |
 | Цифровая подпись | GM/T 0044.2 | `sign` / `verify` |
 | Обмен ключами | GM/T 0044.3 | `createExchangeInitiator` / `createExchangeResponder` |
-| KEM и шифрование | GM/T 0044.4 | `encrypt` / `decrypt`, `kemEncrypt` / `kemDecrypt` |
+| KEM, шифрование и гибридное шифрование | GM/T 0044.4 | `encrypt` / `decrypt`, `kemEncrypt` / `kemDecrypt`, `hybridEncrypt` / `hybridDecrypt` |
 
 ::: warning Два главных ключа не взаимозаменяемы
 Подпись и шифрование используют **независимые** главные ключи (`purpose: 'sign' | 'enc'`):
@@ -101,6 +101,33 @@ function kemDecrypt(ke, id, encapsulation, klen = 32): string
 | `klen` | длина сессионного ключа в байтах, по умолчанию 32 |
 | `encapsulation` | точка инкапсуляции 65 байт (`04 ‖ x ‖ y`) в hex |
 
+### Гибридное шифрование (KEM + SM4-GCM)
+
+```ts
+function hybridEncrypt(
+  key, id, msg, opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  ke, id, sealed, opts?: { safeMode?: boolean },
+): string
+```
+
+`key` может быть **64-байтовым главным открытым ключом шифрования** (SPKI PEM тоже
+подходит) или **32-байтовым главным приватным ключом шифрования** (PKCS#8 PEM тоже
+подходит) — отправителю обычно нужен только главный открытый ключ. Один вызов выполняет
+KEM + SM4-GCM: KEM инкапсулирует 16-байтовый DEK, а сообщение обрабатывает SM4-GCM.
+
+- `sealed` использует тот же версионированный формат, что и SM2 hybrid:
+  `version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`.
+- Каждый вызов создаёт новые DEK и IV; строки `msg` интерпретируются как **hex**;
+  для пустого сообщения передайте `new Uint8Array(0)`.
+- В C1 у SM9 KEM нет C3/HMAC; целостность обеспечивает тег GCM. Неверный id /
+  главный открытый ключ проявляется как `DecryptionError` в `hybridDecrypt`.
+- AAD привязан к `encapsulation`; при `safeMode: true` ошибки со стороны шифротекста
+  возвращают `null`.
+- Гибридному режиму нужны и `sm9.wasm`, и `sm4.wasm`: перед первым вызовом выполните `await sm9.ensureLoaded()` и `await sm4.ensureLoaded()`.
+- `sealedToObject` / `sealedFromObject` также доступны.
+
 ### Обмен ключами (GM/T 0044.3)
 
 ```ts
@@ -141,6 +168,15 @@ const { key, encapsulation } = sm9.kemEncrypt(encKp.masterPrivatePem, id, 32);
 sm9.kemDecrypt(encKp.masterPrivatePem, id, encapsulation, 32);     // === key
 ```
 
+Гибридное шифрование (подходит для больших сообщений):
+
+```ts
+// Инкапсулировать 16-байтовый DEK главным открытым (или приватным) ключом + id,
+// затем зашифровать сообщение через SM4-GCM.
+const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, id, '616263');
+sm9.hybridDecrypt(encKp.masterPrivatePem, id, sealed);             // → '616263'
+```
+
 ## Playground
 
 <Sm9Playground />
@@ -162,4 +198,7 @@ sm9.kemDecrypt(encKp.masterPrivatePem, id, encapsulation, 32);     // === key
 | шифротекст короче 97 байт | `InvalidCiphertextError` |
 | проверка HMAC по C3 не прошла | `DecryptionError` |
 | `encapsulation` в `kemDecrypt` не 65 байт | `RangeError` |
+| `hybridDecrypt`: некорректная структура sealed | `InvalidCiphertextError` |
+| `hybridDecrypt`: проверка тега GCM не прошла (включая неверный id / главный открытый ключ) | `DecryptionError` |
+| `hybridEncrypt`: `iv` не 12 байт | `RangeError` |
 | `klen` не положительное целое | `RangeError` |

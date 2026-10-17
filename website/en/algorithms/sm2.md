@@ -7,6 +7,7 @@ curve **`sm2p256v1`** (256-bit prime field, `a = p - 3`). This library covers fo
 | --- | --- | --- |
 | Digital signature | GM/T 0003.2 | `sign` / `verify` (default **SM3withSM2**) |
 | Public-key encryption | GM/T 0003.4 | `encrypt` / `decrypt` (ciphertext defaults to **C1C3C2**) |
+| Key encapsulation / hybrid encryption | — (conventional) | `kemEncrypt` / `kemDecrypt`, `hybridEncrypt` / `hybridDecrypt` |
 | Key exchange | GM/T 0003.3 | `createExchangeInitiator` / `createExchangeResponder` |
 | Key generation | — | `generateKeyPair` / `getPublicKey` |
 
@@ -123,6 +124,64 @@ function decrypt(
 `safeMode` only swallows **ciphertext-side** failures; argument type errors (`TypeError` /
 `RangeError`) still throw.
 
+### `sm2.kemEncrypt(publicKey, klen = 32)` / `sm2.kemDecrypt(privateKey, encapsulation, klen = 32, opts?)`
+
+```ts
+function kemEncrypt(publicKey: string | Uint8Array, klen?: number):
+  { key: string; encapsulation: string }
+function kemDecrypt(
+  privateKey: string | Uint8Array,
+  encapsulation: string | Uint8Array,
+  klen?: number,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+**SM2 has no standardized standalone KEM.** This is the conventional "encrypt a random
+symmetric key with SM2" idiom. `encapsulation` is a complete SM2 ciphertext (C1C3C2,
+`97 + klen` bytes) with its own C3 check; a wrong private key or tampering throws
+`DecryptionError`. With `safeMode: true` it returns `null`.
+
+### `sm2.hybridEncrypt(publicKey, message, opts?)` / `sm2.hybridDecrypt(privateKey, sealed, opts?)`
+
+```ts
+function hybridEncrypt(
+  publicKey: string | Uint8Array,
+  message: string | Uint8Array,
+  opts?: { iv?: string | Uint8Array },
+): string
+function hybridDecrypt(
+  privateKey: string | Uint8Array,
+  sealed: string | Uint8Array,
+  opts?: { safeMode?: boolean },
+): string
+```
+
+One call performs **KEM + SM4-GCM**: the public key protects only a 16-byte DEK, and the
+message goes through the symmetric cipher. This is the right shape for large messages and
+keeps long data out of SM2's KDF / point-operation path.
+
+- Every call generates a fresh 16-byte DEK and 12-byte IV; `iv` is for tests / protocol
+  interop only — do not pass it in normal use.
+- `message` strings are interpreted as **hex**; pass `new Uint8Array(0)` for an empty message.
+- The returned `sealed` is versioned:
+  `version(1) ‖ klen(1) ‖ encapLen(2) ‖ encapsulation ‖ iv(12) ‖ tag(16) ‖ ct`.
+- AAD binds `encapsulation`; tampering or a wrong private key throws `DecryptionError`.
+- With `safeMode: true`, ciphertext-side failures return `null`.
+- Hybrid depends on both `sm2.wasm` and `sm4.wasm`: warm them up with `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])` before the first call.
+
+### `sm2.sealedToObject(sealed)` / `sm2.sealedFromObject(obj)`
+
+```ts
+function sealedToObject(sealed: string | Uint8Array): {
+  v: number; klen: number; encapsulation: string; iv: string; tag: string; ct: string;
+}
+function sealedFromObject(obj: SealedObject): string
+```
+
+Convert `sealed` between its hex string and a self-describing object — useful for debugging
+or for interoperating with a manual `kemEncrypt` + `sm4.encryptGCM` assembly.
+
 ### `sm2.configurePublicKeyCache(opts)` / `sm2.clearPublicKeyCache()`
 
 ```ts
@@ -220,6 +279,22 @@ const ct2 = sm2.encrypt(publicKeyPem, 'abc', { outputFormat: 'C1C2C3' });
 sm2.decrypt(privateKeyPem, ct2, { inputFormat: 'C1C2C3' });
 ```
 
+KEM and hybrid encryption:
+
+```ts
+// 4) KEM: protect a random session key with the public key
+const { key, encapsulation } = sm2.kemEncrypt(publicKeyPem, 32);
+sm2.kemDecrypt(privateKeyPem, encapsulation, 32);        // === key
+
+// 5) Hybrid encryption: one call performs KEM + SM4-GCM; suited to large messages
+const sealed = sm2.hybridEncrypt(publicKeyPem, '616263');
+sm2.hybridDecrypt(privateKeyPem, sealed);                 // → '616263'
+
+// sealed can also round-trip between hex and object form
+const obj = sm2.sealedToObject(sealed);
+sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
+```
+
 Raw hex keys work just as well:
 
 ```ts
@@ -244,5 +319,10 @@ sm2.verify(pub, 'abc', sig);
 | signature length is not 64 bytes | `InvalidCiphertextError` |
 | ciphertext is shorter than 97 bytes | `InvalidCiphertextError` |
 | C3 check fails (key / ciphertext mismatch) | `DecryptionError` |
+| `kemDecrypt` C3 check fails / wrong private key | `DecryptionError` |
+| `hybridDecrypt` sealed structure is malformed (version / length field / truncation) | `InvalidCiphertextError` |
+| `hybridDecrypt` GCM tag check fails | `DecryptionError` |
+| `hybridEncrypt` `iv` is not 12 bytes | `RangeError` |
+| `kemEncrypt` / `kemDecrypt` `klen` is outside [1, 65536] | `RangeError` |
 | unknown `outputFormat` / `inputFormat` value | `RangeError` |
 | `configurePublicKeyCache({ capacity: 0 })` | `RangeError` |

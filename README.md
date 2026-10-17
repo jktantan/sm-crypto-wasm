@@ -2,8 +2,6 @@
 
 [🇨🇳 中文](#zh-阅读下面的中文文档) · [🇺🇸 English](#en-english-documentation) · [🇷🇺 Русский](#ru-документация-на-русском)
 
-> 📖 **完整文档（含每个算法的参数表与可交互 Playground）**：<https://jktantan.github.io/sm-crypto-wasm/>
-
 Chinese cryptography standards (**SM2 / SM3 / SM4 / SM9 / ZUC**) implemented in
 **AssemblyScript → WebAssembly**. Works on Node 18+ and modern browsers (incl.
 Web Workers). Algorithms are split into sub-packages and lazy-loaded on demand.
@@ -132,6 +130,7 @@ sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
 ```
 
 - `hybridEncrypt` 每次调用都新生成 16 字节 DEK 与 12 字节 IV；消息字符串按 **hex** 解释（空消息传 `new Uint8Array(0)`）。
+- hybrid 同时用到 `sm2.wasm` 与 `sm4.wasm`，首次调用前请 `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`。
 - `hybridDecrypt` 支持 `{ safeMode: true }`，密文支失败返回 `null`。
 - SM2 没有国标定义的独立 KEM；`kemEncrypt` 是“用 SM2 公钥加密随机密钥”的约定做法。
 
@@ -183,6 +182,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // 
 const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
 sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
+
+> SM9 hybrid 同时用到 `sm9.wasm` 与 `sm4.wasm`：首次调用前请分别 `await sm9.ensureLoaded()` 与 `await sm4.ensureLoaded()`。
 
 ### ZUC —— EEA3 机密性 + EIA3 完整性
 
@@ -485,6 +486,7 @@ sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
 ```
 
 - Every `hybridEncrypt` call generates a fresh 16-byte DEK and 12-byte IV; message strings are interpreted as **hex** (pass `new Uint8Array(0)` for an empty message).
+- Hybrid uses both `sm2.wasm` and `sm4.wasm`; warm them up with `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])` before the first call.
 - `hybridDecrypt` supports `{ safeMode: true }`, returning `null` for ciphertext-side failures.
 - SM2 has no standardized KEM construction; `kemEncrypt` is the conventional "encrypt a random key with SM2" idiom.
 
@@ -539,6 +541,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // 
 const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
 sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
+
+> SM9 hybrid uses both `sm9.wasm` and `sm4.wasm`: call `await sm9.ensureLoaded()` and `await sm4.ensureLoaded()` before the first use.
 
 ### ZUC — EEA3 confidentiality + EIA3 integrity
 
@@ -875,6 +879,7 @@ sm2.hybridDecrypt(privateKeyPem, sm2.sealedFromObject(obj));
 ```
 
 - Каждый вызов `hybridEncrypt` создаёт новые 16-байтовый DEK и 12-байтовый IV; строки сообщений интерпретируются как **hex** (для пустого сообщения передайте `new Uint8Array(0)`).
+- Гибридному режиму нужны и `sm2.wasm`, и `sm4.wasm`; перед первым вызовом выполните `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])`.
 - `hybridDecrypt` поддерживает `{ safeMode: true }` и возвращает `null` при ошибках, связанных с шифртекстом.
 - В SM2 нет стандартизованной конструкции KEM; `kemEncrypt` — общепринятый приём «зашифровать случайный ключ открытым ключом SM2».
 
@@ -929,6 +934,8 @@ sm9.kemDecrypt(encKp.masterPrivatePem, 'alice@foo.com', encapsulation, 32);  // 
 const sealed = sm9.hybridEncrypt(encKp.masterPublicPem, 'alice@foo.com', '616263');
 sm9.hybridDecrypt(encKp.masterPrivatePem, 'alice@foo.com', sealed);  // → '616263'
 ```
+
+> Гибридному режиму SM9 нужны и `sm9.wasm`, и `sm4.wasm`: перед первым вызовом выполните `await sm9.ensureLoaded()` и `await sm4.ensureLoaded()`.
 
 ### ZUC — конфиденциальность EEA3 и целостность EIA3
 

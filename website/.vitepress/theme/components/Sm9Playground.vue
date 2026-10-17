@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { sm9 } from 'sm-crypto-wasm';
+import { sm4, sm9 } from 'sm-crypto-wasm';
 import PgField from './PgField.vue';
 import PlaygroundFrame from './PlaygroundFrame.vue';
 import { hexToText } from './pg-input';
@@ -23,9 +23,11 @@ const ciphertext = ref('');
 const plaintext = ref('');
 const kemKey = ref('');
 const kemUnwrapped = ref('');
+const hybridSealed = ref('');
+const hybridPlain = ref('');
 
 async function run() {
-  await sm9.ensureLoaded();
+  await Promise.all([sm9.ensureLoaded(), sm4.ensureLoaded()]);
   // 签名与加密是两套主密钥（purpose 区分），首次运行时各生成一次。
   if (signKp.value === null) {
     signKp.value = await sm9.generateKeyPair({ id: id.value, purpose: 'sign' });
@@ -50,6 +52,13 @@ async function run() {
     kem.encapsulation,
     klen.value,
   );
+
+  hybridSealed.value = sm9.hybridEncrypt(encKp.value.masterPublicPem, id.value, msg);
+  hybridPlain.value = sm9.hybridDecrypt(
+    encKp.value.masterPrivatePem,
+    id.value,
+    hybridSealed.value,
+  );
 }
 
 function reset() {
@@ -60,6 +69,8 @@ function reset() {
   plaintext.value = '';
   kemKey.value = '';
   kemUnwrapped.value = '';
+  hybridSealed.value = '';
+  hybridPlain.value = '';
   verified.value = null;
 }
 </script>
@@ -121,6 +132,14 @@ function reset() {
         >
           {{ kemUnwrapped === '' ? '—' : kemUnwrapped === kemKey ? T.sm9.match : T.sm9.mismatch }}
         </span>
+      </div>
+      <div class="pgr">
+        <span class="pgr__k">{{ T.sm9.hybridKey }}</span>
+        <span class="pgr__v">{{ hybridSealed || '—' }}</span>
+      </div>
+      <div class="pgr">
+        <span class="pgr__k">{{ T.sm9.hybridPtKey }}</span>
+        <span class="pgr__v">{{ hybridPlain ? `${hybridPlain}（${hexToText(hybridPlain)}）` : '—' }}</span>
       </div>
     </template>
   </PlaygroundFrame>

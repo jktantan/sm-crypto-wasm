@@ -12,6 +12,9 @@
  * 与 `sm9.encrypt` 一致，第一参数既接受**加密主公钥**（64 字节 / SPKI PEM），
  * 也接受**加密主私钥**（32 字节 / PKCS#8 PEM）；前者是发送方的典型形态。
  *
+ * 本模块同时用到 `sm9.wasm` 与 `sm4.wasm`：首次调用前请分别
+ * `await sm9.ensureLoaded()` 与 `await sm4.ensureLoaded()`。
+ *
  * 完整性边界：SM9 KEM 的 encapsulation 只有 C1（65 字节），本身没有 C3/HMAC；
  * 错误 id / 错误主公钥会得到不同的 K，最终由 GCM tag 认证失败暴露。因此
  * `hybridDecrypt` 对错误 id 抛的是 GCM 的 `DecryptionError`，而不是 KEM 错误。
