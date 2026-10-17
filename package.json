@@ -96,6 +96,7 @@
     "docs:dev": "pnpm build && vitepress dev website",
     "docs:build": "pnpm build && vitepress build website",
     "docs:preview": "vitepress preview website",
+    "example:wechat:prepare": "node examples/wechat-miniprogram/scripts/prepare.mjs",
     "prepack": "pnpm build && pnpm test"
   },
   "devDependencies": {

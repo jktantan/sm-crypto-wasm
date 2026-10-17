@@ -1,0 +1,9 @@
+{
+  "desc": "测试页不需要被索引",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}

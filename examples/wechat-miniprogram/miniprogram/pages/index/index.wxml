@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="title">sm-crypto-wasm · 微信小程序</view>
+  <view class="summary {{running ? 'running' : ''}}">{{summary}}</view>
+  <button class="btn" bindtap="run" disabled="{{running}}">
+    {{running ? '测试中…' : '重新运行'}}
+  </button>
+  <view class="list">
+    <text wx:for="{{lines}}" wx:key="*this" class="line">{{item}}</text>
+  </view>
+</view>

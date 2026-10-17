@@ -240,6 +240,8 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 | 浏览器（经打包器） | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`，由打包器归档并重写 URL |
 | Web Worker | 加载器不依赖 DOM，Worker 内可用 |
 | Deno / Bun | 走 Node 同路径 |
+| 微信内置浏览器 | 与浏览器相同（`fetch` + `crypto.getRandomValues`）；见[微信与小程序](https://jktantan.github.io/sm-crypto-wasm/guide/wechat) |
+| 微信小程序 | `WXWebAssembly` + `wx.getRandomValues`；见[微信与小程序](https://jktantan.github.io/sm-crypto-wasm/guide/wechat) |
 
 ### 打包器支持
 
@@ -604,6 +606,8 @@ Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc
 | Browser (via a bundler) | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`; the bundler archives and rewrites it |
 | Web Worker | the loader is DOM-free and works inside a Worker |
 | Deno / Bun | follows the Node path |
+| WeChat built-in browser | same as browsers (`fetch` + `crypto.getRandomValues`); see [WeChat & Mini Programs](https://jktantan.github.io/sm-crypto-wasm/en/guide/wechat) |
+| WeChat Mini Program | `WXWebAssembly` + `wx.getRandomValues`; see [WeChat & Mini Programs](https://jktantan.github.io/sm-crypto-wasm/en/guide/wechat) |
 
 ### Bundler support
 
@@ -997,6 +1001,8 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 | Браузер (через сборщик) | `fetch(new URL('../<algo>/<algo>.wasm', import.meta.url))`; сборщик кладёт файл в вывод и переписывает URL |
 | Web Worker | загрузчик не зависит от DOM и работает внутри Worker'а |
 | Deno / Bun | идут по Node-пути |
+| Встроенный браузер WeChat | как обычный браузер (`fetch` + `crypto.getRandomValues`); см. [WeChat и мини-программы](https://jktantan.github.io/sm-crypto-wasm/ru/guide/wechat) |
+| Мини-программа WeChat | `WXWebAssembly` + `wx.getRandomValues`; см. [WeChat и мини-программы](https://jktantan.github.io/sm-crypto-wasm/ru/guide/wechat) |
 
 ### Поддержка сборщиков
 
