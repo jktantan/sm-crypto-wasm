@@ -77,12 +77,12 @@ pnpm example:wechat:prepare --algos sm2        # 自动带 sm4 / pem / common
 
 | 准备方式 | 生成体积 |
 |---|---:|
-| 全部（默认） | 约 293 KB |
-| `--algos sm3` | 约 29 KB |
-| `--algos sm3,sm4` | 约 56 KB |
-| `--algos zuc` | 约 35 KB |
-| `--algos sm2` | 约 157 KB |
-| `--algos sm9` | 约 192 KB |
+| 全部（默认） | 约 297 KB |
+| `--algos sm3` | 约 33 KB |
+| `--algos sm3,sm4` | 约 59 KB |
+| `--algos zuc` | 约 38 KB |
+| `--algos sm2` | 约 160 KB |
+| `--algos sm9` | 约 195 KB |
 
 裁剪后要**同步删掉页面里未选算法的 `import` 和测试块**（示例页面默认测试全部 5 个算法），
 否则编译期会找不到模块。业务页面通常只 import 自己用到的算法，天然匹配。
@@ -123,7 +123,11 @@ pnpm example:wechat:prepare --algos sm2        # 自动带 sm4 / pem / common
 加载。页面按子路径导入（`dist/sm3/index.js` 等），避开聚合入口里的
 `export * as sm2` 语法对旧版开发者工具的兼容性问题。
 
-## 三个运行时适配点
+## 两个运行时适配点
+
+base64 不需要宿主 polyfill：库的 `runtime/convert.ts` 已内置纯 JS 兜底
+（`Buffer` → `btoa`/`atob` → 纯 JS），小程序里会自动走最后一级。下面两个适配点
+才是小程序运行时真正需要补的。
 
 ### wasm 加载：`miniprogram/shims/loadWasm.js`
 
@@ -142,17 +146,10 @@ pnpm example:wechat:prepare --algos sm2        # 自动带 sm4 / pem / common
 SM2 测试块开始前调用了一次；如果你的业务代码在别处用 SM2/SM9，请在自己的启动流程
 里同样预先调用。
 
-### base64：`miniprogram/polyfills/base64.js`
-
-小程序没有 `btoa` / `atob`。SM2 / SM9 的 PEM 密钥生成与解析要走 base64，缺失时会报
-`btoa is not defined`。`app.js` 已引入该 polyfill；它只在宿主缺失时安装，不覆盖已有实现。
-
 ## 常见问题
 
 - **`WXWebAssembly is not defined`**：基础库太低。升到 2.13.0+（随机数需要 2.15.0+）。
 - **`随机数池不足`**：SM2/SM9 调用前没有 `await primeRandom()`，或预取量太小。
-- **`btoa is not defined` / `atob is not defined`**：小程序缺少 base64 全局函数。
-  `app.js` 已引入 `polyfills/base64.js`；如果你只复制了页面，请手动引入。
 - **`TextEncoder is not defined`**：SM9 或 SM2 密钥交换需要。`app.js` 已引入
   `polyfills/textEncoding.js`；如果你只复制了页面而没复制 `app.js`，请手动引入。
 - **ZUC 报「(key, iv, counter) 复用拒绝」**：ZUC 的复用保护是模块级状态，同一组

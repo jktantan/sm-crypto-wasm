@@ -37,7 +37,7 @@ sm3.hash('616263');
 - нет стандартного `WebAssembly`; базовая библиотека **2.13.0+** даёт `WXWebAssembly`;
 - нет `globalThis.crypto`; базовая библиотека **2.15.0+** даёт `wx.getRandomValues`
   (асинхронный вызов);
-- нет `btoa` / `atob`; в старых базовых библиотеках также нет `TextEncoder` / `TextDecoder`.
+- нет `btoa` / `atob` (в библиотеке есть встроенный JS-fallback); в старых базовых библиотеках также нет `TextEncoder` / `TextDecoder`.
 
 ### Быстрый старт
 
@@ -178,19 +178,19 @@ export function randomScalarBelow(order) {
 > **Перед генерацией ключей и подписью SM2 / SM9 обязательно вызовите
 > `await primeRandom()`.** SM3 / SM4 / ZUC случайные числа не нужны.
 
-### Адаптер 3: base64 и кодировка текста
+### Адаптер 3: кодировка текста
 
-Генерация и разбор PEM-ключей SM2 / SM9 используют `btoa` / `atob`, а SM9 и обмен ключами
-SM2 — ещё и `TextEncoder`. В мини-программе нужны polyfill-реализации. В примере они лежат
-в
-[`polyfills/base64.js`](https://github.com/jktantan/sm-crypto-wasm/blob/main/examples/wechat-miniprogram/miniprogram/polyfills/base64.js)
-и
+base64 **не требует** polyfill на стороне хоста: в `runtime/convert.ts` уже есть
+встроенный JS-fallback (`Buffer` → `btoa`/`atob` → чистый JS), который автоматически
+используется в мини-программах.
+
+`TextEncoder` / `TextDecoder` всё ещё могут потребовать fallback (их используют SM9 и
+обмен ключами SM2). Реализация из примера:
 [`polyfills/textEncoding.js`](https://github.com/jktantan/sm-crypto-wasm/blob/main/examples/wechat-miniprogram/miniprogram/polyfills/textEncoding.js).
-Подключите их в `app.js`:
+Подключите её в `app.js`:
 
 ```js
 import './polyfills/textEncoding.js';
-import './polyfills/base64.js';
 ```
 
 ### Вызов библиотеки
@@ -219,16 +219,16 @@ export async function run() {
 
 Нативные мини-программы **не делают tree-shaking**: все файлы под `miniprogramRoot`
 попадают в пакет кода, а `import * as` не удаляет неиспользуемые экспорты. Полный
-`vendor` примера занимает около **293 KB**; обрезка по алгоритмам даёт:
+`vendor` примера занимает около **297 KB**; обрезка по алгоритмам даёт:
 
 | Подготовка | Размер |
 | --- | ---: |
-| Все (по умолчанию) | ~293 KB |
-| `--algos sm3` | ~29 KB |
-| `--algos zuc` | ~35 KB |
-| `--algos sm3,sm4` | ~56 KB |
-| `--algos sm2` (добавляет sm4/pem/common) | ~157 KB |
-| `--algos sm9` (добавляет sm4/pem/common) | ~192 KB |
+| Все (по умолчанию) | ~297 KB |
+| `--algos sm3` | ~33 KB |
+| `--algos zuc` | ~38 KB |
+| `--algos sm3,sm4` | ~59 KB |
+| `--algos sm2` (добавляет sm4/pem/common) | ~160 KB |
+| `--algos sm9` (добавляет sm4/pem/common) | ~195 KB |
 
 Если используете Taro / uni-app / esbuild / Rollup / Webpack, сначала дайте сборщику
 сделать настоящий ESM tree-shaking:
@@ -250,7 +250,6 @@ export async function run() {
 
 - **`WXWebAssembly is not defined`**: базовая библиотека ниже 2.13.0.
 - **`wx.getRandomValues is not defined`**: базовая библиотека ниже 2.15.0.
-- **`btoa is not defined`**: не подключён base64-polyfill.
 - **`TextEncoder is not defined`**: не подключён polyfill кодировки или не скопирован `app.js`.
 - **Пул случайных чисел исчерпан**: вызовите `await primeRandom()` перед SM2 / SM9.
 - **ZUC сообщает о повторном использовании**: одна и та же пара `(key, iv, counter)` может

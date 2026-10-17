@@ -34,7 +34,7 @@ A Mini Program is a different runtime. The browser entry cannot be used as-is:
 - no `fetch`, and `import.meta.url` cannot locate wasm files;
 - no standard `WebAssembly`; base library **2.13.0+** provides `WXWebAssembly`;
 - no `globalThis.crypto`; base library **2.15.0+** provides `wx.getRandomValues` (async);
-- no `btoa` / `atob`; older base libraries also lack `TextEncoder` / `TextDecoder`.
+- no `btoa` / `atob` (the library has a built-in JS fallback); older base libraries also lack `TextEncoder` / `TextDecoder`.
 
 ### Quick start
 
@@ -175,18 +175,18 @@ export function randomScalarBelow(order) {
 > **Call `await primeRandom()` before SM2 / SM9 key generation or signing.** SM3 / SM4 / ZUC
 > do not need randomness.
 
-### Adapter 3: base64 and text encoding
+### Adapter 3: text encoding
 
-SM2 / SM9 PEM key generation and parsing call `btoa` / `atob`; SM9 and SM2 key exchange
-also use `TextEncoder`. Mini Programs need polyfills. The example ships them as
-[`polyfills/base64.js`](https://github.com/jktantan/sm-crypto-wasm/blob/main/examples/wechat-miniprogram/miniprogram/polyfills/base64.js)
-and
+base64 needs **no** host polyfill: `runtime/convert.ts` has a built-in JS fallback
+(`Buffer` → `btoa`/`atob` → pure JS), used automatically in Mini Programs.
+
+`TextEncoder` / `TextDecoder` may still need a fallback (SM9 and SM2 key exchange use them).
+The example ships one as
 [`polyfills/textEncoding.js`](https://github.com/jktantan/sm-crypto-wasm/blob/main/examples/wechat-miniprogram/miniprogram/polyfills/textEncoding.js).
-Import them in `app.js`:
+Import it in `app.js`:
 
 ```js
 import './polyfills/textEncoding.js';
-import './polyfills/base64.js';
 ```
 
 ### Calling the library
@@ -215,16 +215,16 @@ Use subpath imports (`dist/sm3/index.js`, ...) rather than the aggregate
 
 Native Mini Programs do **not** tree-shake: every file under `miniprogramRoot` goes into the
 code package, and `import * as` does not remove unused exports. The full example `vendor`
-directory is about **293 KB**; trimming by algorithm gives:
+directory is about **297 KB**; trimming by algorithm gives:
 
 | Preparation | Size |
 | --- | ---: |
-| All (default) | ~293 KB |
-| `--algos sm3` | ~29 KB |
-| `--algos zuc` | ~35 KB |
-| `--algos sm3,sm4` | ~56 KB |
-| `--algos sm2` (adds sm4/pem/common) | ~157 KB |
-| `--algos sm9` (adds sm4/pem/common) | ~192 KB |
+| All (default) | ~297 KB |
+| `--algos sm3` | ~33 KB |
+| `--algos zuc` | ~38 KB |
+| `--algos sm3,sm4` | ~59 KB |
+| `--algos sm2` (adds sm4/pem/common) | ~160 KB |
+| `--algos sm9` (adds sm4/pem/common) | ~195 KB |
 
 If you use Taro / uni-app / esbuild / Rollup / Webpack, let the bundler do real ESM
 tree-shaking first:
@@ -245,7 +245,6 @@ subpackage, and use `.wasm.br` on base library 2.14+.
 
 - **`WXWebAssembly is not defined`**: base library below 2.13.0.
 - **`wx.getRandomValues is not defined`**: base library below 2.15.0.
-- **`btoa is not defined`**: base64 polyfill missing.
 - **`TextEncoder is not defined`**: text-encoding polyfill missing, or `app.js` was not copied.
 - **Random pool exhausted**: call `await primeRandom()` before SM2 / SM9.
 - **ZUC says reuse rejected**: the same `(key, iv, counter)` may only encrypt once; increment

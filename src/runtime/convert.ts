@@ -17,6 +17,8 @@
  * spec/plan 对应：plan Task 2；spec §6 API 默认 hex、§9 安全姿态。
  */
 
+import { decodeBase64, encodeBase64 } from './base64.core.js';
+
 /** 任意可被业务 API 接受的输入形态。 */
 export type Input = string | Uint8Array;
 
@@ -114,21 +116,33 @@ export function hexToBytes(hex: string, label = 'hex'): Uint8Array {
   throw new TypeError(`hexToBytes(${label}): invalid hex`);
 }
 
-/** bytes → base64。Node `Buffer` 优先，浏览器回落到 `btoa`。 */
+/**
+ * bytes → base64。优先级：Node `Buffer` → 宿主 `btoa` → 纯 JS 兜底。
+ *
+ * 微信小程序既没有 `Buffer` 也没有 `btoa`，会走最后一级；不需要宿主再安装
+ * base64 polyfill。
+ */
 export function bytesToBase64(bytes: Uint8Array): string {
   if (HAS_BUFFER) {
     return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
   }
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0);
-  return btoa(bin);
+  if (HAS_BTOA) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i] ?? 0);
+    return btoa(bin);
+  }
+  return encodeBase64(bytes);
 }
 
 /** base64 合法字符集（含结尾 padding）。 */
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
-/** base64 字符串 → bytes。失败抛 TypeError。 */
-export function base64ToBytes(b64: string, _label = 'base64'): Uint8Array {
+/**
+ * base64 字符串 → bytes。失败抛 TypeError。
+ *
+ * 优先级：Node `Buffer` → 宿主 `atob` → 纯 JS 兜底（微信小程序等）。
+ */
+export function base64ToBytes(b64: string, label = 'base64'): Uint8Array {
   // Node 快路径。`Buffer.from(..., 'base64')` 对非法字符是静默丢弃的，
   // 先用正则挡掉，非法的落到 `atob` 去抛错，保持与浏览器一致的行为。
   if (HAS_BUFFER && B64_RE.test(b64)) {
@@ -137,10 +151,13 @@ export function base64ToBytes(b64: string, _label = 'base64'): Uint8Array {
     out.set(buf);
     return out;
   }
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+  if (HAS_ATOB) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  return decodeBase64(b64, label);
 }
 
 /** PEM → bytes。剥去 BEGIN/END armor，base64 解码。 */
@@ -179,6 +196,10 @@ export function bytesToPem(bytes: Uint8Array, kind: string): string {
  * （实测 4 KB 输入：hex 编码 52.6 µs → 1.9 µs）。
  */
 const HAS_BUFFER = typeof Buffer !== 'undefined' && typeof Buffer.from === 'function';
+
+/** 宿主是否提供 `btoa` / `atob`（现代浏览器有；微信小程序没有）。 */
+const HAS_BTOA = typeof btoa === 'function';
+const HAS_ATOB = typeof atob === 'function';
 
 /** 16 进制数字查表（浏览器路径）。 */
 const HEX_CHARS = '0123456789abcdef';

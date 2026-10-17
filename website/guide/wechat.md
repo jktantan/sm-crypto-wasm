@@ -33,7 +33,7 @@ sm3.hash('616263');
 - 没有 `fetch`，也不能用 `import.meta.url` 定位 wasm；
 - 没有标准 `WebAssembly`，只有基础库 2.13.0+ 的 `WXWebAssembly`；
 - 没有 `globalThis.crypto`，只有基础库 2.15.0+ 的 `wx.getRandomValues`（异步回调）；
-- 没有 `btoa` / `atob`；旧基础库也没有 `TextEncoder` / `TextDecoder`。
+- 没有 `btoa` / `atob`（库内已内置纯 JS 兜底）；旧基础库也没有 `TextEncoder` / `TextDecoder`。
 
 ### 快速开始
 
@@ -170,65 +170,17 @@ export function randomScalarBelow(order) {
 
 > **SM2 / SM9 生成密钥、签名之前必须 `await primeRandom()`**。SM3 / SM4 / ZUC 不需要随机数。
 
-### 适配点三：base64 与文本编码
+### 适配点三：文本编码
 
-SM2 / SM9 的 PEM 密钥生成与解析会调用 `btoa` / `atob`；SM9 和 SM2 密钥交换还会用
-`TextEncoder`。小程序缺失时需要 polyfill：
+base64 **不需要**宿主 polyfill：库的 `runtime/convert.ts` 已内置纯 JS 兜底
+（`Buffer` → `btoa`/`atob` → 纯 JS），小程序里会自动走最后一级。
 
-```js
-// base64.js —— 只在宿主缺失时安装
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-if (typeof globalThis.btoa === 'undefined') {
-  globalThis.btoa = (input) => {
-    const str = String(input);
-    let out = '';
-    for (let i = 0; i < str.length; i += 3) {
-      const a = str.charCodeAt(i);
-      const hasB = i + 1 < str.length;
-      const hasC = i + 2 < str.length;
-      const b = hasB ? str.charCodeAt(i + 1) : 0;
-      const c = hasC ? str.charCodeAt(i + 2) : 0;
-      const n = (a << 16) | (b << 8) | c;
-      out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63]
-        + (hasB ? B64[(n >> 6) & 63] : '=')
-        + (hasC ? B64[n & 63] : '=');
-    }
-    return out;
-  };
-}
-
-if (typeof globalThis.atob === 'undefined') {
-  globalThis.atob = (input) => {
-    const body = String(input).replace(/[\t\n\f\r ]/g, '').replace(/=+$/, '');
-    let out = '';
-    let buffer = 0;
-    let bits = 0;
-    for (let i = 0; i < body.length; i++) {
-      const v = B64.indexOf(body[i]);
-      if (v < 0) throw new Error('InvalidCharacterError: atob invalid base64');
-      buffer = (buffer << 6) | v;
-      bits += 6;
-      if (bits >= 8) {
-        bits -= 8;
-        out += String.fromCharCode((buffer >> bits) & 0xff);
-        buffer &= (1 << bits) - 1;
-      }
-    }
-    return out;
-  };
-}
-
-export {};
-```
-
-`TextEncoder` / `TextDecoder` 的 UTF-8 兜底实现见示例的
+`TextEncoder` / `TextDecoder` 仍可能需要兜底（SM9 和 SM2 密钥交换会用到）。示例实现见
 [`polyfills/textEncoding.js`](https://github.com/jktantan/sm-crypto-wasm/blob/main/examples/wechat-miniprogram/miniprogram/polyfills/textEncoding.js)。
-在 `app.js` 里按顺序引入这三个文件：
+在 `app.js` 里引入：
 
 ```js
 import './polyfills/textEncoding.js';
-import './polyfills/base64.js';
 ```
 
 ### 页面调用
@@ -256,16 +208,16 @@ export async function run() {
 ### 体积与裁剪
 
 原生小程序**不做 tree-shaking**：`miniprogramRoot` 下的文件都会进代码包，`import * as`
-也不会让编译器删掉未使用的导出。示例的全量 `vendor` 约 **293 KB**，按算法裁剪后：
+也不会让编译器删掉未使用的导出。示例的全量 `vendor` 约 **297 KB**，按算法裁剪后：
 
 | 准备方式 | 生成体积 |
 | --- | ---: |
-| 全部（默认） | 约 293 KB |
-| `--algos sm3` | 约 29 KB |
-| `--algos zuc` | 约 35 KB |
-| `--algos sm3,sm4` | 约 56 KB |
-| `--algos sm2`（自动补 sm4/pem/common） | 约 157 KB |
-| `--algos sm9`（自动补 sm4/pem/common） | 约 192 KB |
+| 全部（默认） | 约 297 KB |
+| `--algos sm3` | 约 33 KB |
+| `--algos zuc` | 约 38 KB |
+| `--algos sm3,sm4` | 约 59 KB |
+| `--algos sm2`（自动补 sm4/pem/common） | 约 160 KB |
+| `--algos sm9`（自动补 sm4/pem/common） | 约 195 KB |
 
 如果使用 Taro / uni-app / 自建 esbuild / Rollup / Webpack，可以让打包器先做真正的 ESM
 tree-shaking：
@@ -285,7 +237,6 @@ tree-shaking：
 
 - **`WXWebAssembly is not defined`**：基础库低于 2.13.0，升级基础库/微信版本。
 - **`wx.getRandomValues is not defined`**：基础库低于 2.15.0。
-- **`btoa is not defined`**：没有引入 base64 polyfill。
 - **`TextEncoder is not defined`**：没有引入文本编码 polyfill，或只复制了页面没复制 `app.js`。
 - **`随机数池不足`**：SM2/SM9 调用前没有 `await primeRandom()`，或预取量太小。
 - **ZUC 报「(key, iv, counter) 复用拒绝」**：同一组 `(key, iv, counter)` 只能加密一次；
