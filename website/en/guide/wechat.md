@@ -219,12 +219,12 @@ directory is about **297 KB**; trimming by algorithm gives:
 
 | Preparation | Size |
 | --- | ---: |
-| All (default) | ~297 KB |
-| `--algos sm3` | ~33 KB |
-| `--algos zuc` | ~38 KB |
-| `--algos sm3,sm4` | ~59 KB |
-| `--algos sm2` (adds sm4/pem/common) | ~160 KB |
-| `--algos sm9` (adds sm4/pem/common) | ~195 KB |
+| All (default) | \~297 KB |
+| `--algos sm3` | \~33 KB |
+| `--algos zuc` | \~38 KB |
+| `--algos sm3,sm4` | \~59 KB |
+| `--algos sm2` (adds sm4/pem/common) | \~160 KB |
+| `--algos sm9` (adds sm4/pem/common) | \~195 KB |
 
 If you use Taro / uni-app / esbuild / Rollup / Webpack, let the bundler do real ESM
 tree-shaking first:

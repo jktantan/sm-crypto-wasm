@@ -20,14 +20,14 @@ ESM-only，Node.js >= 18，支持现代浏览器与 Web Worker；算法按子包
 
 | 目的 | 命令 | 说明 |
 |---|---|---|
-| 安装 | `pnpm install` | Node >= 18 |
+| 安装 | `pnpm install` | 运行时 Node >= 18；测试需 Node 20+（vitest 4） |
 | 全量构建 | `pnpm build` | clean + 5 个 wasm + tsc |
 | 只构建 wasm | `pnpm build:wasm:all` | 改 AssemblyScript 后必须执行 |
 | 只编译 TS | `pnpm build:ts` | `tsc -p tsconfig.build.json` |
 | 单测（快） | `pnpm test:unit` | 直接用已有 `dist/*.wasm`，**不重建** |
-| 单测（含构建） | `pnpm test` | `pretest` 会先 `build:wasm:all` |
-| 浏览器测试 | `pnpm test:browser` | happy-dom runner |
-| Fuzz 测试 | `pnpm test:fuzz` | 解析器 / ASN.1 / X.509 / CMS |
+| 单测（含构建） | `pnpm test` | 先 `build:wasm:all`，再跑 `test:unit` |
+| 浏览器测试 | `pnpm test:browser` | 先构建 wasm，再跑 happy-dom runner |
+| Fuzz 测试 | `pnpm test:fuzz` | 先构建 wasm，再跑解析器 / ASN.1 / X.509 / CMS |
 | Lint / 格式检查 | `pnpm lint` | Biome，覆盖 `src tests bench` |
 | 自动格式化 | `pnpm format` | Biome 写回 |
 | 类型检查 | `pnpm typecheck` | `tsc --noEmit` |
@@ -54,8 +54,10 @@ ESM-only，Node.js >= 18，支持现代浏览器与 Web Worker；算法按子包
 
 ## 注释规范（强制）
 
-算法代码必须有注释，且**至少中英双语**。项目面向国内与国际读者，中文在前、英文在后；
-同一文件内保持一致。注释解释“为什么、依据什么标准、有哪些不变量”，不要复述代码。
+算法代码必须有注释，且**至少中英双语**。项目面向国内与国际读者，采用“中文注释块在前、
+英文注释块在后”的结构：先写完整的中文段落，空一行后再写英文段落；**不要在同一行用
+`/` 分隔中英文**（技术列表如 `CBC / CTR` 除外）。同一文件内保持一致。
+注释解释“为什么、依据什么标准、有哪些不变量”，不要复述代码。
 
 ### 必须双语的场景
 
@@ -67,20 +69,26 @@ ESM-only，Node.js >= 18，支持现代浏览器与 Web Worker；算法按子包
 - 安全相关分支（密钥校验、MAC/tag 比较、错误映射、`safeMode`）；
 - 测试中引用的标准向量来源。
 
-平凡 getter / 一目了然的赋值可以不写双语，但公共 API 与算法核心没有例外。
+平凡 getter 或一目了然的赋值可以不写双语，但公共 API 与算法核心没有例外。
 
 ### TS 示例
 
 ```ts
 /**
- * 从私钥派生公钥 / Derive the public key from a private key.
+ * 从私钥派生公钥。
  *
  * 接受 32 字节裸私钥或 PKCS#8 / SEC1 PEM；返回未压缩点 hex。
+ *
+ * @param privateKey 私钥。
+ * @returns 公钥。
+ *
+ * Derive the public key from a private key.
+ *
  * Accepts a 32-byte raw private key or PKCS#8 / SEC1 PEM; returns an
  * uncompressed point as hex.
  *
- * @param privateKey 私钥 / private key
- * @returns 公钥 / public key
+ * @param privateKey The private key.
+ * @returns The public key.
  */
 export function getPublicKey(privateKey: KeyInput): string;
 ```
@@ -90,6 +98,7 @@ export function getPublicKey(privateKey: KeyInput): string;
 ```ts
 // SM4 S 盒，GB/T 32907-2016 §6.2 表 1。
 // 用 memory.data 裸指针避免 StaticArray 的边界检查开销。
+//
 // SM4 S-box, GB/T 32907-2016 §6.2 table 1.
 // Use a raw memory.data pointer to avoid StaticArray bounds-check overhead.
 const SBOX: usize = memory.data<u8>([...]);

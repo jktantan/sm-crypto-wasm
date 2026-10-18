@@ -21,7 +21,7 @@ hero:
 
 features:
   - title: An order of magnitude faster
-    details: Elliptic curves and bilinear pairings run in WASM. SM4's six modes are 3.6~11.2× faster than a pure-JS reference, SM2 1.8~7.6×, SM3 / ZUC 1.8~2.3×.
+    details: Elliptic curves and bilinear pairings run in WASM. SM4's six modes are 3.6–11.2× faster than a pure-JS reference, SM2 1.8–7.6×, SM3 3.1–3.5× and ZUC 2.3×.
   - title: Zero toolchain
     details: The published artifact is .wasm plus a thin TS shim. No node-gyp, no Rust, no compiler for your users.
   - title: Runtime-agnostic

@@ -1,7 +1,12 @@
 # sm-crypto-wasm 设计稿
 
+> **历史设计文档 / Historical design document**：实现细节与工具链可能已变化。
+> 当前代码规范见根目录 `AGENTS.md`，工具链以 `package.json` 为准。
+> Implementation details and toolchain may have changed; see `AGENTS.md` and
+> `package.json` for the current rules.
+
 - 日期：2026-10-13
-- 仓库：`/Users/bytonsec/works/github/sm-crypto-wasm`
+- 仓库：<https://github.com/jktantan/sm-crypto-wasm>
 - 包名：`sm-crypto-wasm`
 - 版本起步：`0.1.0`
 - 目标 Node：`>=18`
@@ -238,11 +243,15 @@ import { encrypt } from 'sm-crypto-wasm/sm2';   // 只加载 sm2.wasm
 - 子入口默认导出"动词函数"而不是 `sm2` 对象（保持体积敏感场景的 tree-shake 友好）；
 - README 配四档速查：SM3 hash、SM4 对称加解密、SM2 加密签名、SM2 密钥交换协议；
 - `package.json` 的 `exports` 字段按 Node 18 ESM 解析约定完整写法（`.`、`./sm2`、`./sm3`、`./sm4`、`./sm9`、`./zuc`、`./package.json`）。
-- **代码注释约定**：所有 `.ts` / `.as` 文件的注释**以中文为主，英文为辅**（锁定 2026-10-13）：
-  - 文件顶部：中文说明文件用途、与 spec/plan 的对应关系、输入输出约束；
-  - 函数 JSDoc：`@param` / `@returns` 用英文（IDE 友好），描述体用中文；
-  - 行内注释：算法步骤、GM/T 引用、不变量用中文；明显的关键字（如 `TODO`、`FIXME`、`HACK`）和 RFC/GMT 编号用英文；
-  - 测试用例 `it(...)` 描述用中文，便于国内团队读测试。
+- **代码注释约定**：所有 `.ts` / `.as` 文件的注释**至少中英双语**（中文在前、英文在后；2026-10-13 初版，2026-10-18 更新）：
+  - 文件顶部：中文 + English summary，说明用途、与 spec/plan 的对应关系、输入输出约束；
+  - 中文块在前、英文块在后；不要在同一行用 `/` 分隔两种语言（技术列表除外）；
+  - 函数 JSDoc：描述体与 `@param` / `@returns` 均双语；
+  - 行内注释：算法步骤、GM/T 引用、不变量、安全相关分支必须双语；标准号 / RFC / GM/T 编号保持原文；
+  - 测试用例 `it(...)` 描述可保持中文，但涉及标准向量来源的注释需双语；
+  - 当前权威规则见根目录 `AGENTS.md`；本节如有冲突，以 `AGENTS.md` 为准。
+  - All `.ts` / `.as` comments must be bilingual (Chinese first, English second);
+    see `AGENTS.md` for the authoritative rules.
 
 ---
 

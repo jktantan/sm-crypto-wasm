@@ -9,8 +9,8 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 
 - **Производительность**: горячие пути (модульная арифметика больших чисел,
   сжатие хэша, раунды блочного шифра) выполняются в WASM. По сравнению с чистой
-  JS-реализацией SM3 / ZUC быстрее в 1.8~2.3×, шесть режимов SM4 — в 3.6~11.2×,
-  SM2 — в 1.8~7.6×; см. **Производительность** ниже;
+  JS-реализацией SM3 быстрее в 3.1\~3.5×, ZUC — в 2.3×, шесть режимов SM4 —
+  в 3.6\~11.2×, SM2 — в 1.8\~7.6×; см. **Производительность** ниже;
 - **Без инструментария**: на выходе `.wasm` плюс тонкая TS-прослойка;
   пользователю не нужны `node-gyp`, Rust или компилятор;
 - **Кросс-рантайм**: один и тот же API работает в Node, браузере и
@@ -25,8 +25,8 @@ ZUC**) на **AssemblyScript → WebAssembly**. Работает на Node 18+ �
 
 Горячие пути (модульная арифметика больших чисел, сжатие хэша, раунды блочного
 шифра, спаривания) выполняются внутри WASM. **Каждая операция, у которой есть
-чистый JS-аналог, быстрее его**: SM3 / ZUC — в 1.8–2.3×, шесть режимов SM4 —
-в 3.6–11.2×, SM2 — в 1.8–7.6×.
+чистый JS-аналог, быстрее его**: SM3 — в 3.1–3.5×, ZUC — в 2.3×, шесть режимов
+SM4 — в 3.6–11.2×, SM2 — в 1.8–7.6×.
 
 Полная таблица по операциям, сравнение с `gmkitx` и разбор «почему именно так» —
 на **[странице производительности](https://jktantan.github.io/sm-crypto-wasm/ru/performance)**.
@@ -220,16 +220,19 @@ const digest = await webcrypto.subtle.digest('SM3', data);
 
 ## Сводка API
 
+В таблице перечислены основные API. Каждый модуль также экспортирует `ensureLoaded()`;
+полный список см. в `dist/index.d.ts` или в `.d.ts` соответствующего подпути.
+
 | Модуль | Функции |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `signWithID` · `verify` · `verifyWithID` · `encrypt` · `decrypt` · `configurePublicKeyCache` · `clearPublicKeyCache` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKey` · `getPreparedPublicKey` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `createSignaturePointPool` (async) · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `webcrypto` | `subtle` · `CryptoKey` |
 | `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
 | `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
-| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
+| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` · `resetReuseGuard` |
 
 Документированные алиасы (указывают на ту же реализацию):
 `sm4.encryptCTR` / `decryptCTR` — алиасы `cryptCTR`,
@@ -249,7 +252,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
+Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`; также есть `sm-crypto-wasm/esbuild-plugin` (см. раздел о сборщиках ниже).
 
 ---
 
@@ -367,8 +370,8 @@ try {
 pnpm install
 pnpm build          # clean + asc (5 .wasm-файлов) + tsc → dist/ (без source map)
 pnpm build:ts:debug # для отладки: пересборка TS в dist/ с .js.map / .d.ts.map
-pnpm test           # Node-раннер (vitest)
-pnpm test:browser   # браузерный раннер (happy-dom)
+pnpm test           # сборка wasm + Node-тесты (vitest)
+pnpm test:browser   # сборка wasm + браузерный раннер (happy-dom)
 pnpm bench          # микро-бенчмарки mitata (5 блоков алгоритмов)
 pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
@@ -406,8 +409,10 @@ biome).
 ## Участие в проекте
 
 Issues и pull requests приветствуются. Настройка окружения, команды тестов и
-требования к PR описаны в [CONTRIBUTING.md](../CONTRIBUTING.md). Об уязвимостях
-сообщайте через канал, указанный в [SECURITY.md](../SECURITY.md).
+требования к PR описаны в
+[CONTRIBUTING.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/CONTRIBUTING.md).
+Об уязвимостях сообщайте через канал, указанный в
+[SECURITY.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/SECURITY.md).
 
 Перед отправкой выполните:
 

@@ -9,7 +9,9 @@
 
 ## 环境 / Requirements
 
-- Node.js >= 18（推荐 20+）/ Node.js >= 18 (20+ recommended)
+- Node.js >= 18（库运行时；开发/测试需 20+，vitest 4 要求 Node 20+）/
+  Node.js >= 18 (library runtime; development/tests require 20+ because vitest 4
+  needs Node 20+)
 - pnpm（CI 当前固定使用 pnpm 10.34.7）/ pnpm (CI currently pins pnpm 10.34.7)
 
 ## 安装与构建 / Setup and build
@@ -35,6 +37,8 @@ pnpm test:unit
   `pnpm test` rebuilds the wasm files first, then runs the Node tests.
 - `pnpm test:unit` 直接使用已有的 `dist/` 产物，适合日常快速回归；
   `pnpm test:unit` uses the existing `dist/` artifacts and is intended for quick local feedback.
+- `pnpm test:browser` 与 `pnpm test:fuzz` 也会先重建 wasm；
+  `pnpm test:browser` and `pnpm test:fuzz` also rebuild the wasm files first.
 
 浏览器与 fuzz 测试 / Browser and fuzz tests:
 

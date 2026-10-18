@@ -9,8 +9,8 @@ lazy-loaded on demand.
 
 - **Performance**: hot paths (bignum modular arithmetic, hash compression,
   block-cipher rounds) run inside WASM. Compared with the pure-JS reference
-  implementation, SM3 / ZUC are 1.8~2.3× faster, the six SM4 modes 3.6~11.2×,
-  and SM2 1.8~7.6× — see **Performance** below;
+  implementation, SM3 is 3.1\~3.5× faster, ZUC 2.3×, the six SM4 modes
+  3.6\~11.2×, and SM2 1.8\~7.6× — see **Performance** below;
 - **Zero toolchain**: the published artifact is `.wasm` plus a thin TS shim;
   users don't need `node-gyp`, Rust, or a compiler;
 - **Runtime-agnostic**: the same API works in Node, browsers, and Workers;
@@ -24,7 +24,8 @@ lazy-loaded on demand.
 
 Hot paths (bignum modular arithmetic, hash compression, block-cipher rounds,
 pairings) run inside WASM. **Every operation with a pure-JS counterpart is faster
-than it**: SM3 / ZUC by 1.8–2.3×, the six SM4 modes by 3.6–11.2×, SM2 by 1.8–7.6×.
+than it**: SM3 by 3.1–3.5×, ZUC by 2.3×, the six SM4 modes by 3.6–11.2×,
+SM2 by 1.8–7.6×.
 
 The full per-operation table, the head-to-head against `gmkitx`, and the
 "why it looks like this" notes live on the
@@ -219,16 +220,19 @@ No certificate-chain validation or CRL/OCSP for X.509/CMS; the WebCrypto adapter
 
 ## API at a glance
 
+The table lists the main APIs. Every module also exports `ensureLoaded()`; the full
+surface is defined by `dist/index.d.ts` or the `.d.ts` file of the corresponding subpath.
+
 | Module | Functions |
 |---|---|
-| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `signWithID` · `verify` · `verifyWithID` · `encrypt` · `decrypt` · `configurePublicKeyCache` · `clearPublicKeyCache` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKey` · `getPreparedPublicKey` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `createSignaturePointPool` (async) · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
 | `webcrypto` | `subtle` · `CryptoKey` |
 | `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
 | `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
-| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
+| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` · `resetReuseGuard` |
 
 Documented aliases (they point to the same implementation):
 `sm4.encryptCTR` / `decryptCTR` alias `cryptCTR`,
@@ -248,7 +252,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
+Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`; there is also `sm-crypto-wasm/esbuild-plugin` (see Bundler support below).
 
 ---
 
@@ -359,8 +363,8 @@ try {
 pnpm install
 pnpm build          # clean + asc (5 .wasm files) + tsc → dist/ (no source maps)
 pnpm build:ts:debug # for debugging: recompile TS to dist/ with .js.map / .d.ts.map
-pnpm test           # Node runner (vitest)
-pnpm test:browser   # browser runner (happy-dom)
+pnpm test           # build wasm + Node tests (vitest)
+pnpm test:browser   # build wasm + browser runner (happy-dom)
 pnpm bench          # mitata micro-benchmarks (5 algorithm blocks)
 pnpm lint           # biome (lint + format)
 pnpm typecheck      # tsc --noEmit
@@ -396,9 +400,11 @@ configs don't affect the build or typecheck.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](../CONTRIBUTING.md)
+Issues and pull requests are welcome. See
+[CONTRIBUTING.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/CONTRIBUTING.md)
 for the development setup, test commands and PR expectations. Report security
-issues through the channel described in [SECURITY.md](../SECURITY.md).
+issues through the channel described in
+[SECURITY.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/SECURITY.md).
 
 Before submitting, run:
 

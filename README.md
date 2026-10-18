@@ -11,7 +11,7 @@
 
 国密算法（SM2 / SM3 / SM4 / SM9 / ZUC）的 **AssemblyScript → WebAssembly** 实现，Node 18+ 与现代浏览器（含 Web Worker）均可使用，按算法分包、按需懒加载。
 
-- **性能**：热点（大整数模运算 / hash 压缩 / 分组密码轮函数）跑在 WASM 里。与同机纯 JS 参考实现相比，SM3 / ZUC 快 1.8~2.3×、SM4 六种模式快 3.6~11.2×、SM2 快 1.8~7.6×；
+- **性能**：热点（大整数模运算 / hash 压缩 / 分组密码轮函数）跑在 WASM 里。与同机纯 JS 参考实现相比，SM3 / ZUC 快 2.3\~3.5×、SM4 六种模式快 3.6\~11.2×、SM2 快 1.8\~7.6×；
 - **零工具链**：发布物是 `.wasm` + 薄 TS 胶水，使用者不需要 `node-gyp` / Rust / 编译器；
 - **跨运行时**：同一份 API 在 Node、浏览器、Worker 下一致；
 - **国标对齐**：实现按 GM/T 0003 / 0004 / 0002 / 0044 / 0001 系列，测试用官方向量与 OpenSSL / GmSSL / gmkitx 交叉对拍。
@@ -199,16 +199,18 @@ X.509 / CMS 不做证书链路径校验、CRL/OCSP；WebCrypto 不是原生 `cry
 
 ## API 一览
 
+下表列出主要 API；所有模块都导出 `ensureLoaded()`，完整导出以 `dist/index.d.ts` 或对应子路径的 `.d.ts` 为准。
+
 | 模块 | 函数 |
 |---|---|
-| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey`(async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
+| `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `signWithID` · `verify` · `verifyWithID` · `encrypt` · `decrypt` · `configurePublicKeyCache` · `clearPublicKeyCache` · `preparePublicKey`(async) · `configurePreparedKeyCache` · `clearPreparedPublicKey` · `getPreparedPublicKey` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `createSignaturePointPool`(async) · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
 | `webcrypto` | `subtle` · `CryptoKey` |
 | `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
 | `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB`/`decryptECB` · `encryptCBC`/`decryptCBC` · `encryptCTR`/`decryptCTR` · `encryptCFB`/`decryptCFB` · `encryptOFB`/`decryptOFB` · `encryptGCM`/`decryptGCM` |
 | `sm9` | `generateKeyPair`(async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
-| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` |
+| `zuc` | `zucKeystream` · `zucEncrypt` · `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` · `resetReuseGuard` |
 
 文档名别名（与主名指向同一实现）：`sm4.encryptCTR`/`decryptCTR` 等价 `cryptCTR`、`encryptOFB`/`decryptOFB` 等价 `cryptOFB`；`zuc.encrypt`/`decrypt`/`generateKeystream`/`mac`/`eia3` 等价 `zucEncrypt`/`zucDecrypt`/`zucKeystream`/`zucMac`。
 
@@ -223,7 +225,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-可用子路径：`sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`。
+可用子路径：`sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`；另有 `sm-crypto-wasm/esbuild-plugin`（见下方打包器支持）。
 
 ---
 
@@ -316,7 +318,7 @@ try {
 ## 性能
 
 热点（大整数模运算、hash 压缩函数、分组密码轮函数、双线性对）在 WASM 内执行。
-所有经过对比的公开操作都快于同机纯 JS 参考实现：SM3 / ZUC 快 1.8\~2.3×，
+所有经过对比的公开操作都快于同机纯 JS 参考实现：SM3 hash/hmac 快 3.1\~3.5×、ZUC EEA3 快 2.3×，
 SM4 六种模式 3.6\~11.2×，SM2 1.8\~7.6×。
 
 完整的逐项操作表、与 `gmkitx` 的对比，以及「为什么是这个形状」的分析，见
@@ -331,8 +333,8 @@ SM4 六种模式 3.6\~11.2×，SM2 1.8\~7.6×。
 pnpm install
 pnpm build          # clean + asc（5 个 .wasm）+ tsc → dist/（无 source map）
 pnpm build:ts:debug # 需要调试时：带 .js.map / .d.ts.map 重编译 TS 到 dist/
-pnpm test           # Node runner（vitest）
-pnpm test:browser   # 浏览器 runner（happy-dom）
+pnpm test           # 构建 wasm + Node 测试（vitest）
+pnpm test:browser   # 构建 wasm + 浏览器 runner（happy-dom）
 pnpm bench          # mitata 微型基准（5 大块算法）
 pnpm lint           # biome（lint + format）
 pnpm typecheck      # tsc --noEmit
@@ -361,8 +363,11 @@ pnpm typecheck      # tsc --noEmit
 ## 贡献
 
 欢迎提交 Issue 与 Pull Request。开发环境、测试命令与 PR 要求见
-[CONTRIBUTING.md](./CONTRIBUTING.md)；agent 协作、中英双语注释与代码规范见
-[AGENTS.md](./AGENTS.md)；安全问题请按 [SECURITY.md](./SECURITY.md) 报告。
+[CONTRIBUTING.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/CONTRIBUTING.md)；
+agent 协作、中英双语注释与代码规范见
+[AGENTS.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/AGENTS.md)；
+安全问题请按
+[SECURITY.md](https://github.com/jktantan/sm-crypto-wasm/blob/main/SECURITY.md) 报告。
 
 提交前请运行：
 

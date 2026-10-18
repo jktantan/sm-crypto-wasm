@@ -72,7 +72,7 @@ pass) — any mismatch throws instead of reporting a bogus number.
 **⚠️ The Cubelrti column carries two numbers.** Its `Cargo.toml` pins the release profile to
 **size** (`opt-level = "z"` + `wasm-opt = ["-Oz"]`), and the pre-built artifact committed to its
 repo is exactly that build (175 KB, vs the 177 KB I get from the same config). Switch to
-**speed** (`opt-level = 3` + `wasm-opt = ["-O3"]`, 263 KB) and it becomes **26%~53% faster**
+**speed** (`opt-level = 3` + `wasm-opt = ["-O3"]`, 263 KB) and it becomes **26%\~53% faster**
 (53% on SM3). So both are given: the default config is "what you actually get", `-O3` is "the
 ceiling of that Rust codebase". Ratio columns read **how many times faster this project is**.
 
@@ -92,7 +92,7 @@ ceiling of that Rust codebase". Ratio columns read **how many times faster this 
 | SM4 GCM encrypt 1 KB | **19.9 µs** | 27.5 µs | 19.7 µs | 30.4 µs | 1.39× | **0.99×** | 1.53× |
 
 Note the last row: **under -O3, Cubelrti essentially ties this project on SM4-GCM**. Per
-operation, the SM4 modes all converge to 1.2~1.5× with -O3; only SM2 (a structural gap, see
+operation, the SM4 modes all converge to 1.2\~1.5× with -O3; only SM2 (a structural gap, see
 below) and SM3 stay in a different league.
 
 Reproduce:
@@ -133,7 +133,7 @@ pnpm bench:cubelrti
   L1 latency via out-of-order execution); that path was removed. SM3 is MD-chained (blocks cannot
   be parallelised) with a serial 64-round compression function.
 - **SM4's CFB / OFB used to be slower than pure JS** — they called into wasm block-by-block
-  (64 crossings per KB). Batch exports brought them to ~10 µs, i.e. 3.6~3.8× faster.
+  (64 crossings per KB). Batch exports brought them to \~10 µs, i.e. 3.6\~3.8× faster.
 - **SM2's compute layer went through nine rounds of work** (Solinas reduction, Comba squaring,
   comb/wNAF scalar multiplication, in-place point arithmetic, mixed coordinates, joint scalar
   multiplication for verification, word-level inversion, public-key derivation caching for
@@ -141,11 +141,11 @@ pnpm bench:cubelrti
   [`docs/performance-ceiling.md`](https://github.com/jktantan/sm-crypto-wasm/blob/main/docs/performance-ceiling.md).
 - **SM9 is pairing-dominated.** Moving the base field to a Montgomery domain (CIOS) took one
   modular multiplication from 179 ns to 98 ns and sped up every end-to-end operation by
-  **1.6~1.8×**. There is no comparable pure-JS SM9 implementation, so only absolute numbers
+  **1.6\~1.8×**. There is no comparable pure-JS SM9 implementation, so only absolute numbers
   are given.
 - **hex codecs mattered**: switching encoding to `Buffer.toString('hex')` (with a lookup-table
-  fallback in browsers) is ~27× faster; the input side now validates and parses in one pass.
-  Together that made hex-input SM3 / SM4 / ZUC **27~32%** faster end to end.
+  fallback in browsers) is \~27× faster; the input side now validates and parses in one pass.
+  Together that made hex-input SM3 / SM4 / ZUC **27\~32%** faster end to end.
 
 ::: tip Numbers vary by version and machine
 The values above come from one specific machine — use `pnpm bench` / `pnpm bench:cubelrti` on

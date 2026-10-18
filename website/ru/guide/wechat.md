@@ -223,12 +223,12 @@ export async function run() {
 
 | Подготовка | Размер |
 | --- | ---: |
-| Все (по умолчанию) | ~297 KB |
-| `--algos sm3` | ~33 KB |
-| `--algos zuc` | ~38 KB |
-| `--algos sm3,sm4` | ~59 KB |
-| `--algos sm2` (добавляет sm4/pem/common) | ~160 KB |
-| `--algos sm9` (добавляет sm4/pem/common) | ~195 KB |
+| Все (по умолчанию) | \~297 KB |
+| `--algos sm3` | \~33 KB |
+| `--algos zuc` | \~38 KB |
+| `--algos sm3,sm4` | \~59 KB |
+| `--algos sm2` (добавляет sm4/pem/common) | \~160 KB |
+| `--algos sm9` (добавляет sm4/pem/common) | \~195 KB |
 
 Если используете Taro / uni-app / esbuild / Rollup / Webpack, сначала дайте сборщику
 сделать настоящий ESM tree-shaking:

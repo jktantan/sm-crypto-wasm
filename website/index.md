@@ -21,7 +21,7 @@ hero:
 
 features:
   - title: 快一个数量级
-    details: 椭圆曲线与双线性对跑在 WASM 里。SM4 六种模式比纯 JS 参考实现快 3.6~11.2×，SM2 快 1.8~7.6×，SM3 / ZUC 快 1.8~2.3×。
+    details: 椭圆曲线与双线性对跑在 WASM 里。SM4 六种模式比纯 JS 参考实现快 3.6–11.2×，SM2 快 1.8–7.6×，SM3 快 3.1–3.5×、ZUC 快 2.3×。
   - title: 零工具链
     details: 发布物是 .wasm 加一层薄 TS 胶水。使用者不需要 node-gyp、Rust 或编译器，五个算法按需下载。
   - title: 跨运行时
