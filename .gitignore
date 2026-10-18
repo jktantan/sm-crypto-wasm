@@ -6,6 +6,10 @@
 # Worktree scratch
 .worktrees/
 
+# Agent / tool scratch
+.reasonix/
+.superpowers/
+
 # Node
 node_modules/
 dist/
@@ -16,6 +20,12 @@ bench/reports/
 # 微信小程序示例的生成产物（由 pnpm example:wechat:prepare 从 dist 复制）
 examples/wechat-miniprogram/miniprogram/vendor/
 examples/wechat-miniprogram/project.private.config.json
+
+# Local secrets
+.env
+.env.*
+!.env.example
+*.local
 
 # Logs
 *.log
