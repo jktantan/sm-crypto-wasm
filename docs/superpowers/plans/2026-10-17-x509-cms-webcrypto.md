@@ -23,7 +23,7 @@
 | CMS / PKCS#7 | 无（`sm4` 里的 PKCS#7 只是填充，与此无关） | 全缺 |
 | WebCrypto 适配 | 无（`src/runtime/random.ts` 只使用宿主 CSPRNG） | 全缺 |
 | 测试基础设施 | vitest（Node + happy-dom 双 runner）、`tests/vectors/**` 预置向量、fast-check fuzz | 需要 X.509/CMS 的 OpenSSL 样本；Node 的 `X509Certificate` 对 SM2 支持不确定，不能当 oracle |
-| CI | `.github/workflows/ci.yml`：lint/typecheck、build+test、wasm 体积、`pnpm pack --dry-run` | 需要加 openssl 版本检查与证书/CMS 互操作测试 |
+| CI | ~~`.github/workflows/ci.yml`~~（2026-10-18 已移除，仅保留 `docs.yml`） | 质量检查改为发布前本地执行 |
 
 ---
 
@@ -381,7 +381,7 @@ const ct = await subtle.encrypt({ name: 'SM4-GCM', iv, additionalData }, key, pl
 - **动态互操作**：`tests/cms/interop.spec.ts` 在 `openssl` 可用时跑（`execFileSync('openssl', ['version'])` 探测），缺失时 `describe.skip`；Windows 开发机没有 openssl 也能跑全量单测。
 - **fuzz**：`tests/fuzz/x509.spec.ts`、`tests/fuzz/cms.spec.ts` 用 fast-check 随机字节喂解析器，断言“只抛 `CertificateError`/`CmsError`，不崩溃、不 OOM”。
 - **负例必测**：截断 DER、尾部多余字节、indefinite-length 在 X.509 路径被拒、未知 critical 扩展、错误曲线、篡改 TBS、篡改 `signedAttrs`、空证书集合。
-- **CI 增量**：`.github/workflows/ci.yml` 加 `openssl version` 打印；固定样本不依赖版本；`pnpm pack --dry-run` 确认 `dist/x509`、`dist/cms`、`dist/webcrypto` 进入包。
+- **CI 增量**：原计划在 `.github/workflows/ci.yml` 增加 openssl 版本、固定样本与打包检查；2026-10-18 用户决定移除自动 CI、仅保留文档部署，因此这些检查改为发布前本地执行（`pnpm test` / `pnpm test:fuzz` / `pnpm test:browser` / `pnpm pack --dry-run`）。
 
 ---
 
