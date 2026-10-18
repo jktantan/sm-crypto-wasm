@@ -23,7 +23,9 @@
  *   platform: 'browser',
  *   format: 'esm',
  *   outdir: 'dist/assets',        // 产物 JS 落这里
+ *                                 // output JS goes here
  *   plugins: [smCryptoWasm()],    // → wasm 复制到 dist/<algo>/<algo>.wasm
+ *                                 // copies wasm to dist/<algo>/<algo>.wasm
  * });
  * ```
  *
@@ -31,29 +33,91 @@
  * 产物目录的上级。
  *
  * 只需用到部分算法时传 `algorithms` 少复制几个。
+ *
+ * esbuild plugin: place the `.wasm` assets **where the runtime can resolve them** in a
+ * browser bundle.
+ *
+ * ## Why it is needed
+ *
+ * The browser loader fetches wasm with `fetch(new URL('../<algo>/<algo>.wasm',
+ * import.meta.url))` (a form both Vite and Webpack 5 understand: they archive the asset
+ * and rewrite the URL). **esbuild does not** — neither `--outfile` nor `--outdir` moves
+ * the file that `new URL` points at (measured on 0.28.2). Result: the build succeeds and
+ * `fetch` 404s at runtime.
+ *
+ * After the build finishes this plugin copies `dist/<algo>/<algo>.wasm` to that relative
+ * location: the runtime URL is `../<algo>/<algo>.wasm` relative to **the emitted JS
+ * file**, so the target base directory is **the parent of the directory holding the
+ * emitted JS** (derived from esbuild's `outdir` / `outfile`).
+ *
+ * ## Usage
+ *
+ * ```ts
+ * import { smCryptoWasm } from 'sm-crypto-wasm/esbuild-plugin';
+ *
+ * await esbuild.build({
+ *   entryPoints: ['src/main.ts'],
+ *   bundle: true,
+ *   platform: 'browser',
+ *   format: 'esm',
+ *   outdir: 'dist/assets',        // the emitted JS lands here
+ *   plugins: [smCryptoWasm()],    // → wasm is copied to dist/<algo>/<algo>.wasm
+ * });
+ * ```
+ *
+ * Pointing `outdir` at a subdirectory (e.g. `dist/assets`) is recommended so the wasm
+ * lands in `dist/<algo>/` instead of the parent of the output directory.
+ *
+ * Pass `algorithms` when only some algorithms are used, to copy fewer files.
  */
 
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** 支持的算法名（与加载器白名单一致）。 */
+/** 支持的算法名（与加载器白名单一致）。
+ *
+ * Supported algorithm names (in sync with the loader allow-list).
+ */
 const WASM_ALGOS = ['sm2', 'sm3', 'sm4', 'sm9', 'zuc'] as const;
+/** 白名单里的算法名类型（由 `WASM_ALGOS` 推导，选项与复制循环都受它约束）。
+ *
+ * The type of the names in the allow-list (derived from `WASM_ALGOS`; both the option
+ * type and the copy loop are constrained by it).
+ */
 export type WasmAlgo = (typeof WASM_ALGOS)[number];
 
-/** `smCryptoWasm()` 的选项。 */
+/** `smCryptoWasm()` 的选项。
+ *
+ * Options for `smCryptoWasm()`.
+ */
 export interface SmCryptoWasmPluginOptions {
-  /** 只复制这些算法的 wasm（默认全部 5 个）。 */
+  /** 只复制这些算法的 wasm（默认全部 5 个）。
+   *
+   * Only copy the wasm of these algorithms (all 5 by default).
+   */
   algorithms?: readonly WasmAlgo[];
-  /** wasm 目标基目录。默认由 esbuild 的 `outdir` / `outfile` 推导（见模块注释）。 */
+  /** wasm 目标基目录。默认由 esbuild 的 `outdir` / `outfile` 推导（见模块注释）。
+   *
+   * Base directory for the wasm output. Defaults to a value derived from esbuild's
+   * `outdir` / `outfile` (see the module comment).
+   */
   outDir?: string;
-  /** wasm 源目录。默认本包的 `dist/`（插件自身所在目录）。 */
+  /** wasm 源目录。默认本包的 `dist/`（插件自身所在目录）。
+   *
+   * Source directory of the wasm. Defaults to this package's `dist/` (the directory
+   * the plugin itself lives in).
+   */
   sourceDir?: string;
 }
 
 /**
  * esbuild 插件的**最小**结构。刻意不依赖 `esbuild` 的类型：这样本包不必把 esbuild
  * 列为依赖，也不会因 esbuild 主版本升级而影响类型。
+ *
+ * The **minimal** shape of an esbuild plugin. It deliberately does not depend on
+ * `esbuild`'s types, so this package need not list esbuild as a dependency and a major
+ * esbuild upgrade cannot affect its types.
  */
 export interface SmCryptoWasmPlugin {
   name: string;
@@ -63,7 +127,11 @@ export interface SmCryptoWasmPlugin {
   }): void;
 }
 
-/** 本包 `dist/` 的位置（编译后插件自身就在 `dist/` 下）。 */
+/** 本包 `dist/` 的位置（编译后插件自身就在 `dist/` 下）。
+ *
+ * Location of this package's `dist/` (once compiled, the plugin itself lives under
+ * `dist/`).
+ */
 const THIS_DIST_DIR = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -71,6 +139,13 @@ const THIS_DIST_DIR = dirname(fileURLToPath(import.meta.url));
  *
  * 运行时相对**产物 JS 文件**解析 `../<algo>/<algo>.wasm`，所以目标是产物 JS 目录的上级。
  * esbuild 通常把入口产物放在 `outdir` 根（单入口时 `outbase` 就是入口所在目录）。
+ *
+ * Derive the base directory for the wasm output.
+ *
+ * At runtime `../<algo>/<algo>.wasm` is resolved relative to **the emitted JS file**, so
+ * the target is the parent of the emitted JS directory. esbuild usually puts the entry
+ * output at the root of `outdir` (with a single entry, `outbase` is the entry's own
+ * directory).
  */
 function resolveTargetBase(opts: { outdir?: string; outfile?: string }): string | undefined {
   if (opts.outdir) return resolve(opts.outdir, '..');
@@ -83,6 +158,11 @@ function resolveTargetBase(opts: { outdir?: string; outfile?: string }): string 
  *
  * @param options 见 {@link SmCryptoWasmPluginOptions}。
  * @returns 可直接放进 `plugins` 数组的插件对象。
+ *
+ * Create the esbuild plugin: copy the wasm assets after a successful build.
+ *
+ * @param options See {@link SmCryptoWasmPluginOptions}.
+ * @returns A plugin object that can be placed directly in the `plugins` array.
  */
 export function smCryptoWasm(options: SmCryptoWasmPluginOptions = {}): SmCryptoWasmPlugin {
   const algos = options.algorithms ?? WASM_ALGOS;
@@ -93,14 +173,22 @@ export function smCryptoWasm(options: SmCryptoWasmPluginOptions = {}): SmCryptoW
     setup(build) {
       build.onEnd((result) => {
         // 构建失败时不产出资源，避免留下半套产物。
+        //
+        // Emit no assets when the build failed, so no half-written output is left behind.
         if (result.errors.length > 0) return;
 
         const targetBase = options.outDir ?? resolveTargetBase(build.initialOptions);
-        if (targetBase === undefined) return; // `write: false` 等场景：没有落盘位置
+        // `write: false` 等场景：没有落盘位置
+        //
+        // Cases such as `write: false`: there is no location to write to.
+        if (targetBase === undefined) return;
 
         for (const algo of algos) {
           const from = join(sourceDir, algo, `${algo}.wasm`);
-          if (!existsSync(from)) continue; // 只装了部分算法时静默跳过
+          // 只装了部分算法时静默跳过。
+          //
+          // Silently skip algorithms that were not installed.
+          if (!existsSync(from)) continue;
           const to = join(targetBase, algo, `${algo}.wasm`);
           mkdirSync(dirname(to), { recursive: true });
           copyFileSync(from, to);

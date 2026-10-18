@@ -15,14 +15,40 @@
  *   Review-Focus #1：空字符串抛 `TypeError`，不静默成功。
  *
  * spec/plan 对应：plan Task 2；spec §6 API 默认 hex、§9 安全姿态。
+ *
+ * String / byte conversion (hex / base64 / PEM / Uint8Array).
+ *
+ * Design notes:
+ * - **Input auto-detect**: when the caller passes a `string`, the encoding is
+ *   decided by the table below:
+ *
+ * | Leading feature | Treated as |
+ * |---|---|
+ * | starts with `-----BEGIN` | PEM |
+ * | `0x` prefix, or pure `[0-9a-fA-F]` of even length | hex |
+ * | any other string decodable by `atob` | base64 |
+ *
+ * - **Output format**: business APIs return hex by default; callers switch with
+ *   `{ output: 'base64' | 'raw' }`.
+ * - **No host buffer views are retained**: every string→bytes conversion returns a
+ *   fresh `Uint8Array`. Review-Focus #1: an empty string throws `TypeError` instead
+ *   of silently succeeding.
+ *
+ * spec/plan: plan Task 2; spec §6 API (hex by default), §9 security posture.
  */
 
 import { decodeBase64, encodeBase64 } from './base64.core.js';
 
-/** 任意可被业务 API 接受的输入形态。 */
+/** 任意可被业务 API 接受的输入形态。
+ *
+ * Any input shape a business API accepts.
+ */
 export type Input = string | Uint8Array;
 
-/** 输出格式选项。默认 hex。 */
+/** 输出格式选项。默认 hex。
+ *
+ * Output format option; defaults to hex.
+ */
 export type OutputFormat = 'hex' | 'base64' | 'raw';
 
 /**
@@ -32,10 +58,20 @@ export type OutputFormat = 'hex' | 'base64' | 'raw';
  * @param label 字段名（错误信息用，便于排查）。
  * @returns 解码后的字节数组。
  * @throws TypeError 输入为空、编码不识别、或解码失败。
+ *
+ * Normalize any `Input` into a `Uint8Array`.
+ *
+ * @param input Input to decode.
+ * @param label Field name (used in error messages to ease troubleshooting).
+ * @returns The decoded bytes.
+ * @throws TypeError The input is empty, its encoding is unrecognized, or decoding
+ *   failed.
  */
 export function toBytes(input: Input, label: string): Uint8Array {
   if (input instanceof Uint8Array) {
     // 拷贝避免上游缓冲区变更影响下游语义。
+    //
+    // Copy so later mutation of the caller's buffer cannot change downstream semantics.
     return new Uint8Array(input);
   }
   if (typeof input !== 'string') {
@@ -46,13 +82,20 @@ export function toBytes(input: Input, label: string): Uint8Array {
   }
 
   // 嗅探顺序：PEM > hex > base64。
+  //
+  // Sniff order: PEM > hex > base64.
   if (input.startsWith('-----BEGIN')) {
     return pemToBytes(input, label);
   }
   // hex：解析与校验合并成一次遍历（非法时返回 null 而不抛错，好继续试 base64）。
+  //
+  // hex: parsing and validation are merged into a single pass (return null instead of
+  // throwing when illegal, so base64 can still be tried).
   const asHex = tryParseHex(input);
   if (asHex !== null) return asHex;
   // 否则尝试 base64；失败抛 TypeError。
+  //
+  // Otherwise try base64; a failure throws TypeError.
   return base64ToBytes(input, label);
 }
 
@@ -60,7 +103,13 @@ export function toBytes(input: Input, label: string): Uint8Array {
  * 把字节数组按指定格式编码。
  *
  * @param bytes 输入字节。
- * @param format 输出格式。`'raw` 默认 hex。`'raw`' 直接返回原引用（拷贝）。
+ * @param format 输出格式。`'hex'` 为默认值；`'raw'` 把字节按文本解码返回。
+ *
+ * Encode a byte array according to `format`.
+ *
+ * @param bytes Input bytes.
+ * @param format Output format. `'hex'` is the default; `'raw'` decodes the bytes as
+ *   text.
  */
 export function fromBytes(bytes: Uint8Array, format: OutputFormat = 'hex'): string {
   switch (format) {
@@ -70,6 +119,8 @@ export function fromBytes(bytes: Uint8Array, format: OutputFormat = 'hex'): stri
       return bytesToBase64(bytes);
     case 'raw':
       // 返回拷贝避免上层修改。
+      //
+      // Return a copy so the caller cannot mutate internal state.
       return bytesToHex(bytes) === '' ? '' : new TextDecoder().decode(bytes.slice());
     default: {
       const _exhaustive: never = format;
@@ -78,13 +129,21 @@ export function fromBytes(bytes: Uint8Array, format: OutputFormat = 'hex'): stri
   }
 }
 
-/** bytes → hex（小写、偶数位）。空输入返回 `''`。 */
+/** bytes → hex（小写、偶数位）。空输入返回 `''`。
+ *
+ * bytes → hex (lowercase, even number of digits). An empty input returns `''`.
+ */
 export function bytesToHex(bytes: Uint8Array): string {
   // Node：原生实现，比逐字节拼字符串快一个数量级。
+  //
+  // Node: native implementation, an order of magnitude faster than building the
+  // string byte by byte.
   if (HAS_BUFFER) {
     return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('hex');
   }
   // 浏览器：16 进制查表，避免每字节一次 `toString` + `padStart` 分配。
+  //
+  // Browser: hex lookup table, avoiding a `toString` + `padStart` allocation per byte.
   let out = '';
   for (let i = 0; i < bytes.length; i++) {
     const v = bytes[i] ?? 0;
@@ -94,12 +153,19 @@ export function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
-/** hex 字符串 → bytes。支持 `0x` 前缀。奇数位长度或非法字符抛错。 */
+/** hex 字符串 → bytes。支持 `0x` 前缀。奇数位长度或非法字符抛错。
+ *
+ * hex string → bytes. A `0x` prefix is accepted. Odd length or illegal characters
+ * throw.
+ */
 export function hexToBytes(hex: string, label = 'hex'): Uint8Array {
   const parsed = tryParseHex(hex);
   if (parsed !== null) return parsed;
   // 失败路径：显式重扫一遍只为给出精确的错误信息（含非法字符的码位）。
   // 正常调用不会走到这里。
+  //
+  // Failure path: a deliberate second scan only to produce a precise error message
+  // (including the code point of the illegal character). Normal calls never get here.
   let s = hex;
   if (s.startsWith('0x') || s.startsWith('0X')) s = s.slice(2);
   if (s.length === 0) throw new TypeError(`hexToBytes(${label}): empty`);
@@ -113,6 +179,9 @@ export function hexToBytes(hex: string, label = 'hex'): Uint8Array {
     }
   }
   // tryParseHex 已覆盖全部合法情形，走到这里说明上面漏判，兜底抛错。
+  //
+  // tryParseHex already covers every valid case; reaching this point means the checks
+  // above missed something, so throw as a backstop.
   throw new TypeError(`hexToBytes(${label}): invalid hex`);
 }
 
@@ -121,6 +190,11 @@ export function hexToBytes(hex: string, label = 'hex'): Uint8Array {
  *
  * 微信小程序既没有 `Buffer` 也没有 `btoa`，会走最后一级；不需要宿主再安装
  * base64 polyfill。
+ *
+ * bytes → base64. Priority: Node `Buffer` → host `btoa` → pure-JS fallback.
+ *
+ * WeChat mini programs have neither `Buffer` nor `btoa`, so they take the last
+ * level; the host need not install a base64 polyfill.
  */
 export function bytesToBase64(bytes: Uint8Array): string {
   if (HAS_BUFFER) {
@@ -134,17 +208,29 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return encodeBase64(bytes);
 }
 
-/** base64 合法字符集（含结尾 padding）。 */
+/** base64 合法字符集（含结尾 padding）。
+ *
+ * The legal base64 character set (including trailing padding).
+ */
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
  * base64 字符串 → bytes。失败抛 TypeError。
  *
  * 优先级：Node `Buffer` → 宿主 `atob` → 纯 JS 兜底（微信小程序等）。
+ *
+ * base64 string → bytes; a failure throws TypeError.
+ *
+ * Priority: Node `Buffer` → host `atob` → pure-JS fallback (WeChat mini programs
+ * and the like).
  */
 export function base64ToBytes(b64: string, label = 'base64'): Uint8Array {
   // Node 快路径。`Buffer.from(..., 'base64')` 对非法字符是静默丢弃的，
   // 先用正则挡掉，非法的落到 `atob` 去抛错，保持与浏览器一致的行为。
+  //
+  // Node fast path. `Buffer.from(..., 'base64')` silently drops illegal characters,
+  // so a regex filters those out first and illegal input falls through to `atob` to
+  // throw, keeping behaviour consistent with browsers.
   if (HAS_BUFFER && B64_RE.test(b64)) {
     const buf = Buffer.from(b64, 'base64');
     const out = new Uint8Array(buf.length);
@@ -160,7 +246,10 @@ export function base64ToBytes(b64: string, label = 'base64'): Uint8Array {
   return decodeBase64(b64, label);
 }
 
-/** PEM → bytes。剥去 BEGIN/END armor，base64 解码。 */
+/** PEM → bytes。剥去 BEGIN/END armor，base64 解码。
+ *
+ * PEM → bytes: strip the BEGIN/END armor and base64-decode the body.
+ */
 export function pemToBytes(pem: string, label = 'pem'): Uint8Array {
   const lines = pem.split(/\r?\n/);
   const body: string[] = [];
@@ -176,11 +265,16 @@ export function pemToBytes(pem: string, label = 'pem'): Uint8Array {
   return base64ToBytes(joined, label);
 }
 
-/** bytes → PEM（带 BEGIN/END 头）。`kind` 例：`SM2 PRIVATE KEY`。 */
+/** bytes → PEM（带 BEGIN/END 头）。`kind` 例：`SM2 PRIVATE KEY`。
+ *
+ * bytes → PEM (with BEGIN/END headers). Example `kind`: `SM2 PRIVATE KEY`.
+ */
 export function bytesToPem(bytes: Uint8Array, kind: string): string {
   const b64 = bytesToBase64(bytes);
   const lines: string[] = [];
   // 每 64 字符换行，标准做法。
+  //
+  // Wrap every 64 characters, which is the standard practice.
   for (let i = 0; i < b64.length; i += 64) {
     lines.push(b64.slice(i, i + 64));
   }
@@ -188,20 +282,36 @@ export function bytesToPem(bytes: Uint8Array, kind: string): string {
 }
 
 // ---------- 内部工具 ----------
+//
+// ---------- Internal helpers ----------
 
 /**
  * Node 环境检测。用 `typeof` 保证在浏览器打包（`Buffer` 未定义）时不抛错。
  *
  * 命中时 hex/base64 编解码走 Node 原生实现，比逐字节的 JS 循环快一个数量级
  * （实测 4 KB 输入：hex 编码 52.6 µs → 1.9 µs）。
+ *
+ * Node environment detection. `typeof` keeps it from throwing when bundled for the
+ * browser (`Buffer` undefined).
+ *
+ * When it hits, hex/base64 codecs use the Node native implementation, an order of
+ * magnitude faster than a byte-by-byte JS loop (measured on 4 KB input: hex encoding
+ * 52.6 µs → 1.9 µs).
  */
 const HAS_BUFFER = typeof Buffer !== 'undefined' && typeof Buffer.from === 'function';
 
-/** 宿主是否提供 `btoa` / `atob`（现代浏览器有；微信小程序没有）。 */
+/** 宿主是否提供 `btoa` / `atob`（现代浏览器有；微信小程序没有）。
+ *
+ * Whether the host provides `btoa` / `atob` (modern browsers do; WeChat mini
+ * programs do not).
+ */
 const HAS_BTOA = typeof btoa === 'function';
 const HAS_ATOB = typeof atob === 'function';
 
-/** 16 进制数字查表（浏览器路径）。 */
+/** 16 进制数字查表（浏览器路径）。
+ *
+ * Hex digit lookup table (browser path).
+ */
 const HEX_CHARS = '0123456789abcdef';
 
 /**
@@ -211,6 +321,16 @@ const HEX_CHARS = '0123456789abcdef';
  * 「解析出的字节数 × 2 ≠ 输入长度」即可判定非法 —— 校验与解析合并成一次遍历，
  * 不再需要先跑正则判断再解析（同一串原来被扫 2~3 遍；实测 8192 字符
  * 14.1 µs → 3.5 µs）。支持 `0x` / `0X` 前缀，空串与奇数长度按非法处理。
+ *
+ * Try to parse a string as hex; returns `null` when it is not valid hex (never
+ * throws).
+ *
+ * **Parsing is the validation**: `Buffer.from(..., 'hex')` stops at the first
+ * illegal character, so "parsed byte count × 2 ≠ input length" alone proves the
+ * input illegal — validation and parsing collapse into one pass and the previous
+ * regex-then-parse (which scanned the same string 2~3 times) is gone (measured on
+ * 8192 characters: 14.1 µs → 3.5 µs). `0x` / `0X` prefixes are accepted; the empty
+ * string and odd lengths count as illegal.
  */
 function tryParseHex(s: string): Uint8Array | null {
   let t = s;
@@ -221,6 +341,9 @@ function tryParseHex(s: string): Uint8Array | null {
     return buf.length * 2 === t.length ? new Uint8Array(buf) : null;
   }
   // 浏览器：逐字符查表，同样是单趟遍历，遇到非法字符立即返回 null。
+  //
+  // Browser: a per-character table lookup, also a single pass, returning null as soon
+  // as an illegal character shows up.
   const out = new Uint8Array(t.length / 2);
   for (let i = 0; i < out.length; i++) {
     const hi = hexValue(t.charCodeAt(i * 2));
@@ -231,7 +354,10 @@ function tryParseHex(s: string): Uint8Array | null {
   return out;
 }
 
-/** 单个 hex 字符的数值；非法字符返回 `-1`。 */
+/** 单个 hex 字符的数值；非法字符返回 `-1`。
+ *
+ * Numeric value of a single hex character; `-1` for illegal characters.
+ */
 function hexValue(code: number): number {
   if (code >= 0x30 && code <= 0x39) return code - 0x30;
   if (code >= 0x41 && code <= 0x46) return code - 0x41 + 10;

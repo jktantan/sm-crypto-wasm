@@ -5,6 +5,13 @@
  *
  * 红线 #2：签发给外部系统的证书/CMS 必须是 DER 格式；直接塞裸 `r‖s`
  * 会产出非标准数据。
+ *
+ * Conversion between the two encodings of an SM2 signature value:
+ * - raw form: 64 bytes `r ‖ s` (what `sm2.sign` returns);
+ * - DER form: `SEQUENCE { INTEGER r, INTEGER s }` (what X.509 / CMS requires).
+ *
+ * Red line #2: certificates and CMS data handed to other systems must use the
+ * DER form; stuffing raw `r‖s` in produces non-standard output.
  */
 
 import { Asn1Error, integer, parseDer, readInteger, seq } from '../asn1/index.js';
@@ -14,6 +21,10 @@ import { CertificateError } from './errors.js';
  * DER `SEQUENCE { r, s }` → 64 字节 `r ‖ s`。
  *
  * @throws CertificateError 结构非法、r/s 为负或超过 32 字节。
+ *
+ * DER `SEQUENCE { r, s }` to 64 bytes `r ‖ s`.
+ *
+ * @throws CertificateError Malformed structure, or r/s negative or wider than 32 bytes.
  */
 export function derSignatureToRaw(der: Uint8Array, what = 'signature'): Uint8Array {
   let r: bigint;
@@ -41,6 +52,10 @@ export function derSignatureToRaw(der: Uint8Array, what = 'signature'): Uint8Arr
  * 64 字节 `r ‖ s` → DER `SEQUENCE { r, s }`。
  *
  * @throws CertificateError 长度不是 64 字节。
+ *
+ * 64 bytes `r ‖ s` to DER `SEQUENCE { r, s }`.
+ *
+ * @throws CertificateError The input is not exactly 64 bytes.
  */
 export function rawSignatureToDer(raw: Uint8Array, what = 'signature'): Uint8Array {
   if (raw.length !== 64) throw new CertificateError(`${what}: expected 64-byte r||s`);
@@ -54,7 +69,11 @@ export function rawSignatureToDer(raw: Uint8Array, what = 'signature'): Uint8Arr
   }
 }
 
-/** 把 bigint 写成定长大端字节。 */
+/**
+ * 把 bigint 写成定长大端字节。
+ *
+ * Writes a bigint as fixed-length big-endian bytes.
+ */
 function bigintToBytes(value: bigint, length: number): Uint8Array {
   const out = new Uint8Array(length);
   let v = value;
@@ -65,6 +84,11 @@ function bigintToBytes(value: bigint, length: number): Uint8Array {
   return out;
 }
 
+/**
+ * 把大端字节读成 bigint。
+ *
+ * Reads big-endian bytes as a bigint.
+ */
 function bytesToBigint(bytes: Uint8Array): bigint {
   let v = 0n;
   for (let i = 0; i < bytes.length; i++) v = (v << 8n) | BigInt(bytes[i] as number);
@@ -72,4 +96,7 @@ function bytesToBigint(bytes: Uint8Array): bigint {
 }
 
 // Asn1Error 仅用于类型导入的副作用检查；保留引用避免 tree-shaker 误判。
+//
+// Asn1Error is kept only for the type-import side-effect check; holding a
+// reference keeps the tree-shaker from misjudging it.
 void Asn1Error;

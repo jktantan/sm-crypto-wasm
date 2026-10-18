@@ -7,6 +7,18 @@
 //   Fp2→bytes: a1||a0；Fp4: a1||a0；Fp12: a2||a1||a0
 //   C1 = 0x04||x||y（65B）；KDF 输入用 C1 的 x||y（64B）
 //   C3 = HMAC-SM3(K2, C2)
+//
+// SM9 high-level cryptographic operations (AssemblyScript): key derivation,
+// signing / verification, encryption / decryption.
+//
+// Authoritative baseline: the GmSSL C implementation (src/sm9_key.c /
+// sm9_sign.c / sm9_enc.c, GM/T 0044-2016).
+//   H1 = modn_from_hash( SM3(0x01||ID||hid||1) || SM3(0x01||ID||hid||2) )
+//   H2 = modn_from_hash( SM3(0x02||Z||1) || SM3(0x02||Z||2) )
+//   KDF = SM3(0x02||Z||ct), ct starting at 1
+//   Fp2→bytes: a1||a0; Fp4: a1||a0; Fp12: a2||a1||a0
+//   C1 = 0x04||x||y (65B); the KDF input uses C1's x||y (64B)
+//   C3 = HMAC-SM3(K2, C2)
 
 import {
   bytesMod,
@@ -41,19 +53,38 @@ import {
   g2ToAffine,
 } from './point';
 
-/** 签名私钥派生用的 hid。 */
+/**
+ * 签名私钥派生用的 hid。
+ *
+ * hid used when deriving the signing private key.
+ */
 export const HID_SIGN: u8 = 0x01;
-/** 加密私钥派生用的 hid。 */
+/**
+ * 加密私钥派生用的 hid。
+ *
+ * hid used when deriving the encryption private key.
+ */
 export const HID_ENC: u8 = 0x03;
-/** 密钥交换私钥派生用的 hid（GM/T 0044.3）。 */
+/**
+ * 密钥交换私钥派生用的 hid（GM/T 0044.3）。
+ *
+ * hid used when deriving the key-exchange private key (GM/T 0044.3).
+ */
 export const HID_EXCH: u8 = 0x02;
 
+// H1/H2 哈希输入的前缀字节（GM/T 0044）：0x01 用于 H1，0x02 用于 H2。
+//
+// Prefix bytes for the H1/H2 hash input (GM/T 0044): 0x01 for H1, 0x02 for H2.
 const HASH1_PREFIX: u8 = 0x01;
 const HASH2_PREFIX: u8 = 0x02;
 
 // ---------- H1 / H2 / KDF ----------
 
-/** SM3(prefix || z || ct)，ct 为 4 字节大端；返回 32 字节。 */
+/**
+ * SM3(prefix || z || ct)，ct 为 4 字节大端；返回 32 字节。
+ *
+ * SM3(prefix || z || ct) with ct as 4 big-endian bytes; returns 32 bytes.
+ */
 function hashPrefixCt(prefix: u8, z: StaticArray<u8>, ct: u32): StaticArray<u8> {
   const n = z.length;
   const buf = new StaticArray<u8>(1 + n + 4);
@@ -69,7 +100,12 @@ function hashPrefixCt(prefix: u8, z: StaticArray<u8>, ct: u32): StaticArray<u8> 
   return out;
 }
 
-/** 40 字节哈希（ha||hb 取前 40 字节）mod (n-1)，再 +1，∈[1,n-1]。 */
+/**
+ * 40 字节哈希（ha||hb 取前 40 字节）mod (n-1)，再 +1，∈[1,n-1]。
+ *
+ * A 40-byte hash (ha||hb truncated to 40 bytes) mod (n-1), plus 1, giving a
+ * value in [1,n-1].
+ */
 function hash40Modn(ha: StaticArray<u8>, hb: StaticArray<u8>): U256 {
   const h = new StaticArray<u8>(40);
   for (let i = 0; i < 32; i++) h[i] = ha[i];
@@ -81,7 +117,11 @@ function hash40Modn(ha: StaticArray<u8>, hb: StaticArray<u8>): U256 {
   return r;
 }
 
-/** H1(id||hid, n)，对齐 GmSSL sm9_z256_hash1。 */
+/**
+ * H1(id||hid, n)，对齐 GmSSL sm9_z256_hash1。
+ *
+ * H1(id||hid, n), aligned with GmSSL sm9_z256_hash1.
+ */
 export function hash1(id: StaticArray<u8>, idLen: i32, hid: u8): U256 {
   const z = new StaticArray<u8>(idLen + 1);
   for (let i = 0; i < idLen; i++) z[i] = id[i];
@@ -89,12 +129,20 @@ export function hash1(id: StaticArray<u8>, idLen: i32, hid: u8): U256 {
   return hash40Modn(hashPrefixCt(HASH1_PREFIX, z, 1), hashPrefixCt(HASH1_PREFIX, z, 2));
 }
 
-/** H2(Z, n)，Z 为任意字节串。 */
+/**
+ * H2(Z, n)，Z 为任意字节串。
+ *
+ * H2(Z, n), where Z is an arbitrary byte string.
+ */
 export function hash2(z: StaticArray<u8>): U256 {
   return hash40Modn(hashPrefixCt(HASH2_PREFIX, z, 1), hashPrefixCt(HASH2_PREFIX, z, 2));
 }
 
-/** SM9 KDF（GM/T 0044 5.4.3），对齐 GmSSL sm3_kdf（无前缀）。 */
+/**
+ * SM9 KDF（GM/T 0044 5.4.3），对齐 GmSSL sm3_kdf（无前缀）。
+ *
+ * The SM9 KDF (GM/T 0044 5.4.3), aligned with GmSSL sm3_kdf (no prefix).
+ */
 export function kdf(z: StaticArray<u8>, klen: i32): StaticArray<u8> {
   const out = new StaticArray<u8>(klen);
   let off = 0;
@@ -116,8 +164,13 @@ export function kdf(z: StaticArray<u8>, klen: i32): StaticArray<u8> {
 }
 
 // ---------- 密钥派生 ----------
+// ---------- Key derivation ----------
 
-/** ds = [ks·(H1+ks)^{-1}]P1（G1）。 */
+/**
+ * ds = [ks·(H1+ks)^{-1}]P1（G1）。
+ *
+ * ds = [ks·(H1+ks)^{-1}]P1 (in G1).
+ */
 export function signExtractKeyDs(ks: U256, id: StaticArray<u8>, idLen: i32): G1 {
   const h1 = hash1(id, idLen, HID_SIGN);
   const t1 = addModN(h1, ks);
@@ -125,14 +178,22 @@ export function signExtractKeyDs(ks: U256, id: StaticArray<u8>, idLen: i32): G1 
   return g1MulG(t2);
 }
 
-/** t2 = ks·(H1+ks)^{-1} mod n（签名私钥标量）。 */
+/**
+ * t2 = ks·(H1+ks)^{-1} mod n（签名私钥标量）。
+ *
+ * t2 = ks·(H1+ks)^{-1} mod n (the signing private key scalar).
+ */
 export function signT2(ks: U256, id: StaticArray<u8>, idLen: i32): U256 {
   const h1 = hash1(id, idLen, HID_SIGN);
   const t1 = addModN(h1, ks);
   return mulModN(ks, invModN(t1));
 }
 
-/** de = [ke·(H1(ID||hid)+ke)^{-1}]P2（G2），hid 指定用途。 */
+/**
+ * de = [ke·(H1(ID||hid)+ke)^{-1}]P2（G2），hid 指定用途。
+ *
+ * de = [ke·(H1(ID||hid)+ke)^{-1}]P2 (in G2); hid selects the purpose.
+ */
 function extractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32, hid: u8): G2 {
   const h1 = hash1(id, idLen, hid);
   const t1 = addModN(h1, ke);
@@ -140,47 +201,90 @@ function extractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32, hid: u8): G2 {
   return g2MulG(t2);
 }
 
-/** 加密私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x03）。 */
+/**
+ * 加密私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x03）。
+ *
+ * Encryption private key de = [ke·(H1+ke)^{-1}]P2 (hid=0x03).
+ */
 export function encExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 {
   return extractKeyDe(ke, id, idLen, HID_ENC);
 }
 
-/** 密钥交换私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x02）。 */
+/**
+ * 密钥交换私钥 de = [ke·(H1+ke)^{-1}]P2（hid=0x02）。
+ *
+ * Key-exchange private key de = [ke·(H1+ke)^{-1}]P2 (hid=0x02).
+ */
 export function exchExtractKeyDe(ke: U256, id: StaticArray<u8>, idLen: i32): G2 {
   return extractKeyDe(ke, id, idLen, HID_EXCH);
 }
 
-/** Ppubs = [ks]P2。 */
+/**
+ * Ppubs = [ks]P2。
+ *
+ * Ppubs = [ks]P2.
+ */
 export function signMasterPublic(ks: U256): G2 {
   return g2MulG(ks);
 }
 
-/** Ppube = [ke]P1。 */
+/**
+ * Ppube = [ke]P1。
+ *
+ * Ppube = [ke]P1.
+ */
 export function encMasterPublic(ke: U256): G1 {
   return g1MulG(ke);
 }
 
 // ---------- 公开配对值缓存 ----------
+// ---------- Public pairing-value cache ----------
 //
 // e(Ppubs, P1) 与 e(P2, Ppube) 只取决于主公钥（公开点），与消息 / 用户无关，
 // 但各占一整次 pairing（百毫秒级）。verify / encrypt / KEM 对同一主公钥反复调用时
 // 每次都重算。这里按主公钥仿射坐标做 4 槽直接映射缓存——缓存的值是公开点的
 // 配对结果，不含任何秘密，缓存只省时间不改变任何安全边界。
 // 4 槽：绝大多数应用（1 个 KGC + 少数根密钥）远用不满；满了覆盖最旧槽。
+//
+// e(Ppubs, P1) and e(P2, Ppube) depend only on the master public key (a public
+// point) and not on the message or user, yet each costs a full pairing
+// (hundreds of milliseconds). verify / encrypt / KEM recomputed them on every
+// call for the same master public key. This is a 4-slot direct-mapped cache
+// keyed on the affine coordinates of the master public key — the cached values
+// are pairing results of public points, contain no secret, and the cache only
+// saves time without moving any security boundary. 4 slots: the vast majority
+// of applications (one KGC plus a few root keys) never fill them; when full,
+// the oldest slot is overwritten.
 
-/** signG 缓存槽：key 为 Ppubs 仿射（128 字节），value 为 e(Ppubs, P1)。 */
+/**
+ * signG 缓存槽：key 为 Ppubs 仿射（128 字节），value 为 e(Ppubs, P1)。
+ *
+ * signG cache slot: key is the affine Ppubs (128 bytes), value is
+ * e(Ppubs, P1).
+ */
 class SignGCacheSlot {
   keyX1: U256 = 0;
   keyX0: U256 = 0;
   keyY1: U256 = 0;
   keyY0: U256 = 0;
-  /** 0 表示空槽（Fp12 现在是指针类型，不能用 null）；非 0 时指向永久区的值。 */
+  /**
+   * 0 表示空槽（Fp12 现在是指针类型，不能用 null）；非 0 时指向永久区的值。
+   *
+   * 0 means an empty slot (Fp12 is a pointer type now, so null cannot be used);
+   * when non-zero it points at a value in permanent memory.
+   */
   value: Fp12 = 0;
 }
 
 const SIGN_G_CACHE = new StaticArray<SignGCacheSlot>(4);
 for (let i = 0; i < 4; i++) SIGN_G_CACHE[i] = new SignGCacheSlot();
 
+/**
+ * 用主公钥坐标派生的 u32 指纹，用作缓存槽下标（仅性能优化，不参与安全判定）。
+ *
+ * u32 fingerprint derived from the public-key coordinates, used as the cache
+ * slot index (a performance optimisation only, never a security decision).
+ */
 function g2FingerprintU(P: G2): u32 {
   let h: u32 = 0x9e3779b9;
   h = (h ^ load<u32>(P.X)) * <u32>0x01000193;
@@ -190,14 +294,23 @@ function g2FingerprintU(P: G2): u32 {
   return h;
 }
 
-/** 把一个 Fp12（384 字节）深拷贝到永久区（缓存必须跨导出调用存活）。 */
+/**
+ * 把一个 Fp12（384 字节）深拷贝到永久区（缓存必须跨导出调用存活）。
+ *
+ * Deep-copies an Fp12 (384 bytes) into permanent memory (the cache must
+ * outlive exported calls).
+ */
 function permFp12(src: Fp12): Fp12 {
   const p = permAlloc(384);
   memory.copy(p, src, 384);
   return p;
 }
 
-/** g = e(Ppubs, P1)（带 4 槽缓存；Ppubs 需为仿射）。 */
+/**
+ * g = e(Ppubs, P1)（带 4 槽缓存；Ppubs 需为仿射）。
+ *
+ * g = e(Ppubs, P1) (with the 4-slot cache; Ppubs must be affine).
+ */
 export function signG(ppubs: G2): Fp12 {
   const a = g2ToAffine(ppubs);
   const slotIdx = g2FingerprintU(a) & 3;
@@ -220,17 +333,31 @@ export function signG(ppubs: G2): Fp12 {
   return g;
 }
 
-/** encG 缓存槽：key 为 Ppube 仿射（64 字节）。 */
+/**
+ * encG 缓存槽：key 为 Ppube 仿射（64 字节）。
+ *
+ * encG cache slot: key is the affine Ppube (64 bytes).
+ */
 class EncGCacheSlot {
   keyX: U256 = 0;
   keyY: U256 = 0;
-  /** 0 表示空槽。 */
+  /**
+   * 0 表示空槽。
+   *
+   * 0 means an empty slot.
+   */
   value: Fp12 = 0;
 }
 
 const ENC_G_CACHE = new StaticArray<EncGCacheSlot>(4);
 for (let i = 0; i < 4; i++) ENC_G_CACHE[i] = new EncGCacheSlot();
 
+/**
+ * 用主公钥坐标派生的 u32 指纹，用作缓存槽下标（仅性能优化，不参与安全判定）。
+ *
+ * u32 fingerprint derived from the public-key coordinates, used as the cache
+ * slot index (a performance optimisation only, never a security decision).
+ */
 function g1FingerprintU(P: G1): u32 {
   let h: u32 = 0x9e3779b9;
   h = (h ^ load<u32>(P.X)) * <u32>0x01000193;
@@ -240,7 +367,12 @@ function g1FingerprintU(P: G1): u32 {
   return h;
 }
 
-/** g = e(P2, Ppube)（带 4 槽缓存；对应加密 / KEM 里的 e(Ppube, P2) 同一值）。 */
+/**
+ * g = e(P2, Ppube)（带 4 槽缓存；对应加密 / KEM 里的 e(Ppube, P2) 同一值）。
+ *
+ * g = e(P2, Ppube) (with the 4-slot cache; this is the same value as
+ * e(Ppube, P2) used in encryption / KEM).
+ */
 export function encG(ppube: G1): Fp12 {
   const a = g1ToAffine(ppube);
   const slotIdx = g1FingerprintU(a) & 3;
@@ -256,7 +388,13 @@ export function encG(ppube: G1): Fp12 {
 }
 
 // ---------- 字节辅助 ----------
+// ---------- Byte helpers ----------
 
+/**
+ * 拼接两个字节串。
+ *
+ * Concatenates two byte strings.
+ */
 function cat2(a: StaticArray<u8>, b: StaticArray<u8>): StaticArray<u8> {
   const r = new StaticArray<u8>(a.length + b.length);
   for (let i = 0; i < a.length; i++) r[i] = a[i];
@@ -264,11 +402,20 @@ function cat2(a: StaticArray<u8>, b: StaticArray<u8>): StaticArray<u8> {
   return r;
 }
 
+/**
+ * 拼接三个字节串（KDF / 确认值输入用）。
+ *
+ * Concatenates three byte strings (used for KDF / confirmation-value inputs).
+ */
 function cat3(a: StaticArray<u8>, b: StaticArray<u8>, c: StaticArray<u8>): StaticArray<u8> {
   return cat2(cat2(a, b), c);
 }
 
-/** 从 32 字节大端（起点 off）读 U256。 */
+/**
+ * 从 32 字节大端（起点 off）读 U256。
+ *
+ * Reads a U256 from 32 big-endian bytes starting at off.
+ */
 function u256FromBytesBE(b: StaticArray<u8>, off: i32): U256 {
   const x = u256zero();
   const base = changetype<usize>(b) + <usize>off;
@@ -285,9 +432,17 @@ function u256FromBytesBE(b: StaticArray<u8>, off: i32): U256 {
 }
 
 // 转回标准域的字节输出暂存（u256toBytes 只读，顺序调用安全；非重入：这些是叶子）。
+//
+// Scratch for byte output after converting back to the standard domain
+// (u256toBytes only reads it, so sequential calls are safe; not re-entrant:
+// these are leaves).
 const FP_TMP: U256 = u256zero();
 
-/** Fp2 → 线性内存：a1||a0（转回标准域）。 */
+/**
+ * Fp2 → 线性内存：a1||a0（转回标准域）。
+ *
+ * Fp2 → linear memory: a1||a0 (converted back to the standard domain).
+ */
 function fp2ToBytes(a: Fp2, ptr: usize): void {
   fpFromMontTo(FP_TMP, a + 32);
   u256toBytes(FP_TMP, ptr);
@@ -295,13 +450,21 @@ function fp2ToBytes(a: Fp2, ptr: usize): void {
   u256toBytes(FP_TMP, ptr + 32);
 }
 
-/** Fp4 → 线性内存：a1||a0。 */
+/**
+ * Fp4 → 线性内存：a1||a0。
+ *
+ * Fp4 → linear memory: a1||a0.
+ */
 function fp4ToBytes(a: Fp4, ptr: usize): void {
   fp2ToBytes(a + 64, ptr);
   fp2ToBytes(a, ptr + 64);
 }
 
-/** Fp12 → 384 字节：a2||a1||a0（GmSSL 约定）。 */
+/**
+ * Fp12 → 384 字节：a2||a1||a0（GmSSL 约定）。
+ *
+ * Fp12 → 384 bytes: a2||a1||a0 (GmSSL convention).
+ */
 function fp12ToBytes(w: Fp12): StaticArray<u8> {
   const r = new StaticArray<u8>(384);
   const p = changetype<usize>(r);
@@ -311,7 +474,12 @@ function fp12ToBytes(w: Fp12): StaticArray<u8> {
   return r;
 }
 
-/** G1 仿射 → 65 字节 0x04||x||y（转回标准域）。 */
+/**
+ * G1 仿射 → 65 字节 0x04||x||y（转回标准域）。
+ *
+ * G1 affine point → 65 bytes 0x04||x||y (converted back to the standard
+ * domain).
+ */
 function g1Compressed(P: G1): StaticArray<u8> {
   const A = g1ToAffine(P);
   const r = new StaticArray<u8>(65);
@@ -323,7 +491,12 @@ function g1Compressed(P: G1): StaticArray<u8> {
   return r;
 }
 
-/** G1 仿射 → 64 字节 x||y（KDF 输入用，转回标准域）。 */
+/**
+ * G1 仿射 → 64 字节 x||y（KDF 输入用，转回标准域）。
+ *
+ * G1 affine point → 64 bytes x||y (for KDF input, converted back to the
+ * standard domain).
+ */
 function g1xy(P: G1): StaticArray<u8> {
   const A = g1ToAffine(P);
   const r = new StaticArray<u8>(64);
@@ -334,7 +507,11 @@ function g1xy(P: G1): StaticArray<u8> {
   return r;
 }
 
-/** HMAC-SM3（RFC 2104，块 64 字节）。 */
+/**
+ * HMAC-SM3（RFC 2104，块 64 字节）。
+ *
+ * HMAC-SM3 (RFC 2104, 64-byte block).
+ */
 function hmacSm3(key: StaticArray<u8>, msg: StaticArray<u8>): StaticArray<u8> {
   const blockSize = 64;
   const k0 = new StaticArray<u8>(blockSize);
@@ -360,9 +537,17 @@ function hmacSm3(key: StaticArray<u8>, msg: StaticArray<u8>): StaticArray<u8> {
 }
 
 // ---------- 签名 / 验签（GM/T 0044 第 5 章） ----------
+// ---------- Sign / verify (GM/T 0044 chapter 5) ----------
 // signG（带缓存）已上移到「公开配对值缓存」一节。
+//
+// signG (with its cache) was moved up into the "public pairing-value cache"
+// section.
 
-/** SM9 签名。输出 h(32)||Sx(32)||Sy(32)，共 96 字节。 */
+/**
+ * SM9 签名。输出 h(32)||Sx(32)||Sy(32)，共 96 字节。
+ *
+ * SM9 signing. Outputs h(32)||Sx(32)||Sy(32), 96 bytes in total.
+ */
 export function sm9Sign(
   ds: G1,
   ppubs: G2,
@@ -386,7 +571,12 @@ export function sm9Sign(
   u256toBytes(FP_TMP, outPtr + 64);
 }
 
-/** SM9 验签。签名 = h(32)||Sx(32)||Sy(32)。通过返回 1。 */
+/**
+ * SM9 验签。签名 = h(32)||Sx(32)||Sy(32)。通过返回 1。
+ *
+ * SM9 verification. The signature is h(32)||Sx(32)||Sy(32). Returns 1 on
+ * success.
+ */
 export function sm9Verify(
   ppubs: G2,
   idPtr: usize,
@@ -419,8 +609,14 @@ export function sm9Verify(
 }
 
 // ---------- 加密 / 解密（GM/T 0044 第 6 章） ----------
+// ---------- Encrypt / decrypt (GM/T 0044 chapter 6) ----------
 
-/** SM9 加密。输出 C1(65)||C3(32)||C2(msgLen)，返回总长度。 */
+/**
+ * SM9 加密。输出 C1(65)||C3(32)||C2(msgLen)，返回总长度。
+ *
+ * SM9 encryption. Outputs C1(65)||C3(32)||C2(msgLen) and returns the total
+ * length.
+ */
 export function sm9Encrypt(
   ppube: G1,
   idPtr: usize,
@@ -432,6 +628,9 @@ export function sm9Encrypt(
   outCap: i32,
 ): i32 {
   // 输出缓冲容量校验：密文 = C1(65) || C3(32) || C2(msgLen)，绝不越界写。
+  //
+  // Validate the output capacity: the ciphertext is
+  // C1(65) || C3(32) || C2(msgLen), and nothing is ever written out of bounds.
   const total = 65 + 32 + msgLen;
   if (total > outCap) return -1;
 
@@ -460,7 +659,12 @@ export function sm9Encrypt(
   return total;
 }
 
-/** SM9 解密。输入 C1(65)||C3(32)||C2，返回明文长度；校验失败返回 -1。 */
+/**
+ * SM9 解密。输入 C1(65)||C3(32)||C2，返回明文长度；校验失败返回 -1。
+ *
+ * SM9 decryption. Input is C1(65)||C3(32)||C2; returns the plaintext length, or
+ * -1 when verification fails.
+ */
 export function sm9Decrypt(
   de: G2,
   idPtr: usize,
@@ -495,6 +699,9 @@ export function sm9Decrypt(
   const K = kdf(cat3(C1xy, fp12ToBytes(w), id), msgLen + 32);
 
   // GmSSL: C3 = HMAC-SM3(K2, C2)，即对密文算 HMAC（不是对明文）。
+  //
+  // GmSSL: C3 = HMAC-SM3(K2, C2), i.e. the HMAC is taken over the ciphertext
+  // (not the plaintext).
   const K2 = new StaticArray<u8>(32);
   for (let i = 0; i < 32; i++) K2[i] = K[msgLen + i];
   const C3p = hmacSm3(K2, C2);
@@ -508,14 +715,22 @@ export function sm9Decrypt(
   return msgLen;
 }
 
-/** 从线性内存读 U256（大端 32 字节）。 */
+/**
+ * 从线性内存读 U256（大端 32 字节）。
+ *
+ * Reads a U256 from linear memory (32 big-endian bytes).
+ */
 function readU256(ptr: usize): U256 {
   const b = new StaticArray<u8>(32);
   for (let i = 0; i < 32; i++) b[i] = load<u8>(ptr + i);
   return u256FromBytesBE(b, 0);
 }
 
-/** 诊断：直接调 sm9 的 kdf（输入为线性内存）。 */
+/**
+ * 诊断：直接调 sm9 的 kdf（输入为线性内存）。
+ *
+ * Diagnostic: calls sm9's kdf directly (input taken from linear memory).
+ */
 export function kdfOut(zPtr: usize, zLen: i32, kPtr: usize, kLen: i32): void {
   const z = new StaticArray<u8>(zLen);
   for (let i = 0; i < zLen; i++) z[i] = load<u8>(zPtr + i);
@@ -524,7 +739,14 @@ export function kdfOut(zPtr: usize, zLen: i32, kPtr: usize, kLen: i32): void {
 }
 
 // ---------- 密钥封装 KEM（GM/T 0044.4，对齐 GmSSL sm9_enc.c） ----------
+// ---------- Key encapsulation KEM (GM/T 0044.4, aligned with GmSSL sm9_enc.c) ----------
 
+/**
+ * 前 n 字节是否全为 0（KEM 要求 K 全 0 时换 r 重试）。
+ *
+ * Whether the first n bytes are all zero (KEM requires a retry with another r
+ * when K is all zero).
+ */
 function isAllZero(b: StaticArray<u8>, n: i32): bool {
   for (let i = 0; i < n; i++) if (b[i] !== 0) return false;
   return true;
@@ -537,6 +759,14 @@ function isAllZero(b: StaticArray<u8>, n: i32): bool {
  * @param ppube 加密主公钥 [ke]P1（G1）。
  * @param r     临时随机数（32 字节）。
  * @returns 1 成功；0 表示 K 全 0（调用方需换 r 重试）。
+ *
+ * SM9 KEM encapsulation: Q = [H1(ID||hid,N)]P1 + Ppube; C1 = [r]Q;
+ * w = e(Ppube, P2)^r; K = KDF(C1.x||C1.y || w || ID, klen).
+ *
+ * @param ppube Encryption master public key [ke]P1 (in G1).
+ * @param r     Ephemeral random scalar (32 bytes).
+ * @returns 1 on success; 0 means K is all zero (the caller must retry with a
+ *          different r).
  */
 export function sm9KemEncrypt(
   ppube: G1,
@@ -572,6 +802,11 @@ export function sm9KemEncrypt(
  *
  * @param de 用户加密私钥 [ke/(H1+ke)]P2（G2）。
  * @returns 1 成功；0 表示 C1 格式错或 K 全 0。
+ *
+ * SM9 KEM decapsulation: w = e(de, C1); K = KDF(C1.x||C1.y || w || ID, klen).
+ *
+ * @param de User decryption private key [ke/(H1+ke)]P2 (in G2).
+ * @returns 1 on success; 0 means C1 is malformed or K is all zero.
  */
 export function sm9KemDecrypt(
   de: G2,
@@ -608,6 +843,7 @@ void g1Add;
 void g2Add;
 
 // ---------- 密钥交换（GM/T 0044.3，对齐 GmSSL sm9_exch.c） ----------
+// ---------- Key exchange (GM/T 0044.3, aligned with GmSSL sm9_exch.c) ----------
 //
 // 双方用各自加密私钥 de（= enc key，见 sm9.h: #define SM9_EXCH_KEY SM9_ENC_KEY）
 // 与主公钥 Ppube=[ke]P1：
@@ -616,22 +852,44 @@ void g2Add;
 //   K = KDF(IDA||IDB||RA||RB||G1||G2||G3, klen)         （RA/RB 恒按 A 在前）
 //   S = SM3(prefix || G1 || SM3(G2 || G3 || IDA || IDB || RA || RB))
 //     prefix = 0x83（发起方）/ 0x82（响应方）
+//
+// Both sides use their own encryption private key de (= the enc key, see sm9.h:
+// #define SM9_EXCH_KEY SM9_ENC_KEY) together with the master public key
+// Ppube=[ke]P1:
+//   E1 = e(P2, Ppube)^r; E2 = e(de, peerR); G3 = E2^r
+//   initiator: G1 = E1, G2 = E2; responder: G1 = E2, G2 = E1
+//   K = KDF(IDA||IDB||RA||RB||G1||G2||G3, klen)  (RA/RB always ordered A first)
+//   S = SM3(prefix || G1 || SM3(G2 || G3 || IDA || IDB || RA || RB))
+//     prefix = 0x83 (initiator) / 0x82 (responder)
 
-/** 从线性内存读 len 字节。 */
+/**
+ * 从线性内存读 len 字节。
+ *
+ * Reads len bytes from linear memory.
+ */
 function ldBytes(ptr: usize, len: i32): StaticArray<u8> {
   const b = new StaticArray<u8>(len);
   for (let i = 0; i < len; i++) b[i] = load<u8>(ptr + i);
   return b;
 }
 
-/** 从 65 字节未压缩点取 64 字节 x||y。 */
+/**
+ * 从 65 字节未压缩点取 64 字节 x||y。
+ *
+ * Takes the 64 bytes x||y out of a 65-byte uncompressed point.
+ */
 function xy64(p65: StaticArray<u8>): StaticArray<u8> {
   const r = new StaticArray<u8>(64);
   for (let i = 0; i < 64; i++) r[i] = p65[1 + i];
   return r;
 }
 
-/** 从线性内存读 65 字节未压缩 G1 点（04||x||y）为 G1（Z=1，坐标转 Montgomery）。 */
+/**
+ * 从线性内存读 65 字节未压缩 G1 点（04||x||y）为 G1（Z=1，坐标转 Montgomery）。
+ *
+ * Reads a 65-byte uncompressed G1 point (04||x||y) from linear memory into a G1
+ * point (Z=1, coordinates converted to Montgomery form).
+ */
 function readG1Bytes(ptr: usize): G1 {
   const P = new G1();
   P.X = fpToMont(readU256(ptr + 1));
@@ -640,7 +898,11 @@ function readG1Bytes(ptr: usize): G1 {
   return P;
 }
 
-/** 计算 G1/G2/G3 的字节（各 384B），对齐 GmSSL compute_g。 */
+/**
+ * 计算 G1/G2/G3 的字节（各 384B），对齐 GmSSL compute_g。
+ *
+ * Computes the bytes of G1/G2/G3 (384B each), aligned with GmSSL compute_g.
+ */
 function exchComputeG(
   de: G2,
   ppube: G1,
@@ -666,7 +928,12 @@ function exchComputeG(
   }
 }
 
-/** 生成本端临时点 R = [r](H1(ID_peer||hid,N)·P1 + Ppube)，输出 65B。 */
+/**
+ * 生成本端临时点 R = [r](H1(ID_peer||hid,N)·P1 + Ppube)，输出 65B。
+ *
+ * Generates this side's ephemeral point R = [r](H1(ID_peer||hid,N)·P1 + Ppube)
+ * and writes it as 65 bytes.
+ */
 export function sm9ExchEphemeral(
   ppube: G1,
   peerIdPtr: usize,
@@ -681,7 +948,12 @@ export function sm9ExchEphemeral(
   for (let i = 0; i < 65; i++) store<u8>(outPtr + i, R[i]);
 }
 
-/** 密钥交换共享密钥 K = KDF(...)。@returns 1 成功；0 K 全 0。 */
+/**
+ * 密钥交换共享密钥 K = KDF(...)。@returns 1 成功；0 K 全 0。
+ *
+ * Key-exchange shared secret K = KDF(...). @returns 1 on success; 0 when K is
+ * all zero.
+ */
 export function sm9ExchKey(
   de: G2,
   ppube: G1,
@@ -719,7 +991,12 @@ export function sm9ExchKey(
   return 1;
 }
 
-/** 密钥交换确认值 S = SM3(prefix || G1 || SM3(G2||G3||IDA||IDB||RA||RB))。prefix: 0x83 发起方 / 0x82 响应方。 */
+/**
+ * 密钥交换确认值 S = SM3(prefix || G1 || SM3(G2||G3||IDA||IDB||RA||RB))。prefix: 0x83 发起方 / 0x82 响应方。
+ *
+ * Key-exchange confirmation value S = SM3(prefix || G1 ||
+ * SM3(G2||G3||IDA||IDB||RA||RB)). prefix: 0x83 initiator / 0x82 responder.
+ */
 export function sm9ExchConfirm(
   de: G2,
   ppube: G1,
@@ -763,6 +1040,10 @@ export function sm9ExchConfirm(
 /**
  * 一次算出 SA(0x83)、SB(0x82) 与共享密钥 K（避免重复 pairing）。
  * @returns 1 成功；0 K 全 0。
+ *
+ * Computes SA(0x83), SB(0x82) and the shared secret K in one pass (avoiding a
+ * repeated pairing).
+ * @returns 1 on success; 0 when K is all zero.
  */
 export function sm9ExchAll(
   de: G2,

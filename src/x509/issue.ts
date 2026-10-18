@@ -12,6 +12,24 @@
  * - SAN 的 dNSName / rfc822Name / URI 必须为 ASCII，iPAddress 必须是合法 4/16 字节。
  *
  * 本模块**不生成密钥、不管理私钥**：私钥由调用方提供，签名后不驻留。
+ *
+ * X.509 certificate issuance (self-signed certificates, plus issuing an
+ * end-entity certificate with a CA certificate).
+ *
+ * Security boundaries (red lines #4 / #5 / #6):
+ * - the certificate version is always v3;
+ * - a certificate with `basicConstraints.ca=false` must not be used to issue
+ *   child certificates, and it must not carry `keyUsage: keyCertSign`;
+ * - a certificate used as issuer must be a CA (`basicConstraints.ca === true`),
+ *   and when it carries KeyUsage that must include `keyCertSign`;
+ * - the KeyUsage of a CA certificate (when provided) must include `keyCertSign`;
+ * - the serial number is a positive integer; by default a random 16-byte value
+ *   is generated with the top bit cleared;
+ * - SubjectAltName dNSName / rfc822Name / URI must be ASCII, and iPAddress must
+ *   be a valid 4/16-byte address.
+ *
+ * This module **never generates keys and never manages private keys**: the
+ * caller supplies the private key and it is not retained after signing.
  */
 
 import { parseSm2PublicKeyPem } from '../pem/sm2.js';
@@ -54,7 +72,11 @@ import type {
   Validity,
 } from './types.js';
 
-/** `createSelfSignedCertificate` 的选项。 */
+/**
+ * `createSelfSignedCertificate` 的选项。
+ *
+ * Options for `createSelfSignedCertificate`.
+ */
 export type SelfSignedCertificateOptions = Omit<IssueCertificateOptions, 'issuer' | 'signer'> & {
   readonly privateKey: string | Uint8Array;
 };
@@ -64,6 +86,11 @@ export type SelfSignedCertificateOptions = Omit<IssueCertificateOptions, 'issuer
  *
  * @throws CertificateError 输入不满足证书约束。
  * @throws RangeError 序列号/有效期/路径长度越界。
+ *
+ * Issues one SM2 certificate.
+ *
+ * @throws CertificateError The input violates a certificate constraint.
+ * @throws RangeError The serial number, validity or path length is out of range.
  */
 export function issueCertificate(opts: IssueCertificateOptions): IssueCertificateResult {
   validateSubject(opts.subject, 'subject');
@@ -101,6 +128,10 @@ export function issueCertificate(opts: IssueCertificateOptions): IssueCertificat
 
   // 默认空标识：与 OpenSSL 的 X.509 路径一致（`openssl verify` 可直接验证）。
   // 需要 GM/T 默认标识时由调用方显式传 `DEFAULT_SM2_USER_ID`。
+  //
+  // The empty identity by default, matching OpenSSL's X.509 path so that
+  // `openssl verify` accepts the result. Callers that need the GM/T default
+  // identity pass `DEFAULT_SM2_USER_ID` explicitly.
   const signatureHex = sm2.signWithID(
     opts.signer.privateKey,
     tbs.raw,
@@ -119,6 +150,10 @@ export function issueCertificate(opts: IssueCertificateOptions): IssueCertificat
  * 生成自签证书（issuer = subject）。
  *
  * @throws CertificateError / RangeError 同 `issueCertificate`。
+ *
+ * Creates a self-signed certificate (issuer = subject).
+ *
+ * @throws CertificateError / RangeError Same conditions as `issueCertificate`.
  */
 export function createSelfSignedCertificate(
   opts: SelfSignedCertificateOptions,
@@ -134,6 +169,14 @@ export function createSelfSignedCertificate(
  * `#hex` 编码、十六进制转义等）。
  *
  * @throws CertificateError 格式非法或属性名未知。
+ *
+ * Parses a DN string written in a subset of RFC 4514, e.g.
+ * `"C=CN,O=Example,CN=Example CA"`.
+ *
+ * Backslash escapes (`\,`, `\=`, `\\`) are supported; full RFC 4514 (multi-valued
+ * RDNs, `#hex` encoding, hex escapes, ...) is not.
+ *
+ * @throws CertificateError Malformed input or an unknown attribute name.
  */
 export function parseDistinguishedName(input: string): DistinguishedNameInput {
   if (typeof input !== 'string' || input.trim().length === 0) {
@@ -178,7 +221,12 @@ export function parseDistinguishedName(input: string): DistinguishedNameInput {
 }
 
 // ---------- 校验 ----------
+//
+// ---------- Validation ----------
 
+// 校验 DN 输入。
+//
+// Validates the DN input.
 function validateSubject(dn: DistinguishedNameInput, what: string): void {
   if (typeof dn !== 'object' || dn === null || typeof dn.commonName !== 'string') {
     throw new TypeError(`${what}: commonName is required`);
@@ -206,6 +254,9 @@ function validateSubject(dn: DistinguishedNameInput, what: string): void {
   }
 }
 
+// 校验签发者证书与私钥。
+//
+// Validates the signer certificate and private key.
 function validateSigner(signer: CertificateSigner): void {
   if (typeof signer !== 'object' || signer === null || signer.privateKey === undefined) {
     throw new TypeError('signer.privateKey is required');
@@ -213,6 +264,8 @@ function validateSigner(signer: CertificateSigner): void {
   const cert = signer.certificate;
   if (cert === undefined) return;
   // 红线 #4：只有 CA 证书才能签发子证书。
+  //
+  // Red line #4: only a CA certificate may issue child certificates.
   if (cert.basicConstraints?.ca !== true) {
     throw new CertificateError('signer certificate is not a CA (basicConstraints.ca !== true)');
   }
@@ -221,6 +274,9 @@ function validateSigner(signer: CertificateSigner): void {
   }
 }
 
+// 校验 BasicConstraints 与 KeyUsage 组合。
+//
+// Validates BasicConstraints and KeyUsage combinations.
 function validateBasicConstraints(opts: IssueCertificateOptions): void {
   const basic = opts.basicConstraints;
   const keyUsage = opts.keyUsage;
@@ -241,6 +297,9 @@ function validateBasicConstraints(opts: IssueCertificateOptions): void {
   }
 }
 
+// 校验序列号为正整数。
+//
+// Validates that the serial number is a positive integer.
 function validateSerialNumber(serialNumber: bigint): void {
   if (typeof serialNumber !== 'bigint') throw new TypeError('serialNumber must be a bigint');
   if (serialNumber <= 0n) throw new RangeError('serialNumber must be positive');
@@ -249,6 +308,9 @@ function validateSerialNumber(serialNumber: bigint): void {
   }
 }
 
+// 校验有效期起止顺序。
+//
+// Validates the validity period ordering.
 function validateValidity(validity: Validity): void {
   for (const [name, date] of [
     ['notBefore', validity.notBefore],
@@ -259,11 +321,17 @@ function validateValidity(validity: Validity): void {
     }
   }
   // 证书时间精度到秒；按秒比较避免毫秒差导致编码后两者相等。
+  //
+  // Certificate times have one-second precision, so compare in seconds to avoid
+  // a millisecond difference making the two encoded values equal.
   const nb = Math.floor(validity.notBefore.getTime() / 1000);
   const na = Math.floor(validity.notAfter.getTime() / 1000);
   if (na <= nb) throw new RangeError('notAfter must be later than notBefore');
 }
 
+// 校验 SAN 类型与内容。
+//
+// Validates SubjectAltName types and values.
 function validateSubjectAltNames(names: readonly SubjectAltNameInput[] | undefined): void {
   if (names === undefined) return;
   for (const name of names) {
@@ -285,6 +353,8 @@ function validateSubjectAltNames(names: readonly SubjectAltNameInput[] | undefin
         break;
       case 'ip':
         // 具体解析在编码阶段完成；这里只做早期校验。
+        //
+        // The actual parsing happens during encoding; this is only an early check.
         break;
       default:
         throw new CertificateError(`subjectAltNames: unknown type "${String(name.type)}"`);
@@ -292,6 +362,9 @@ function validateSubjectAltNames(names: readonly SubjectAltNameInput[] | undefin
   }
 }
 
+// 断言字符串为 ASCII。
+//
+// Asserts that a string is ASCII.
 function assertAscii(value: string, what: string): void {
   for (let i = 0; i < value.length; i++) {
     if (value.charCodeAt(i) > 0x7f) throw new CertificateError(`${what} must be ASCII`);
@@ -299,7 +372,12 @@ function assertAscii(value: string, what: string): void {
 }
 
 // ---------- 扩展 ----------
+//
+// ---------- Extensions ----------
 
+// 构建证书扩展列表。
+//
+// Builds the certificate extension list.
 function buildExtensions(
   opts: IssueCertificateOptions,
   publicKey: Uint8Array,
@@ -362,7 +440,12 @@ function buildExtensions(
 }
 
 // ---------- 辅助 ----------
+//
+// ---------- Helpers ----------
 
+// 解析被签发证书的公钥。
+//
+// Resolves the subject public key.
 function resolveSubjectPublicKey(opts: IssueCertificateOptions): Uint8Array {
   if (opts.subjectPublicKey !== undefined) {
     return readPublicKey(opts.subjectPublicKey, 'subjectPublicKey');
@@ -373,6 +456,9 @@ function resolveSubjectPublicKey(opts: IssueCertificateOptions): Uint8Array {
   return readPublicKey(sm2.getPublicKey(opts.signer.privateKey), 'signer public key');
 }
 
+// 读取 64/65 字节或 PEM 公钥。
+//
+// Reads a 64/65-byte or PEM public key.
 function readPublicKey(input: string | Uint8Array, where: string): Uint8Array {
   if (typeof input === 'string' && input.includes('-----BEGIN')) {
     try {
@@ -385,9 +471,15 @@ function readPublicKey(input: string | Uint8Array, where: string): Uint8Array {
   return normalizePublicKey(bytes);
 }
 
+// 把解析后的 Name 转回输入结构。
+//
+// Converts a parsed Name back to the input structure.
 function nameToInput(name: Name): DistinguishedNameInput {
   return {
     // Name.commonName 理论上可缺失；encodeName 会在全空时报错。
+    //
+    // Name.commonName may in theory be absent; encodeName reports an error when
+    // every attribute is empty.
     commonName: name.commonName ?? '',
     ...(name.organization === undefined ? {} : { organization: name.organization }),
     ...(name.organizationalUnit === undefined
@@ -400,10 +492,16 @@ function nameToInput(name: Name): DistinguishedNameInput {
   };
 }
 
+// 生成 16 字节随机正整数序列号。
+//
+// Generates a 16-byte random positive serial number.
 function randomSerialNumber(): bigint {
   for (;;) {
     const bytes = randomBytes(16);
     // 最高位清零：编码时无需额外补 0x00，也满足“正整数”约束。
+    //
+    // Clear the top bit: the encoder then needs no extra 0x00 padding and the
+    // value still satisfies the "positive integer" constraint.
     bytes[0] = (bytes[0] as number) & 0x7f;
     let value = 0n;
     for (const byte of bytes) value = (value << 8n) | BigInt(byte);
@@ -411,6 +509,10 @@ function randomSerialNumber(): bigint {
   }
 }
 
+// DN 属性标签 → DistinguishedNameInput 字段；接受 RFC 4514 简写与点分 OID 两种写法。
+//
+// DN attribute labels to DistinguishedNameInput fields; both RFC 4514 shorthands
+// and dotted OIDs are accepted.
 const FIELD_BY_LABEL: Readonly<Record<string, keyof DistinguishedNameInput>> = {
   CN: 'commonName',
   '2.5.4.3': 'commonName',
@@ -429,6 +531,9 @@ const FIELD_BY_LABEL: Readonly<Record<string, keyof DistinguishedNameInput>> = {
   '1.2.840.113549.1.9.1': 'emailAddress',
 };
 
+// 按未转义分隔符切分 DN 字符串。
+//
+// Splits a DN string on unescaped separators.
 function splitUnescaped(input: string, separator: string): string[] {
   const parts: string[] = [];
   let current = '';
@@ -455,6 +560,9 @@ function splitUnescaped(input: string, separator: string): string[] {
   return parts;
 }
 
+// 查找未转义字符位置。
+//
+// Finds the position of an unescaped character.
 function indexOfUnescaped(input: string, target: string): number {
   let escaped = false;
   for (let i = 0; i < input.length; i++) {
@@ -472,6 +580,9 @@ function indexOfUnescaped(input: string, target: string): number {
   return -1;
 }
 
+// 解码 DN 中的反斜杠转义。
+//
+// Decodes backslash escapes in a DN.
 function decodeEscapes(input: string): string {
   let out = '';
   let escaped = false;
@@ -489,5 +600,9 @@ function decodeEscapes(input: string): string {
   return out;
 }
 
-/** 保留类型引用，供生成的声明文件使用。 */
+/**
+ * 保留类型引用，供生成的声明文件使用。
+ *
+ * Keeps the type reference so the generated declaration file can use it.
+ */
 export type { Certificate };

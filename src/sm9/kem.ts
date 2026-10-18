@@ -10,6 +10,20 @@
  *
  * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 4。
+ *
+ * SM9 key encapsulation (KEM, GM/T 0044.4).
+ *
+ * Two encapsulation entry points:
+ * - `kemEncrypt(ke, id, klen, r?)` derives Ppub-e from the encryption master private
+ *   key (the already published interface).
+ * - `kemEncapsulateWithMasterPublic(pub, id, klen, r?)` uses the encryption master
+ *   public key `[ke]P1` directly (the sender's typical shape; consumed by
+ *   `hybrid.ts`, leaving `kemEncrypt` unchanged).
+ *
+ * Decapsulation has one form only, `kemDecrypt(ke, id, encapsulation, klen)`: it
+ * requires the encryption master private key.
+ *
+ * Spec / plan: `docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md` Task 4.
  */
 
 import { DecryptionError, InvalidKeyError } from '../runtime/errors.js';
@@ -24,14 +38,31 @@ import {
   toBytes,
 } from './input.js';
 
-/** KEM 封装结果。 */
+/**
+ * KEM 封装结果。
+ *
+ * Result of a KEM encapsulation.
+ */
 export interface KemResult {
-  /** 会话密钥 K（hex，长度为 `2*klen`）。 */
+  /**
+   * 会话密钥 K（hex，长度为 `2*klen`）。
+   *
+   * Session key K as hex (`2*klen` characters).
+   */
   key: string;
-  /** 封装点 C1（65 字节未压缩 G1 点 hex：`04 || x || y`）。 */
+  /**
+   * 封装点 C1（65 字节未压缩 G1 点 hex：`04 || x || y`）。
+   *
+   * Encapsulated point C1 as hex (65-byte uncompressed G1 point: `04 || x || y`).
+   */
   encapsulation: string;
 }
 
+/**
+ * 校验会话密钥字节长度：必须是正整数。
+ *
+ * Validates the session-key length in bytes: it must be a positive integer.
+ */
 function requireKlen(klen: number): void {
   if (!Number.isInteger(klen) || klen <= 0) throw new RangeError('sm9: klen 必须为正整数');
 }
@@ -44,6 +75,15 @@ function requireKlen(klen: number): void {
  * @param klen 会话密钥字节长度（默认 32）
  * @param r    32 字节随机数 hex（可选；不传则由宿主 CSPRNG 提供）
  * @returns    `{ key, encapsulation }`
+ *
+ * SM9 key encapsulation (GM/T 0044.4): encapsulates a session key for the receiver
+ * id under its encryption master public key [ke]P1.
+ *
+ * @param ke 32-byte encryption master private key as hex (used to derive [ke]P1).
+ * @param id Receiver identity.
+ * @param klen Session-key length in bytes (default 32).
+ * @param r 32-byte nonce as hex (optional; the host CSPRNG supplies it otherwise).
+ * @returns `{ key, encapsulation }`.
  */
 export function kemEncrypt(
   ke: string | Uint8Array,
@@ -84,6 +124,18 @@ export function kemEncrypt(
  * @param id 接收方标识。
  * @param klen 会话密钥字节长度（默认 32）。
  * @param r 32 字节随机数 hex（可选）。
+ *
+ * Internal entry point that encapsulates under the encryption master public key
+ * (`hybridEncrypt` uses it).
+ *
+ * It differs from `kemEncrypt` only in the key parameter: the KGC's encryption
+ * master private key is not needed here.
+ *
+ * @param masterPublicKey 64-byte encryption master public key `[ke]P1` (point bytes /
+ *   SPKI master public key PEM).
+ * @param id Receiver identity.
+ * @param klen Session-key length in bytes (default 32).
+ * @param r 32-byte nonce as hex (optional).
  */
 export function kemEncapsulateWithMasterPublic(
   masterPublicKey: string | Uint8Array,
@@ -123,6 +175,12 @@ export function kemEncapsulateWithMasterPublic(
  *
  * @param encapsulation 65 字节封装点 C1 hex
  * @returns 会话密钥 hex
+ *
+ * SM9 key decapsulation: recovers the session key from the encapsulated point C1
+ * using the local encryption master private key ke and the id.
+ *
+ * @param encapsulation 65-byte encapsulated point C1 as hex.
+ * @returns The session key as hex.
  */
 export function kemDecrypt(
   ke: string | Uint8Array,

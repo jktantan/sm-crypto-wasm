@@ -13,20 +13,55 @@
  * - 单对象解析一律拒绝尾部多余字节（红线 #3）。
  *
  * 每个节点保留 `raw`（输入缓冲上的视图），供 CMS 验签与证书 TBS 直接使用。
+ *
+ * ASN.1 DER/BER parser.
+ *
+ * Covers the BER/DER subset needed by X.509 and CMS:
+ * - definite-length (short and long form);
+ * - BER indefinite-length (`0x80` + EOC `00 00`), allowed **only in `parseBer`**;
+ * - high tag numbers (`0x1f` + base128);
+ * - recursive constructed / primitive handling.
+ *
+ * Strictness:
+ * - `parseDer` rejects indefinite length, non-minimal length encodings, EOC and
+ *   trailing bytes;
+ * - `parseBer` relaxes length encoding and allows indefinite length, but still
+ *   rejects truncation and trailing bytes;
+ * - single-object parsing always rejects trailing bytes (red line #3).
+ *
+ * Every node keeps `raw` (a view onto the input buffer) so that CMS signature
+ * verification and certificate TBS hashing can use it directly.
  */
 
 import { decodeOid } from './oid.js';
 import { parseTime } from './time.js';
 import { Asn1Class, Asn1Error, type Asn1Node, UniversalTag } from './types.js';
 
-/** constructed 嵌套深度上限，防栈溢出与恶意深嵌套。 */
+/**
+ * constructed 嵌套深度上限，防栈溢出与恶意深嵌套。
+ *
+ * Upper bound on constructed nesting depth, to avoid stack overflow and hostile
+ * deeply nested input.
+ */
 const MAX_DEPTH = 64;
 
-/** 解析选项。 */
+/**
+ * 解析选项。
+ *
+ * Parse options.
+ */
 export interface ParseOptions {
-  /** 允许 BER indefinite-length。仅 CMS 路径应开启。 */
+  /**
+   * 允许 BER indefinite-length。仅 CMS 路径应开启。
+   *
+   * Allow BER indefinite-length; only the CMS path should enable this.
+   */
   allowIndefinite?: boolean;
-  /** 是否严格校验长度编码的最小形式（DER 默认开启）。 */
+  /**
+   * 是否严格校验长度编码的最小形式（DER 默认开启）。
+   *
+   * Whether to enforce minimal length encoding (on by default for DER).
+   */
   strictLength?: boolean;
 }
 
@@ -34,6 +69,11 @@ export interface ParseOptions {
  * 解析单个 DER 对象。
  *
  * @throws Asn1Error 截断、超出深度、非 DER 编码、或根节点后有多余字节。
+ *
+ * Parses a single DER object.
+ *
+ * @throws Asn1Error On truncation, excessive depth, non-DER encoding, or trailing
+ *   bytes after the root node.
  */
 export function parseDer(buf: Uint8Array): Asn1Node {
   return parseSingle(buf, { allowIndefinite: false, strictLength: true }, 'parseDer');
@@ -43,6 +83,11 @@ export function parseDer(buf: Uint8Array): Asn1Node {
  * 解析单个 BER 对象（允许 indefinite-length）。
  *
  * @throws Asn1Error 截断、超出深度、或根节点后有多余字节。
+ *
+ * Parses a single BER object (indefinite-length allowed).
+ *
+ * @throws Asn1Error On truncation, excessive depth, or trailing bytes after the
+ *   root node.
  */
 export function parseBer(buf: Uint8Array): Asn1Node {
   return parseSingle(buf, { allowIndefinite: true, strictLength: false }, 'parseBer');
@@ -52,16 +97,30 @@ export function parseBer(buf: Uint8Array): Asn1Node {
  * 解析连续的多个 DER 对象（证书 bundle / CMS 文件）。
  *
  * 返回按出现顺序排列的节点；允许空输入并返回空数组。
+ *
+ * Parses a sequence of consecutive DER objects (a certificate bundle or a CMS file).
+ *
+ * Returns the nodes in order of appearance; empty input is allowed and yields an
+ * empty array.
  */
 export function parseDerAll(buf: Uint8Array): Asn1Node[] {
   return parseAll(buf, { allowIndefinite: false, strictLength: true }, 'parseDerAll');
 }
 
-/** 解析连续的多个 BER 对象（允许 indefinite-length）。 */
+/**
+ * 解析连续的多个 BER 对象（允许 indefinite-length）。
+ *
+ * Parses a sequence of consecutive BER objects (indefinite-length allowed).
+ */
 export function parseBerAll(buf: Uint8Array): Asn1Node[] {
   return parseAll(buf, { allowIndefinite: true, strictLength: false }, 'parseBerAll');
 }
 
+/**
+ * 解析根节点，并要求输入完全被消费。
+ *
+ * Parses the root node and requires the whole input to be consumed.
+ */
 function parseSingle(buf: Uint8Array, opts: Required<ParseOptions>, where: string): Asn1Node {
   const reader = new Reader(buf, opts, where);
   const node = reader.readNode(0);
@@ -71,6 +130,11 @@ function parseSingle(buf: Uint8Array, opts: Required<ParseOptions>, where: strin
   return node;
 }
 
+/**
+ * 解析所有顶层对象，直到输入耗尽。
+ *
+ * Parses every top-level object until the input is exhausted.
+ */
 function parseAll(buf: Uint8Array, opts: Required<ParseOptions>, where: string): Asn1Node[] {
   const reader = new Reader(buf, opts, where);
   const nodes: Asn1Node[] = [];
@@ -80,6 +144,11 @@ function parseAll(buf: Uint8Array, opts: Required<ParseOptions>, where: string):
   return nodes;
 }
 
+/**
+ * 游标式 TLV 读取器（持有单一输入缓冲与位置）。
+ *
+ * Cursor-style TLV reader over a single input buffer.
+ */
 class Reader {
   private readonly buf: Uint8Array;
   private readonly opts: Required<ParseOptions>;
@@ -92,10 +161,20 @@ class Reader {
     this.where = where;
   }
 
+  /**
+   * 距输入末尾还剩多少字节。
+   *
+   * Number of bytes left before the end of the input.
+   */
   remaining(): number {
     return this.buf.length - this.pos;
   }
 
+  /**
+   * 读取一个字节，越界则报错。
+   *
+   * Reads one byte, throwing on out-of-bounds.
+   */
   private byte(): number {
     if (this.pos >= this.buf.length) {
       throw new Asn1Error(`${this.where}: truncated at offset ${this.pos}`);
@@ -103,7 +182,11 @@ class Reader {
     return this.buf[this.pos++] as number;
   }
 
-  /** 读取一个完整 TLV。 */
+  /**
+   * 读取一个完整 TLV。
+   *
+   * Reads one complete TLV.
+   */
   readNode(depth: number): Asn1Node {
     if (depth > MAX_DEPTH) {
       throw new Asn1Error(`${this.where}: nesting deeper than ${MAX_DEPTH}`);
@@ -115,6 +198,8 @@ class Reader {
     const tag = (first & 0x1f) === 0x1f ? this.readHighTag() : first & 0x1f;
 
     // EndOfContent 只能作为 indefinite-length 的结束标记出现。
+    //
+    // EndOfContent may only appear as the terminator of an indefinite-length value.
     if (cls === Asn1Class.Universal && tag === UniversalTag.EndOfContent && !constructed) {
       const lb = this.byte();
       if (lb !== 0) throw new Asn1Error(`${this.where}: malformed EndOfContent`);
@@ -141,6 +226,8 @@ class Reader {
     const contentStart = this.pos;
     if (indefinite) {
       // indefinite：一直读到 EOC（00 00）。
+      //
+      // Indefinite: keep reading until the EOC (00 00).
       const children: Asn1Node[] = [];
       for (;;) {
         if (this.remaining() < 2) {
@@ -203,7 +290,11 @@ class Reader {
     };
   }
 
-  /** 高 tag number：后续字节 base128。 */
+  /**
+   * 高 tag number：后续字节 base128。
+   *
+   * High tag number: subsequent bytes are base128.
+   */
   private readHighTag(): number {
     let value = 0;
     let count = 0;
@@ -221,7 +312,11 @@ class Reader {
     }
   }
 
-  /** 长格式长度（`n` 为 1..4）。 */
+  /**
+   * 长格式长度（`n` 为 1..4）。
+   *
+   * Long-form length (`n` is 1..4).
+   */
   private readLongLength(n: number): number {
     if (n === 0) throw new Asn1Error(`${this.where}: reserved length encoding 0x80`);
     if (n > 4) throw new Asn1Error(`${this.where}: length of ${n} bytes is not supported`);
@@ -246,11 +341,17 @@ class Reader {
 }
 
 // ----------------- 常用值读取 -----------------
+//
+// ----------------- Common value readers -----------------
 
 /**
  * 读取 INTEGER（二进制补码，支持负数）。
  *
  * @throws Asn1Error 节点不是 INTEGER。
+ *
+ * Reads an INTEGER (two's complement, negative values supported).
+ *
+ * @throws Asn1Error When the node is not an INTEGER.
  */
 export function readInteger(node: Asn1Node, what = 'INTEGER'): bigint {
   if (node.cls !== Asn1Class.Universal || node.tag !== UniversalTag.Integer) {
@@ -267,7 +368,11 @@ export function readInteger(node: Asn1Node, what = 'INTEGER'): bigint {
   return value;
 }
 
-/** 读取 BOOLEAN（DER 中 TRUE 必须为 0xFF）。 */
+/**
+ * 读取 BOOLEAN（DER 中 TRUE 必须为 0xFF）。
+ *
+ * Reads a BOOLEAN (DER requires TRUE to be 0xFF).
+ */
 export function readBoolean(node: Asn1Node, what = 'BOOLEAN'): boolean {
   if (node.cls !== Asn1Class.Universal || node.tag !== UniversalTag.Boolean) {
     throw new Asn1Error(`${what}: expected BOOLEAN`);
@@ -276,15 +381,32 @@ export function readBoolean(node: Asn1Node, what = 'BOOLEAN'): boolean {
   return (node.value[0] as number) !== 0;
 }
 
-/** BIT STRING 内容。 */
+/**
+ * BIT STRING 内容。
+ *
+ * Contents of a BIT STRING.
+ */
 export interface BitString {
-  /** 去掉 unused bits 后的有效字节（尾部未用位保留，由调用方屏蔽）。 */
+  /**
+   * 去掉 unused bits 后的有效字节（尾部未用位保留，由调用方屏蔽）。
+   *
+   * The payload bytes, with the unused-bits header removed (the trailing unused
+   * bits stay in place and must be masked by the caller).
+   */
   readonly bytes: Uint8Array;
-  /** 末尾未使用位数（0..7）。 */
+  /**
+   * 末尾未使用位数（0..7）。
+   *
+   * Number of unused trailing bits (0..7).
+   */
   readonly unusedBits: number;
 }
 
-/** 读取 BIT STRING。 */
+/**
+ * 读取 BIT STRING。
+ *
+ * Reads a BIT STRING.
+ */
 export function readBitString(node: Asn1Node, what = 'BIT STRING'): BitString {
   if (node.cls !== Asn1Class.Universal || node.tag !== UniversalTag.BitString) {
     throw new Asn1Error(`${what}: expected BIT STRING`);
@@ -295,7 +417,11 @@ export function readBitString(node: Asn1Node, what = 'BIT STRING'): BitString {
   return { bytes: node.value.subarray(1), unusedBits };
 }
 
-/** 读取 OCTET STRING。 */
+/**
+ * 读取 OCTET STRING。
+ *
+ * Reads an OCTET STRING.
+ */
 export function readOctetString(node: Asn1Node, what = 'OCTET STRING'): Uint8Array {
   if (node.cls !== Asn1Class.Universal || node.tag !== UniversalTag.OctetString) {
     throw new Asn1Error(`${what}: expected OCTET STRING`);
@@ -303,7 +429,11 @@ export function readOctetString(node: Asn1Node, what = 'OCTET STRING'): Uint8Arr
   return node.value;
 }
 
-/** 读取 OBJECT IDENTIFIER。 */
+/**
+ * 读取 OBJECT IDENTIFIER。
+ *
+ * Reads an OBJECT IDENTIFIER.
+ */
 export function readOid(node: Asn1Node, what = 'OBJECT IDENTIFIER'): string {
   if (node.cls !== Asn1Class.Universal || node.tag !== UniversalTag.ObjectIdentifier) {
     throw new Asn1Error(`${what}: expected OBJECT IDENTIFIER`);
@@ -311,7 +441,11 @@ export function readOid(node: Asn1Node, what = 'OBJECT IDENTIFIER'): string {
   return decodeOid(node.value);
 }
 
-/** 读取 UTCTime / GeneralizedTime。 */
+/**
+ * 读取 UTCTime / GeneralizedTime。
+ *
+ * Reads a UTCTime / GeneralizedTime.
+ */
 export function readTime(node: Asn1Node, what = 'Time'): Date {
   if (node.cls !== Asn1Class.Universal) {
     throw new Asn1Error(`${what}: expected UTCTime or GeneralizedTime`);
@@ -328,6 +462,11 @@ export function readTime(node: Asn1Node, what = 'Time'): Date {
  *
  * 支持 UTF8String / PrintableString / IA5String / NumericString /
  * TeletexString / BMPString / UniversalString；其他类型抛 `Asn1Error`。
+ *
+ * Reads an ASN.1 string.
+ *
+ * Supports UTF8String / PrintableString / IA5String / NumericString /
+ * TeletexString / BMPString / UniversalString; other types throw `Asn1Error`.
  */
 export function readString(node: Asn1Node, what = 'string'): string {
   if (node.cls !== Asn1Class.Universal) {
@@ -369,6 +508,11 @@ export function readString(node: Asn1Node, what = 'string'): string {
   }
 }
 
+/**
+ * 字节 → 单字节字符（低 8 位），用于 ASCII 类字符串。
+ *
+ * Bytes to one-code-unit string, used for ASCII-like string types.
+ */
 function latin1(bytes: Uint8Array): string {
   let out = '';
   for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i] as number);

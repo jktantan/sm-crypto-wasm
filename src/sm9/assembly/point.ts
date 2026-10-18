@@ -7,6 +7,16 @@
 // 对齐 GmSSL 官方 SM9（view/SM9.js）。
 //
 // 参考：GM/T 0044-2016。
+//
+// SM9 curve point arithmetic (AssemblyScript).
+//
+// - G1: points over Fp, Jacobian coordinates (X, Y, Z), affine (X/Z², Y/Z³).
+// - G2: twist-curve points over Fp2, Jacobian coordinates.
+//
+// Curve: y² = x³ + 5 (G1 over Fp; G2 over the twist curve y² = x³ + 5·u, whose
+// b term is [0,5]). Aligned with GmSSL's official SM9 (view/SM9.js).
+//
+// Reference: GM/T 0044-2016.
 
 import {
   permAlloc,
@@ -58,7 +68,11 @@ import {
   fp2zero,
 } from './fp2';
 
-/** G1 点（Fp 上），Jacobian。 */
+/**
+ * G1 点（Fp 上），Jacobian。
+ *
+ * A G1 point (over Fp), in Jacobian coordinates.
+ */
 export class G1 {
   X: U256;
   Y: U256;
@@ -70,7 +84,11 @@ export class G1 {
   }
 }
 
-/** G2 点（Fp2 上），Jacobian。 */
+/**
+ * G2 点（Fp2 上），Jacobian。
+ *
+ * A G2 point (over Fp2), in Jacobian coordinates.
+ */
 export class G2 {
   X: Fp2;
   Y: Fp2;
@@ -83,17 +101,34 @@ export class G2 {
 }
 
 // ---------- 预构造常量 ----------
+// ---------- Pre-built constants ----------
 //
 // 这些原先每次调用都用 u256fromHex 重新解析 64 个 hex 字符；其中 g1Double 里的
 // 常量在一次标量乘里要被解析 256 次，属于纯浪费。它们都是只读使用（传给 fp*
 // 或赋给新建点的字段），共享同一份 U256 是安全的。
+//
+// These used to be re-parsed from 64 hex characters with u256fromHex on every
+// call; the constant inside g1Double alone was parsed 256 times per scalar
+// multiply, which was pure waste. They are only ever read (passed to fp* or
+// assigned to fields of freshly created points), so sharing one U256 is safe.
 
-const U256_ONE = fpMontOne(); // 「1」在 Montgomery 域中 = R mod p
+// 「1」在 Montgomery 域中 = R mod p
+//
+// "1" in the Montgomery domain = R mod p.
+const U256_ONE = fpMontOne();
+// 「3」在 Montgomery 域中 = 3·R mod p（g1Double 的倍点公式用）。
+//
+// "3" in the Montgomery domain = 3·R mod p (used by the doubling formula in
+// g1Double).
 const U256_THREE = fpToMont(
   u256fromHex('0000000000000000000000000000000000000000000000000000000000000003'),
 );
 
 // G1 点运算的 U256 工作区（fp 层 To 算子用，零堆分配；非重入：*Into 是叶子）。
+//
+// U256 working area for G1 point arithmetic (used by the fp-layer To
+// operators, zero heap allocation; not re-entrant: the *Into functions are
+// leaves).
 const GE0 = u256zero();
 const GE1 = u256zero();
 const GE2 = u256zero();
@@ -107,6 +142,9 @@ const GE9 = u256zero();
 const GE10 = u256zero();
 const GE11 = u256zero();
 // 基点坐标：标准域常量，进 Montgomery 域各转一次（模块初始化时做，只此一次）。
+//
+// Base-point coordinates: standard-domain constants, each converted to the
+// Montgomery domain once (at module initialisation, only once).
 const G1_GX = fpToMont(
   u256fromHex('93DE051D62BF718FF5ED0704487D01D6E1E4086909DC3280E8C4E4817C66DDDD'),
 );
@@ -128,7 +166,11 @@ const G2_GY1 = fpToMont(
 
 // ---------- G1 ----------
 
-/** SM9 基点 P1（G1）。 */
+/**
+ * SM9 基点 P1（G1）。
+ *
+ * The SM9 base point P1 (in G1).
+ */
 export function g1Generator(): G1 {
   const p = new G1();
   p.X = G1_GX;
@@ -137,10 +179,16 @@ export function g1Generator(): G1 {
   return p;
 }
 
+// 判断 G1 点是否为无穷远点。
+//
+// Checks whether a G1 point is the point at infinity.
 export function g1IsInfinity(P: G1): bool {
   return u256isZero(P.Z);
 }
 
+// 拷贝 G1 仿射点。
+//
+// Copies a G1 affine point.
 export function g1Copy(P: G1): G1 {
   const r = new G1();
   r.X = u256clone(P.X);
@@ -149,6 +197,9 @@ export function g1Copy(P: G1): G1 {
   return r;
 }
 
+// G1 点取负。
+//
+// Negates a G1 point.
 export function g1Neg(P: G1): G1 {
   const r = new G1();
   r.X = P.X;
@@ -157,7 +208,11 @@ export function g1Neg(P: G1): G1 {
   return r;
 }
 
-/** out = 2P（倍点，对齐 point_double）。允许 out 与 P 别名。 */
+/**
+ * out = 2P（倍点，对齐 point_double）。允许 out 与 P 别名。
+ *
+ * out = 2P (point doubling, aligned with point_double). out may alias P.
+ */
 export function g1DoubleInto(out: G1, P: G1): void {
   if (g1IsInfinity(P)) {
     u256copy(P.X, out.X);
@@ -171,7 +226,10 @@ export function g1DoubleInto(out: G1, P: G1): void {
   fpSqrTo(GE0, X1);
   fpMulTo(GE0, GE0, U256_THREE); // T2 = 3 X1²
   fpAddTo(GE1, Y1, Y1); // Y3 = 2 Y1
-  fpMulTo(out.Z, GE1, Z1); // Z3（Z1 此后不再使用）
+  // Z3（Z1 此后不再使用）
+  //
+  // Z3 (Z1 is not used after this line).
+  fpMulTo(out.Z, GE1, Z1);
   fpSqrTo(GE1, GE1);
   fpMulTo(GE2, GE1, X1); // T3 = Y3·X1
   fpSqrTo(GE1, GE1);
@@ -186,14 +244,23 @@ export function g1DoubleInto(out: G1, P: G1): void {
   u256copy(GE1, out.Y);
 }
 
-/** 倍点（对齐 point_double）。 */
+/**
+ * 倍点（对齐 point_double）。
+ *
+ * Point doubling (aligned with point_double).
+ */
 export function g1Double(P: G1): G1 {
   const r = new G1();
   g1DoubleInto(r, P);
   return r;
 }
 
-/** out = P + Q（完整 Jacobian，对齐 GmSSL sm9_z256_point_add）。允许别名。 */
+/**
+ * out = P + Q（完整 Jacobian，对齐 GmSSL sm9_z256_point_add）。允许别名。
+ *
+ * out = P + Q (full Jacobian addition, aligned with GmSSL
+ * sm9_z256_point_add). Aliasing is allowed.
+ */
 export function g1AddInto(out: G1, P: G1, Q: G1): void {
   if (g1IsInfinity(Q)) {
     u256copy(P.X, out.X);
@@ -234,7 +301,10 @@ export function g1AddInto(out: G1, P: G1, Q: G1): void {
     }
     u256copy(U256_ONE, out.X);
     u256copy(U256_ONE, out.Y);
-    u256copy(u256zero(), out.Z); // 无穷远
+    // 无穷远
+    //
+    // Point at infinity.
+    u256copy(u256zero(), out.Z);
     return;
   }
   fpMulTo(GE4, GE4, GE7); // Z3 = Z3·H
@@ -258,7 +328,11 @@ export function g1AddInto(out: G1, P: G1, Q: G1): void {
   u256copy(GE4, out.Z);
 }
 
-/** 点加（完整 Jacobian，对齐 GmSSL sm9_z256_point_add）。 */
+/**
+ * 点加（完整 Jacobian，对齐 GmSSL sm9_z256_point_add）。
+ *
+ * Point addition (full Jacobian, aligned with GmSSL sm9_z256_point_add).
+ */
 export function g1Add(P: G1, Q: G1): G1 {
   const r = new G1();
   g1AddInto(r, P, Q);
@@ -266,17 +340,33 @@ export function g1Add(P: G1, Q: G1): G1 {
 }
 
 // ---------- wNAF 标量乘 ----------
+// ---------- wNAF scalar multiplication ----------
 //
 // 朴素 double-and-add 平均要做 ~128 次点加；宽度 5 的 NAF 把非零密度降到约
 // 1/(w+1)，点加降到 ~43 次。Jacobian 坐标下点加明显贵于点倍，所以划算。
+//
+// A naive double-and-add needs ~128 additions on average; a width-5 NAF drops
+// the non-zero density to about 1/(w+1), cutting that to ~43 additions. In
+// Jacobian coordinates an addition is clearly more expensive than a doubling,
+// so this pays off.
 
 const WNAF_W = 5;
-const WNAF_LEN = 257; // 256 位 + 1
+// 256 位 + 1
+//
+// 256 bits + 1.
+const WNAF_LEN = 257;
 const WNAF_HALF: u32 = (<u32>1) << (WNAF_W - 1); // 16
 const WNAF_MASK: u32 = ((<u32>1) << WNAF_W) - 1; // 31
-const WNAF_TABLE = 8; // 1 << (W - 2)，存 P, 3P, …, 15P
+// 1 << (W - 2)，存 P, 3P, …, 15P
+//
+// 1 << (W - 2); stores P, 3P, …, 15P.
+const WNAF_TABLE = 8;
 
-/** a -= v（v < 2^32，原地）。 */
+/**
+ * a -= v（v < 2^32，原地）。
+ *
+ * a -= v (v < 2^32, in place).
+ */
 function subSmallU32(a: U256, v: u32): void {
   let borrow: i64 = <i64>v;
   let i = 0;
@@ -293,7 +383,11 @@ function subSmallU32(a: U256, v: u32): void {
   }
 }
 
-/** a += v（v < 2^32，原地）。 */
+/**
+ * a += v（v < 2^32，原地）。
+ *
+ * a += v (v < 2^32, in place).
+ */
 function addSmallU32(a: U256, v: u32): void {
   let carry: u64 = <u64>v;
   let i = 0;
@@ -310,6 +404,12 @@ function addSmallU32(a: U256, v: u32): void {
  * digit ∈ {0, ±1, ±3, …, ±15}；k 不被修改。
  *
  * @returns 有效位数（最高位 digit 必非零；k == 0 时返回 0）
+ *
+ * Computes the width-5 wNAF (non-adjacent form) of k, least significant digit
+ * first. digit ∈ {0, ±1, ±3, …, ±15}; k is not modified.
+ *
+ * @returns Number of significant digits (the top digit is always non-zero;
+ *          0 when k == 0).
  */
 function wnaf(k: U256, out: StaticArray<i32>): i32 {
   const d = u256clone(k);
@@ -321,6 +421,8 @@ function wnaf(k: U256, out: StaticArray<i32>): i32 {
       if (m > WNAF_HALF) digit -= 32; // m - 2^W
       out[i] = digit;
       // d -= digit（digit 为负则相当于加）
+      //
+      // d -= digit (a negative digit means adding instead).
       if (digit > 0) subSmallU32(d, <u32>digit);
       else addSmallU32(d, <u32>-digit);
     } else {
@@ -332,13 +434,23 @@ function wnaf(k: U256, out: StaticArray<i32>): i32 {
   return i;
 }
 
-/** 标量乘（wNAF，w = 5）。k 为 U256。 */
+/**
+ * 标量乘（wNAF，w = 5）。k 为 U256。
+ *
+ * Scalar multiplication (wNAF, w = 5); k is a U256.
+ */
 export function g1Mul(k: U256, P: G1): G1 {
   const digits = new StaticArray<i32>(WNAF_LEN);
   const n = wnaf(k, digits);
-  if (n === 0) return new G1(); // k == 0 → 无穷远
+  // k == 0 → 无穷远
+  //
+  // k == 0 → point at infinity.
+  if (n === 0) return new G1();
 
   // 预计算 P, 3P, 5P, …, 15P 及其负（循环内零分配）
+  //
+  // Precompute P, 3P, 5P, …, 15P and their negatives (no allocation in the
+  // loop).
   const table = new StaticArray<G1>(WNAF_TABLE);
   const negTable = new StaticArray<G1>(WNAF_TABLE);
   table[0] = g1Copy(P);
@@ -362,6 +474,7 @@ export function g1Mul(k: U256, P: G1): G1 {
 }
 
 // ---------- 固定基点 comb 预计算 ----------
+// ---------- Fixed-base comb precomputation ----------
 //
 // 基点固定时，把标量的位按 i = j + t·d 重排（t = 0..w-1 段，j = 0..d-1 个 comb
 // 位置），于是：
@@ -369,19 +482,38 @@ export function g1Mul(k: U256, P: G1): G1 {
 //   G[c] = Σ_{t: c_t = 1} (2^d)^t · P
 // 表只有 2^w 项，而运行时只需 d-1 次倍点 + d 次点加（w=5 时 51+52），
 // 对比 wNAF 的 255 次倍点 + ~43 次点加。表惰性构造一次后缓存。
+//
+// With a fixed base point the scalar's bits are reordered as i = j + t·d
+// (t = 0..w-1 segments, j = 0..d-1 comb positions), so that:
+//   k·P = Σ_{j=0}^{d-1} 2^j · G[c_j],  c_j = Σ_{t=0}^{w-1} b_{j + t·d} · 2^t
+//   G[c] = Σ_{t: c_t = 1} (2^d)^t · P
+// The table has only 2^w entries while a run needs just d-1 doublings + d
+// additions (51+52 for w=5), versus 255 doublings + ~43 additions for wNAF. The
+// table is built lazily once and then cached.
 
 const COMB_W = 5;
 const COMB_D = 52; // ceil(256 / COMB_W)
-const COMB_SIZE = 1 << COMB_W; // 32 项
+// 32 项
+//
+// 32 entries.
+const COMB_SIZE = 1 << COMB_W;
 
-/** v 的最低置位的位索引（要求 v > 0）。 */
+/**
+ * v 的最低置位的位索引（要求 v > 0）。
+ *
+ * Bit index of the lowest set bit of v (requires v > 0).
+ */
 function lowBitIndex(v: i32): i32 {
   let i = 0;
   while (((v >>> i) & 1) === 0) i++;
   return i;
 }
 
-/** 第 j 个 comb 位置的 w 位索引 c_j。 */
+/**
+ * 第 j 个 comb 位置的 w 位索引 c_j。
+ *
+ * The w-bit index c_j of the j-th comb position.
+ */
 function combIndex(k: U256, j: i32): i32 {
   let c: i32 = 0;
   for (let t = COMB_W - 1; t >= 0; t--) {
@@ -392,7 +524,11 @@ function combIndex(k: U256, j: i32): i32 {
   return c;
 }
 
-/** 构造基点 P 的 comb 表 G。 */
+/**
+ * 构造基点 P 的 comb 表 G。
+ *
+ * Builds the comb table G for the base point P.
+ */
 function buildG1Comb(): StaticArray<G1> {
   const S = new StaticArray<G1>(COMB_W);
   S[0] = g1Generator();
@@ -402,7 +538,10 @@ function buildG1Comb(): StaticArray<G1> {
     S[t] = s;
   }
   const G = new StaticArray<G1>(COMB_SIZE);
-  G[0] = new G1(); // 无穷远
+  // 无穷远
+  //
+  // Point at infinity.
+  G[0] = new G1();
   for (let c = 1; c < COMB_SIZE; c++) {
     const low = c & -c;
     G[c] = g1Add(G[c ^ low], S[lowBitIndex(low)]);
@@ -412,12 +551,20 @@ function buildG1Comb(): StaticArray<G1> {
 
 let g1CombCache: StaticArray<G1> = new StaticArray<G1>(0);
 
-/** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
+/**
+ * 惰性取 comb 表（首次构造后缓存，之后零开销）。
+ *
+ * Lazily obtains a comb table (built on first use, then cached at zero cost).
+ */
 function g1CombTable(): StaticArray<G1> {
   if (g1CombCache.length === 0) {
     const t = buildG1Comb();
     // 缓存必须活在 arena 之外：arena 在每次导出调用入口回卷，落在里面的坐标
     // 会在下一次调用时被覆盖。逐个把坐标深拷贝到永久区。
+    //
+    // The cache must live outside the arena: the arena is rewound at the entry
+    // of every exported call, so coordinates stored there would be overwritten
+    // on the next call. Deep-copy each coordinate into permanent memory.
     for (let i = 0; i < t.length; i++) {
       const p = t[i];
       p.X = permU256(p.X);
@@ -429,7 +576,11 @@ function g1CombTable(): StaticArray<G1> {
   return g1CombCache;
 }
 
-/** 标量乘基点 P1（固定基点 comb）。 */
+/**
+ * 标量乘基点 P1（固定基点 comb）。
+ *
+ * Scalar multiplication of the base point P1 (fixed-base comb).
+ */
 export function g1MulG(k: U256): G1 {
   const G = g1CombTable();
   const Q: G1 = g1Copy(G[combIndex(k, COMB_D - 1)]);
@@ -440,7 +591,11 @@ export function g1MulG(k: U256): G1 {
   return Q;
 }
 
-/** 转仿射。Z==0 时原样返回。 */
+/**
+ * 转仿射。Z==0 时原样返回。
+ *
+ * Convert to affine coordinates. Returns the input unchanged when Z==0.
+ */
 export function g1ToAffine(P: G1): G1 {
   const r = g1Copy(P);
   if (u256isZero(r.Z)) return r;
@@ -454,8 +609,13 @@ export function g1ToAffine(P: G1): G1 {
 }
 
 // ---------- G2（扭曲线，Fp2 坐标） ----------
+// ---------- G2 (twist curve, Fp2 coordinates) ----------
 
-/** SM9 基点 P2（G2）。 */
+/**
+ * SM9 基点 P2（G2）。
+ *
+ * The SM9 base point P2 (in G2).
+ */
 export function g2Generator(): G2 {
   const p = new G2();
   p.X = fp2set(G2_GX0, G2_GX1);
@@ -464,10 +624,16 @@ export function g2Generator(): G2 {
   return p;
 }
 
+// 判断 G2 点是否为无穷远点。
+//
+// Checks whether a G2 point is the point at infinity.
 export function g2IsInfinity(P: G2): bool {
   return fp2isZero(P.Z);
 }
 
+// 拷贝 G2 仿射点。
+//
+// Copies a G2 affine point.
 export function g2Copy(P: G2): G2 {
   const r = new G2();
   r.X = fp2copy(P.X);
@@ -476,6 +642,9 @@ export function g2Copy(P: G2): G2 {
   return r;
 }
 
+// G2 点取负。
+//
+// Negates a G2 point.
 export function g2Neg(P: G2): G2 {
   const r = new G2();
   r.X = P.X;
@@ -484,7 +653,11 @@ export function g2Neg(P: G2): G2 {
   return r;
 }
 
-/** b 项 [0, 5]（Montgomery 域）。 */
+/**
+ * b 项 [0, 5]（Montgomery 域）。
+ *
+ * The b term [0, 5] (Montgomery domain).
+ */
 function g2B(): Fp2 {
   return fp2set(
     u256zero(),
@@ -492,9 +665,18 @@ function g2B(): Fp2 {
   );
 }
 
-/** 倍点（对齐 twist_point_double）。 */
+/**
+ * 倍点（对齐 twist_point_double）。
+ *
+ * Point doubling (aligned with twist_point_double).
+ */
 // G2/G1 点运算的 Fp2 工作区（To 算子，零堆分配；非重入：下面的 *Into 是叶子，
 // 内部只调 fp2 的 To 算子，后者有独立 scratch）。PE_ONE / PE_ZERO 为只读常量。
+//
+// Fp2 working area for G2/G1 point arithmetic (To operators, zero heap
+// allocation; not re-entrant: the *Into functions below are leaves that only
+// call fp2's To operators, which have their own scratch). PE_ONE / PE_ZERO are
+// read-only constants.
 const PE_ONE: Fp2 = fp2one();
 const PE_ZERO: Fp2 = fp2zero();
 const PE0: Fp2 = fp2zero();
@@ -517,6 +699,12 @@ const _PE13: Fp2 = fp2zero();
  *
  * 允许 out 与 P 别名：写 out 的三个分量都排在所有对 P 的读取之后
  * （out.Z 虽是中途写出，但 Z1 在那一行之后不再被用到，已在注释中标明）。
+ *
+ * out = 2P (Jacobian doubling, aligned with point_double).
+ *
+ * out may alias P: all three components of out are written only after every
+ * read of P (out.Z is written midway, but Z1 is not used after that line, as
+ * noted in the comment there).
  */
 export function g2DoubleInto(out: G2, P: G2): void {
   if (g2IsInfinity(P)) {
@@ -531,7 +719,10 @@ export function g2DoubleInto(out: G2, P: G2): void {
   fp2SqrTo(PE0, X1);
   fp2TriTo(PE0, PE0); // T2 = 3 X1²
   fp2DblTo(PE1, Y1); // Y3 = 2 Y1
-  fp2MulTo(out.Z, PE1, Z1); // Z3 = Y3·Z1（Z1 此后不再使用）
+  // Z3 = Y3·Z1（Z1 此后不再使用）
+  //
+  // Z3 = Y3·Z1 (Z1 is not used after this line).
+  fp2MulTo(out.Z, PE1, Z1);
   fp2SqrTo(PE1, PE1);
   fp2MulTo(PE3, PE1, X1); // T3 = Y3·X1
   fp2SqrTo(PE1, PE1);
@@ -546,13 +737,21 @@ export function g2DoubleInto(out: G2, P: G2): void {
   fp2Put(out.Y, PE1);
 }
 
+// G2 点倍加。
+//
+// Doubles a G2 point.
 export function g2Double(P: G2): G2 {
   const r = new G2();
   g2DoubleInto(r, P);
   return r;
 }
 
-/** out = P + Q（完整 Jacobian，对齐 GmSSL sm9_z256_twist_point_add）。允许别名。 */
+/**
+ * out = P + Q（完整 Jacobian，对齐 GmSSL sm9_z256_twist_point_add）。允许别名。
+ *
+ * out = P + Q (full Jacobian addition, aligned with GmSSL
+ * sm9_z256_twist_point_add). Aliasing is allowed.
+ */
 export function g2AddInto(out: G2, P: G2, Q: G2): void {
   if (g2IsInfinity(Q)) {
     fp2Put(out.X, P.X);
@@ -593,7 +792,10 @@ export function g2AddInto(out: G2, P: G2, Q: G2): void {
     }
     fp2Put(out.X, PE_ONE);
     fp2Put(out.Y, PE_ONE);
-    fp2Put(out.Z, PE_ZERO); // 无穷远
+    // 无穷远
+    //
+    // Point at infinity.
+    fp2Put(out.Z, PE_ZERO);
     return;
   }
   fp2MulTo(PE4, PE4, PE7); // Z3 = Z3·H
@@ -616,14 +818,23 @@ export function g2AddInto(out: G2, P: G2, Q: G2): void {
   fp2Put(out.Z, PE4);
 }
 
-/** 点加（完整 Jacobian，对齐 GmSSL sm9_z256_twist_point_add）。 */
+/**
+ * 点加（完整 Jacobian，对齐 GmSSL sm9_z256_twist_point_add）。
+ *
+ * Point addition (full Jacobian, aligned with GmSSL sm9_z256_twist_point_add).
+ */
 export function g2Add(P: G2, Q: G2): G2 {
   const r = new G2();
   g2AddInto(r, P, Q);
   return r;
 }
 
-/** out = P + Q（完整点加，对齐 twist_point_add_full）。允许别名。 */
+/**
+ * out = P + Q（完整点加，对齐 twist_point_add_full）。允许别名。
+ *
+ * out = P + Q (full point addition, aligned with twist_point_add_full).
+ * Aliasing is allowed.
+ */
 export function g2AddFullInto(out: G2, P: G2, Q: G2): void {
   if (g2IsInfinity(Q)) {
     fp2Put(out.X, P.X);
@@ -662,7 +873,10 @@ export function g2AddFullInto(out: G2, P: G2, Q: G2): void {
   if (fp2isZero(PE0) && fp2isZero(PE5)) {
     fp2Put(out.X, PE_ONE);
     fp2Put(out.Y, PE_ONE);
-    fp2Put(out.Z, PE_ZERO); // 无穷远
+    // 无穷远
+    //
+    // Point at infinity.
+    fp2Put(out.Z, PE_ZERO);
     return;
   }
   fp2SqrTo(PE6, PE0); // T6 = T1²
@@ -682,20 +896,34 @@ export function g2AddFullInto(out: G2, P: G2, Q: G2): void {
   fp2Put(out.Z, PE7);
 }
 
-/** 完整点加（对齐 twist_point_add_full）。 */
+/**
+ * 完整点加（对齐 twist_point_add_full）。
+ *
+ * Full point addition (aligned with twist_point_add_full).
+ */
 export function g2AddFull(P: G2, Q: G2): G2 {
   const r = new G2();
   g2AddFullInto(r, P, Q);
   return r;
 }
 
-/** 标量乘（wNAF，w = 5）。 */
+/**
+ * 标量乘（wNAF，w = 5）。
+ *
+ * Scalar multiplication (wNAF, w = 5).
+ */
 export function g2Mul(k: U256, P: G2): G2 {
   const digits = new StaticArray<i32>(WNAF_LEN);
   const n = wnaf(k, digits);
-  if (n === 0) return new G2(); // k == 0 → 无穷远
+  // k == 0 → 无穷远
+  //
+  // k == 0 → point at infinity.
+  if (n === 0) return new G2();
 
   // 预计算 P, 3P, 5P, …, 15P 及其负（循环内零分配）
+  //
+  // Precompute P, 3P, 5P, …, 15P and their negatives (no allocation in the
+  // loop).
   const table = new StaticArray<G2>(WNAF_TABLE);
   const negTable = new StaticArray<G2>(WNAF_TABLE);
   table[0] = g2Copy(P);
@@ -718,7 +946,11 @@ export function g2Mul(k: U256, P: G2): G2 {
   return Q;
 }
 
-/** 构造基点 P2 的 comb 表 G。 */
+/**
+ * 构造基点 P2 的 comb 表 G。
+ *
+ * Builds the comb table G for the base point P2.
+ */
 function buildG2Comb(): StaticArray<G2> {
   const S = new StaticArray<G2>(COMB_W);
   S[0] = g2Generator();
@@ -728,7 +960,10 @@ function buildG2Comb(): StaticArray<G2> {
     S[t] = s;
   }
   const G = new StaticArray<G2>(COMB_SIZE);
-  G[0] = new G2(); // 无穷远
+  // 无穷远
+  //
+  // Point at infinity.
+  G[0] = new G2();
   for (let c = 1; c < COMB_SIZE; c++) {
     const low = c & -c;
     G[c] = g2Add(G[c ^ low], S[lowBitIndex(low)]);
@@ -738,11 +973,18 @@ function buildG2Comb(): StaticArray<G2> {
 
 let g2CombCache: StaticArray<G2> = new StaticArray<G2>(0);
 
-/** 惰性取 comb 表（首次构造后缓存，之后零开销）。 */
+/**
+ * 惰性取 comb 表（首次构造后缓存，之后零开销）。
+ *
+ * Lazily obtains a comb table (built on first use, then cached at zero cost).
+ */
 function g2CombTable(): StaticArray<G2> {
   if (g2CombCache.length === 0) {
     const t = buildG2Comb();
     // 同 G1：缓存必须落在永久区，否则下一次 arenaRewind 会覆盖这些坐标。
+    //
+    // As for G1: the cache must live in permanent memory, otherwise the next
+    // arenaRewind overwrites these coordinates.
     for (let i = 0; i < t.length; i++) {
       const p = t[i];
       p.X = permFp2(p.X);
@@ -754,14 +996,22 @@ function g2CombTable(): StaticArray<G2> {
   return g2CombCache;
 }
 
-/** 把一个 Fp2（64 字节）深拷贝到永久区。 */
+/**
+ * 把一个 Fp2（64 字节）深拷贝到永久区。
+ *
+ * Deep-copies an Fp2 (64 bytes) into permanent memory.
+ */
 function permFp2(src: Fp2): Fp2 {
   const p = permAlloc(64);
   memory.copy(p, src, 64);
   return p;
 }
 
-/** 标量乘基点 P2（固定基点 comb）。 */
+/**
+ * 标量乘基点 P2（固定基点 comb）。
+ *
+ * Scalar multiplication of the base point P2 (fixed-base comb).
+ */
 export function g2MulG(k: U256): G2 {
   const G = g2CombTable();
   const Q: G2 = g2Copy(G[combIndex(k, COMB_D - 1)]);
@@ -772,7 +1022,11 @@ export function g2MulG(k: U256): G2 {
   return Q;
 }
 
-/** 转仿射。 */
+/**
+ * 转仿射。
+ *
+ * Convert to affine coordinates.
+ */
 export function g2ToAffine(P: G2): G2 {
   const r = g2Copy(P);
   if (fp2isZero(r.Z) || fp2isOne(r.Z)) return r;

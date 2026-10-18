@@ -7,6 +7,17 @@
 //   p = 2^256 - 2^224 - 2^96 + 2^64 - 1
 //     = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
 //   n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
+//
+// SM2 prime-field / subgroup-order arithmetic (AssemblyScript).
+//
+// This file is a **thin wrapper**: the generic 256-bit modular arithmetic lives in
+// `src/common/assembly/field256.ts`; here only the SM2 moduli are fixed and the calls
+// are forwarded, keeping the internal SM2 call signatures unchanged.
+//
+// SM2 curve parameters (GM/T 0003-2012):
+//   p = 2^256 - 2^224 - 2^96 + 2^64 - 1
+//     = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
+//   n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 
 import {
   arenaAlloc,
@@ -44,6 +55,8 @@ import {
 } from '../../common/assembly/field256';
 
 // 重新导出通用工具，供 SM2 其它文件沿用。
+//
+// Re-export the generic helpers so the other SM2 files can keep using them.
 export {
   U256,
   U512,
@@ -67,11 +80,17 @@ export {
 
 // SM2 素域 p（小端 limb）。
 // p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
+//
+// SM2 prime field p (little-endian limbs).
+// p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
 export const P_LIMBS: StaticArray<u32> = [
   0xffffffff, 0xffffffff, 0x00000000, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
 ];
 
 // SM2 子群阶 n（小端 limb）。
+// n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
+//
+// SM2 subgroup order n (little-endian limbs).
 // n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
 export const N_LIMBS: StaticArray<u32> = [
   0x39d54123, 0x53bbf409, 0x21c6052b, 0x7203df6b, 0xffffffff, 0xffffffff, 0xffffffff, 0xfffffffe,
@@ -80,35 +99,65 @@ export const N_LIMBS: StaticArray<u32> = [
 // p / n 的 U256 形式只构造一次。每次 fpAdd/fpSub/fpMul 都重建一份 U256 是最贵的固定开销
 // （SM2 实测 fpAdd ≈ 0.83µs ≈ fpMul 的 1/3）。field256 的 mod* 系列只读模数（输入自行
 // clone），不会写这块共享内存；调用方也不要就地修改 pArr()/nArr() 的返回值。
+//
+// The U256 forms of p / n are built only once. Rebuilding a U256 on every
+// fpAdd/fpSub/fpMul is the most expensive fixed overhead (measured fpAdd ≈ 0.83µs
+// ≈ 1/3 of fpMul on SM2). field256's mod* family only reads the modulus (it clones
+// its own inputs) and never writes this shared memory; callers must not modify the
+// values returned by pArr()/nArr() in place.
 const P_CACHE: U256 = u256fromLimbs(P_LIMBS);
 const N_CACHE: U256 = u256fromLimbs(N_LIMBS);
 
-/** 返回 p（共享常量：只读，勿就地修改）。 */
+/**
+ * 返回 p（共享常量：只读，勿就地修改）。
+ *
+ * Return p (a shared constant: read-only, do not modify in place).
+ */
 export function pArr(): U256 {
   return P_CACHE;
 }
 
-/** 返回 n（共享常量：只读，勿就地修改）。 */
+/**
+ * 返回 n（共享常量：只读，勿就地修改）。
+ *
+ * Return n (a shared constant: read-only, do not modify in place).
+ */
 export function nArr(): U256 {
   return N_CACHE;
 }
 
-/** 模加：(a + b) mod p。 */
+/**
+ * 模加：(a + b) mod p。
+ *
+ * Modular addition: (a + b) mod p.
+ */
 export function fpAdd(a: U256, b: U256): U256 {
   return modAdd(a, b, pArr());
 }
 
-/** 模减：(a - b) mod p。 */
+/**
+ * 模减：(a - b) mod p。
+ *
+ * Modular subtraction: (a - b) mod p.
+ */
 export function fpSub(a: U256, b: U256): U256 {
   return modSub(a, b, pArr());
 }
 
-/** 模乘：(a * b) mod p。 */
+/**
+ * 模乘：(a * b) mod p。
+ *
+ * Modular multiplication: (a * b) mod p.
+ */
 export function fpMul(a: U256, b: U256): U256 {
   return modMul(a, b, pArr());
 }
 
-/** 模平方。 */
+/**
+ * 模平方。
+ *
+ * Modular squaring.
+ */
 export function fpSqr(a: U256): U256 {
   return modSqr(a, pArr());
 }
@@ -118,43 +167,81 @@ export function fpSqr(a: U256): U256 {
 // 供点运算的 Into 版使用：一次倍点原本要 ~10 次 `new U256`（arena 分配 + 可能的
 // memory.copy），改成写调用方的 out 后这部分开销消失。四者都允许 out 与入参别名
 // （mod*Into 的读写顺序已经保证：先读完入参、再写 out）。
+//
+// In-place (To) variants.
+//
+// Used by the Into versions of the point arithmetic: one doubling used to need ~10
+// `new U256` allocations (arena allocation plus possibly a `memory.copy`); writing to
+// the caller's out removes that overhead. All four allow out to alias an input
+// (mod*Into's read/write order guarantees it: all inputs are read before out is written).
 
-/** 原地：(a + b) mod p → out。 */
+/**
+ * 原地：(a + b) mod p → out。
+ *
+ * In place: (a + b) mod p → out.
+ */
 export function fpAddTo(out: U256, a: U256, b: U256): void {
   modAddInto(out, a, b, pArr());
 }
 
-/** 原地：(a - b) mod p → out。 */
+/**
+ * 原地：(a - b) mod p → out。
+ *
+ * In place: (a - b) mod p → out.
+ */
 export function fpSubTo(out: U256, a: U256, b: U256): void {
   modSubInto(out, a, b, pArr());
 }
 
-/** 原地：(a · b) mod p → out。 */
+/**
+ * 原地：(a · b) mod p → out。
+ *
+ * In place: (a · b) mod p → out.
+ */
 export function fpMulTo(out: U256, a: U256, b: U256): void {
   modMulInto(out, a, b, pArr());
 }
 
-/** 原地：a² mod p → out。 */
+/**
+ * 原地：a² mod p → out。
+ *
+ * In place: a² mod p → out.
+ */
 export function fpSqrTo(out: U256, a: U256): void {
   modSqrInto(out, a, pArr());
 }
 
-/** 模逆：a^{-1} mod p。 */
+/**
+ * 模逆：a^{-1} mod p。
+ *
+ * Modular inverse: a^{-1} mod p.
+ */
 export function fpInv(a: U256): U256 {
   return modInv(a, pArr());
 }
 
 // ---------- 诊断用（保持既有导出，供 probe 使用） ----------
+// ---------- Diagnostics (existing exports kept for probes) ----------
 
-/** 诊断用：暴露 512-bit 积。 */
+/**
+ * 诊断用：暴露 512-bit 积。
+ *
+ * Diagnostic: expose the 512-bit product.
+ */
 export function mul512Debug(a: U256, b: U256): U512 {
   return mul512(a, b);
 }
 
-/** 诊断用：暴露归约。 */
+/**
+ * 诊断用：暴露归约。
+ *
+ * Diagnostic: expose the reduction.
+ */
 export function reduce512Debug(x: U512): U256 {
   return reduce512(x, pArr());
 }
 
 // 保持 u256addRaw / u256subRaw 可见（部分内部代码可能引用）。
+//
+// Keep u256addRaw / u256subRaw visible (some internal code may reference them).
 export { u256addRaw, u256subRaw };

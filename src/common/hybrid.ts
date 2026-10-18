@@ -8,6 +8,19 @@
  *   避免“空输入静默成功”。
  *
  * IV 同样按 hex / Uint8Array 处理，未提供时由宿主 CSPRNG 生成 12 字节。
+ *
+ * Shared input conventions for hybrid encryption.
+ *
+ * The two hybrid modules (SM2 / SM9) apply **the same** string semantics to `message`:
+ * - `Uint8Array`: used as is (copied);
+ * - `string`: must be hex (a `0x` prefix is allowed); base64 / UTF-8 are no longer
+ *   guessed;
+ * - pass `new Uint8Array(0)` for an empty message — an empty string is rejected
+ *   outright by the existing `toBytes` contract, which avoids "empty input silently
+ *   succeeds".
+ *
+ * The IV is likewise hex / Uint8Array; when omitted, 12 bytes are generated from the
+ * host CSPRNG.
  */
 
 import { hexToBytes } from '../runtime/convert.js';
@@ -20,6 +33,13 @@ import { SEALED_IV_LEN } from './sealed.js';
  * @param input hex 字符串或字节数组。
  * @param label 错误信息里的字段名。
  * @throws TypeError 空字符串、奇数长度、非 hex 字符或类型不对。
+ *
+ * Normalize the hybrid `message` into bytes.
+ *
+ * @param input A hex string or a byte array.
+ * @param label Field name used in error messages.
+ * @throws TypeError The string is empty or of odd length, contains a non-hex character,
+ *   or the value has the wrong type.
  */
 export function toMessageBytes(input: string | Uint8Array, label = 'message'): Uint8Array {
   if (input instanceof Uint8Array) return new Uint8Array(input);
@@ -36,6 +56,11 @@ export function toMessageBytes(input: string | Uint8Array, label = 'message'): U
  * 归一化 hybrid 的 IV：未提供则新生成 12 字节；提供则必须恰好 12 字节。
  *
  * @throws RangeError 长度不是 12。
+ *
+ * Normalize the hybrid IV: generate 12 fresh bytes when absent; when supplied it must
+ * be exactly 12 bytes.
+ *
+ * @throws RangeError The length is not 12.
  */
 export function resolveIv(iv: string | Uint8Array | undefined): Uint8Array {
   const out =

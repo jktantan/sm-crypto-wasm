@@ -14,11 +14,39 @@
  *   数值越界（长度上限、计数器为负等）抛 `RangeError`，不包装为 `SmCryptoError`。
  *
  * spec/plan 对应：plan Task 2、Review Focus #3/#4；spec §6 API、§9 安全姿态。
+ *
+ * Unified error type hierarchy.
+ *
+ * Design notes:
+ * - **Every library-semantic error is a subclass of `SmCryptoError`**; callers can
+ *   decide with `err instanceof SmCryptoError` whether this library rejected their
+ *   input.
+ * - Split by "how the user fixes it":
+ *   - Key branch `InvalidKeyError`: format, length, or curve validity of a key /
+ *     scalar input is wrong. (`InvalidPublicKeyError` is a subclass.)
+ *   - Ciphertext branch `CiphertextError`: structure or verification of a
+ *     ciphertext / signature / protocol message is wrong.
+ *     - `InvalidCiphertextError`: bad structure (length, version byte, ASN.1, point
+ *       encoding).
+ *     - `DecryptionError`: structure is fine but verification failed (C3 SM3 /
+ *       GCM tag / C3 HMAC).
+ * - **Host-native types are used only when the argument is not a cryptographic
+ *   object at all**: a wrong type throws `TypeError`, an out-of-range number (length
+ *   cap, negative counter, …) throws `RangeError`; those are never wrapped in
+ *   `SmCryptoError`.
+ *
+ * spec/plan: plan Task 2, Review Focus #3/#4; spec §6 API, §9 security posture.
  */
 
-/** 库根错误。所有自定义错误都派生自它。 */
+/** 库根错误。所有自定义错误都派生自它。
+ *
+ * Library root error; every custom error derives from it.
+ */
 export class SmCryptoError extends Error {
-  /** 错误名，便于跨语言/跨进程识别错误类型。 */
+  /** 错误名，便于跨语言/跨进程识别错误类型。
+   *
+   * Error name, so the error kind can be identified across languages/processes.
+   */
   override readonly name: string = 'SmCryptoError';
 
   constructor(message: string, options?: { cause?: unknown }) {
@@ -29,32 +57,56 @@ export class SmCryptoError extends Error {
   }
 }
 
-/** 密钥无效：解析失败、OID 不支持、点不在曲线上、长度不对等。 */
+/** 密钥无效：解析失败、OID 不支持、点不在曲线上、长度不对等。
+ *
+ * Invalid key: parse failure, unsupported OID, point not on the curve, wrong
+ * length, etc.
+ */
 export class InvalidKeyError extends SmCryptoError {
   override readonly name: string = 'InvalidKeyError';
 }
 
-/** 公钥无效：不在曲线上、坐标越界、或为无穷远点。 */
+/** 公钥无效：不在曲线上、坐标越界、或为无穷远点。
+ *
+ * Invalid public key: not on the curve, coordinate out of range, or the point at
+ * infinity.
+ */
 export class InvalidPublicKeyError extends InvalidKeyError {
   override readonly name = 'InvalidPublicKeyError';
 }
 
-/** 密文支的基类：密文 / 签名 / 协议消息相关失败的共同祖先。 */
+/** 密文支的基类：密文 / 签名 / 协议消息相关失败的共同祖先。
+ *
+ * Base of the ciphertext branch: common ancestor of ciphertext / signature /
+ * protocol-message failures.
+ */
 export class CiphertextError extends SmCryptoError {
   override readonly name: string = 'CiphertextError';
 }
 
-/** 密文无效：长度、版本字节、ASN.1 结构、点编码不符合规范。 */
+/** 密文无效：长度、版本字节、ASN.1 结构、点编码不符合规范。
+ *
+ * Invalid ciphertext: length, version byte, ASN.1 structure, or point encoding
+ * does not follow the spec.
+ */
 export class InvalidCiphertextError extends CiphertextError {
   override readonly name = 'InvalidCiphertextError';
 }
 
-/** 解密失败：密文结构合法但解密结果与预期 MAC / SM3 不一致。 */
+/** 解密失败：密文结构合法但解密结果与预期 MAC / SM3 不一致。
+ *
+ * Decryption failure: the ciphertext structure is valid but the result does not
+ * match the expected MAC / SM3 value.
+ */
 export class DecryptionError extends CiphertextError {
   override readonly name = 'DecryptionError';
 }
 
-/** 算法尚未实现（仅在 stub 阶段出现）。提示用户等待后续版本。 */
+/** 算法尚未实现（仅在 stub 阶段出现）。提示用户等待后续版本。
+ *
+ * Algorithm not implemented yet (only appears during the stub stage). Signals the
+ * user to wait for a later release.
+ */
 export class NotImplementedError extends SmCryptoError {
   override readonly name = 'NotImplementedError';
 }
@@ -63,6 +115,10 @@ export class NotImplementedError extends SmCryptoError {
  * 类型守卫：`err` 是不是本库的 SmCryptoError（含子类）。
  *
  * @param err 任意异常。
+ *
+ * Type guard: is `err` this library's SmCryptoError (subclasses included)?
+ *
+ * @param err Any thrown value.
  */
 export function isSmCryptoError(err: unknown): err is SmCryptoError {
   return err instanceof SmCryptoError;

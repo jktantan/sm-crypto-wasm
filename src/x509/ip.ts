@@ -3,6 +3,11 @@
  *
  * 输出 4 字节（IPv4）或 16 字节（IPv6）。IPv6 支持 `::` 压缩与
  * 末尾内嵌 IPv4（如 `::ffff:192.168.0.1`）。
+ *
+ * IP address parsing for the SubjectAltName iPAddress entry.
+ *
+ * Produces 4 bytes (IPv4) or 16 bytes (IPv6). IPv6 supports `::` compression
+ * and a trailing embedded IPv4 address (e.g. `::ffff:192.168.0.1`).
  */
 
 import { CertificateError } from './errors.js';
@@ -11,6 +16,10 @@ import { CertificateError } from './errors.js';
  * 把 IPv4 / IPv6 文本解析为地址字节。
  *
  * @throws CertificateError 格式非法。
+ *
+ * Parses IPv4 / IPv6 text into address bytes.
+ *
+ * @throws CertificateError The text is not a valid address.
  */
 export function parseIpAddress(value: string): Uint8Array {
   const text = value.trim();
@@ -19,6 +28,9 @@ export function parseIpAddress(value: string): Uint8Array {
   return parseIpv4(text);
 }
 
+// 解析 IPv4 文本为 4 字节。
+//
+// Parses IPv4 text into 4 bytes.
 function parseIpv4(text: string): Uint8Array {
   const parts = text.split('.');
   if (parts.length !== 4) throw new CertificateError(`invalid IPv4 address "${text}"`);
@@ -35,6 +47,9 @@ function parseIpv4(text: string): Uint8Array {
   return out;
 }
 
+// 解析 IPv6 文本为 16 字节。
+//
+// Parses IPv6 text into 16 bytes.
 function parseIpv6(text: string): Uint8Array {
   const doubleColon = text.indexOf('::');
   let headParts: string[];
@@ -73,11 +88,17 @@ function parseIpv6(text: string): Uint8Array {
   return out;
 }
 
+// 切分 IPv6 的冒号分段。
+//
+// Splits an IPv6 colon-separated part.
 function splitPart(part: string): string[] {
   if (part.length === 0) return [];
   return part.split(':').filter((item) => item !== '');
 }
 
+// 把 IPv6 分段转为 16-bit 组。
+//
+// Converts IPv6 parts to 16-bit groups.
 function groupsOf(parts: string[], allowIpv4AtEnd: boolean, text: string): number[] {
   const out: number[] = [];
   for (let i = 0; i < parts.length; i++) {

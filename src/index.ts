@@ -6,6 +6,7 @@
  * import { sm3, sm4, zuc, sm2 } from 'sm-crypto-wasm';
  *
  * await sm3.ensureLoaded();          // 首次用某算法前预热其 wasm
+ *                                    // preload that algorithm's wasm before first use
  * sm3.hash('hello');
  * ```
  *
@@ -15,11 +16,32 @@
  * `import { encryptECB } from 'sm-crypto-wasm/sm4'`。
  *
  * spec/plan 对应：plan Task 12；spec §5 产物结构、§6 API。
+ *
+ * sm-crypto-wasm aggregate entry point (facade).
+ *
+ * Usage:
+ * ```ts
+ * import { sm3, sm4, zuc, sm2 } from 'sm-crypto-wasm';
+ *
+ * await sm3.ensureLoaded();          // warm an algorithm's wasm before first use
+ * sm3.hash('hello');
+ * ```
+ *
+ * Design: every algorithm is its own namespace exposing `ensureLoaded()` plus its
+ * business functions. The wasm is split per algorithm and only the algorithm that
+ * is actually called gets loaded (see the memoization in
+ * `src/runtime/loadWasm.ts`). Sub-path imports are supported for further
+ * tree-shaking: `import { encryptECB } from 'sm-crypto-wasm/sm4'`.
+ *
+ * spec/plan: plan Task 12; spec §5 artifact layout, §6 API.
  */
 
 export * as cms from './cms/index.js';
 export { bytesToHex, fromBytes, hexToBytes, toBytes } from './runtime/convert.js';
 // 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。
+//
+// Runtime helpers (error types, codecs) are re-exported so callers can catch
+// this library's errors.
 export {
   CiphertextError,
   DecryptionError,

@@ -8,6 +8,18 @@
  *
  * 解析刻意宽松（接受无秒、无时区、GeneralizedTime 的小数秒），因为真实现场
  * 存在非规范编码；编码始终输出规范形式。
+ *
+ * X.509 time encoding/parsing (UTCTime / GeneralizedTime).
+ *
+ * Rules (RFC 5280):
+ * - 1950–2049 use UTCTime (`YYMMDDHHMMSSZ`);
+ * - Other years use GeneralizedTime (`YYYYMMDDHHMMSSZ`);
+ * - Certificate time has second precision: milliseconds are truncated when parsing,
+ *   keeping parse → encode round-trips stable.
+ *
+ * Parsing is deliberately lenient (missing seconds, missing timezone, GeneralizedTime
+ * fractional seconds) because non-canonical encodings exist in the wild; encoding
+ * always emits the canonical form.
  */
 
 import { Asn1Error } from './types.js';
@@ -16,6 +28,10 @@ import { Asn1Error } from './types.js';
  * 编码 UTCTime（仅接受 1950–2049 年）。
  *
  * @throws RangeError 日期无效或年份越界。
+ *
+ * Encodes a UTCTime (years 1950–2049 only).
+ *
+ * @throws RangeError When the Date is invalid or the year is out of range.
  */
 export function encodeUtcTime(date: Date): string {
   const { year, month, day, hour, minute, second } = utcParts(date, 'encodeUtcTime');
@@ -30,6 +46,10 @@ export function encodeUtcTime(date: Date): string {
  * 编码 GeneralizedTime。
  *
  * @throws RangeError 日期无效。
+ *
+ * Encodes a GeneralizedTime.
+ *
+ * @throws RangeError When the Date is invalid.
  */
 export function encodeGeneralizedTime(date: Date): string {
   const { year, month, day, hour, minute, second } = utcParts(date, 'encodeGeneralizedTime');
@@ -38,6 +58,8 @@ export function encodeGeneralizedTime(date: Date): string {
 
 /**
  * 按 RFC 5280 自动选择 UTCTime（1950–2049）或 GeneralizedTime。
+ *
+ * Picks UTCTime (1950–2049) or GeneralizedTime automatically as RFC 5280 requires.
  */
 export function encodeTime(date: Date): string {
   const year = utcParts(date, 'encodeTime').year;
@@ -54,6 +76,16 @@ export function encodeTime(date: Date): string {
  *
  * @returns 毫秒为 0 的 `Date`。
  * @throws Asn1Error 格式或日期分量非法。
+ *
+ * Parses a UTCTime or GeneralizedTime string.
+ *
+ * Accepts:
+ * - `YYMMDDHHMMSSZ` / `YYMMDDHHMMZ` (UTCTime; 50–99 → 1950–1999, 00–49 → 2000–2049);
+ * - `YYYYMMDDHHMMSSZ` / `YYYYMMDDHHMMZ` / `YYYYMMDDHHMMSS.sssZ` (GeneralizedTime);
+ * - an optional `+HHMM` / `-HHMM` offset on the time part; a missing timezone means UTC.
+ *
+ * @returns A `Date` whose milliseconds are 0.
+ * @throws Asn1Error On illegal syntax or date components.
  */
 export function parseTime(text: string): Date {
   const s = text.trim();
@@ -80,6 +112,9 @@ export function parseTime(text: string): Date {
 
   const localMs = Date.UTC(year, month - 1, day, hour, minute, second);
   // 先在「输入的本地分量」上校验日期合法性，再应用时区偏移。
+  //
+  // Validate the date against the input's local components first, then apply the
+  // timezone offset.
   const local = new Date(localMs);
   if (
     Number.isNaN(local.getTime()) ||
@@ -95,11 +130,20 @@ export function parseTime(text: string): Date {
   return new Date(localMs - offsetMinutes * 60_000);
 }
 
-/** UTCTime 两位年份展开。 */
+/**
+ * UTCTime 两位年份展开。
+ *
+ * Expands a two-digit UTCTime year.
+ */
 function utcYear(yy: number): number {
   return yy >= 50 ? 1900 + yy : 2000 + yy;
 }
 
+/**
+ * 日期的 UTC 分量（年为完整四位年份）。
+ *
+ * UTC components of a Date (with a full four-digit year).
+ */
 interface TimeParts {
   year: number;
   month: number;
@@ -109,6 +153,11 @@ interface TimeParts {
   second: number;
 }
 
+/**
+ * 提取日期的 UTC 分量并校验日期有效性。
+ *
+ * Extracts the UTC components of a Date and validates it.
+ */
 function utcParts(date: Date, where: string): TimeParts {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     throw new RangeError(`${where}: invalid Date`);
@@ -123,10 +172,20 @@ function utcParts(date: Date, where: string): TimeParts {
   };
 }
 
+/**
+ * 十进制补零到 2 位。
+ *
+ * Zero-pads a decimal number to 2 digits.
+ */
 function pad2(n: number): string {
   return n.toString(10).padStart(2, '0');
 }
 
+/**
+ * 十进制补零到 4 位。
+ *
+ * Zero-pads a decimal number to 4 digits.
+ */
 function pad4(n: number): string {
   return n.toString(10).padStart(4, '0');
 }

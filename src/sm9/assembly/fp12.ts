@@ -5,6 +5,15 @@
 // 对齐 GmSSL 官方 SM9（view/SM9.js）的 fp12_* 实现。
 //
 // 参考：GM/T 0044-2016。
+//
+// SM9 twelfth-degree extension field Fp12 (AssemblyScript).
+//
+// Definition: Fp12 = Fp4[w]/(w³ − v), an element a = a0 + a1·w + a2·w², stored
+// as a **contiguous 384-byte raw pointer**: a0 at a, a1 at a + 128, a2 at
+// a + 256 (each component is an Fp4). Aligned with the fp12_* implementation in
+// GmSSL's official SM9 (view/SM9.js).
+//
+// Reference: GM/T 0044-2016.
 
 import {
   arenaAlloc,
@@ -54,39 +63,70 @@ import {
   fp4zero,
 } from './fp4';
 
-/** Fp12 元素：384 字节，a0/a1/a2 分别在偏移 0 / 128 / 256。 */
+/**
+ * Fp12 元素：384 字节，a0/a1/a2 分别在偏移 0 / 128 / 256。
+ *
+ * An Fp12 element: 384 bytes, with a0 / a1 / a2 at offsets 0 / 128 / 256.
+ */
 export type Fp12 = usize;
 
-/** Fp12 的字节数。 */
+/**
+ * Fp12 的字节数。
+ *
+ * Size of an Fp12 element in bytes.
+ */
 export const FP12_BYTES: usize = 384;
 
-/** w¹（a1）地址。 */
+/**
+ * w¹（a1）地址。
+ *
+ * Address of the w¹ (a1) part.
+ */
 function w1of(a: Fp12): Fp4 {
   return a + 128;
 }
 
-/** w²（a2）地址。 */
+/**
+ * w²（a2）地址。
+ *
+ * Address of the w² (a2) part.
+ */
 function w2of(a: Fp12): Fp4 {
   return a + 256;
 }
 
-/** Fp4 的 a1 分量地址。 */
+/**
+ * Fp4 的 a1 分量地址。
+ *
+ * Address of the a1 component inside an Fp4.
+ */
 function fa1(a: Fp4): Fp2 {
   return a + 64;
 }
 
+/**
+ * 零元（新分配，全零）。
+ *
+ * The zero element (freshly allocated, all zero bytes).
+ */
 export function fp12zero(): Fp12 {
   const r = arenaAlloc(FP12_BYTES);
   memory.fill(r, 0, FP12_BYTES);
   return r;
 }
 
+// Fp12 乘法单位元。
+//
+// Fp12 multiplicative identity.
 export function fp12one(): Fp12 {
   const r = fp12zero();
   fp4CopyInto(r, fp4one());
   return r;
 }
 
+// 由三个 Fp4 分量构造 Fp12。
+//
+// Builds an Fp12 from three Fp4 components.
 export function fp12set(a0: Fp4, a1: Fp4, a2: Fp4): Fp12 {
   const r = arenaAlloc(FP12_BYTES);
   fp4CopyInto(r, a0);
@@ -95,41 +135,68 @@ export function fp12set(a0: Fp4, a1: Fp4, a2: Fp4): Fp12 {
   return r;
 }
 
+// 拷贝 Fp12 元素。
+//
+// Copies an Fp12 element.
 export function fp12copy(a: Fp12): Fp12 {
   const r = arenaAlloc(FP12_BYTES);
   memory.copy(r, a, FP12_BYTES);
   return r;
 }
 
+// 判断 Fp12 是否为零元。
+//
+// Checks whether an Fp12 element is zero.
 export function fp12isZero(a: Fp12): bool {
   return fp4isZero(a) && fp4isZero(w1of(a)) && fp4isZero(w2of(a));
 }
 
+// 判断两个 Fp12 元素是否相等。
+//
+// Checks Fp12 equality.
 export function fp12eq(a: Fp12, b: Fp12): bool {
   return fp4eq(a, b) && fp4eq(w1of(a), w1of(b)) && fp4eq(w2of(a), w2of(b));
 }
 
+// Fp12 加法。
+//
+// Fp12 addition.
 export function fp12Add(a: Fp12, b: Fp12): Fp12 {
   return fp12set(fp4Add(a, b), fp4Add(w1of(a), w1of(b)), fp4Add(w2of(a), w2of(b)));
 }
 
+// Fp12 减法。
+//
+// Fp12 subtraction.
 export function fp12Sub(a: Fp12, b: Fp12): Fp12 {
   return fp12set(fp4Sub(a, b), fp4Sub(w1of(a), w1of(b)), fp4Sub(w2of(a), w2of(b)));
 }
 
+// Fp12 取负。
+//
+// Fp12 negation.
 export function fp12Neg(a: Fp12): Fp12 {
   return fp12set(fp4Neg(a), fp4Neg(w1of(a)), fp4Neg(w2of(a)));
 }
 
+// Fp12 倍乘（2a）。
+//
+// Doubles an Fp12 element.
 export function fp12Dbl(a: Fp12): Fp12 {
   return fp12Add(a, a);
 }
 
 // ---------- scratch（To 算子内部工作区） ----------
+// ---------- scratch (working area for the To operators) ----------
 //
 // 非重入约束：fp12 的 To 算子内部只调 fp4 / fp2 的 To 算子（它们各自有独立
 // scratch）与 fp 层的 To 算子，不再回调 fp12 的 To 算子，因此这些槽在单次调用
 // 期间独占。U* 为 Fp4 级、W* 为 Fp2 级工作区。
+//
+// Non-re-entrancy: an fp12 To operator only calls fp4 / fp2 To operators (each
+// with its own scratch) and fp-layer To operators, and never calls back into an
+// fp12 To operator, so these slots are exclusively owned during one call.
+// U* is Fp4-level and W* is Fp2-level working space.
 const U0: Fp4 = fp4zero();
 const U1: Fp4 = fp4zero();
 const U2: Fp4 = fp4zero();
@@ -164,9 +231,15 @@ const W22: Fp2 = fp2zero();
 const W23: Fp2 = fp2zero();
 
 // fp12Pow 持有的逆元（与 U0..U7 分开：To 算子会用 U 槽）。
+//
+// The inverse held by fp12Pow (separate from U0..U7, which the To operators use).
 const INV_HOLD: Fp12 = fp12zero();
 
-/** 就地拷贝：dst := src（保持 dst 地址不变）。 */
+/**
+ * 就地拷贝：dst := src（保持 dst 地址不变）。
+ *
+ * In-place copy: dst := src (dst keeps its address).
+ */
 export function fp12CopyInto(dst: Fp12, src: Fp12): void {
   memory.copy(dst, src, FP12_BYTES);
 }
@@ -180,6 +253,16 @@ export function fp12CopyInto(dst: Fp12, src: Fp12): void {
  * Karatsuba：6 个积 p0/p1/p2 + s01/s02/s12 求出全部交叉项，
  * fp4Mul 9 → 6 次（这是 pairing 最热的路径）。
  * 全部中间量走 scratch；允许 out 与 a / b 别名（写 out 前已读完入参）。
+ *
+ * out = a · b (aligned with fp12_mul), w³ = v:
+ *   r0 = a0 b0 + v·(a1 b2 + a2 b1)
+ *   r1 = a0 b1 + a1 b0 + v·(a2 b2)
+ *   r2 = a0 b2 + a1 b1 + a2 b0
+ *
+ * Karatsuba: 6 products p0/p1/p2 plus s01/s02/s12 yield all cross terms, so 6
+ * fp4Mul calls instead of 9 (this is the hottest path in pairing). All
+ * intermediates go through scratch; out may alias a / b (the inputs are fully
+ * read before out is written).
  */
 export function fp12MulTo(out: Fp12, a: Fp12, b: Fp12): void {
   fp4MulTo(U0, a, b); // p0
@@ -211,6 +294,8 @@ export function fp12MulTo(out: Fp12, a: Fp12, b: Fp12): void {
 
 /**
  * 乘法（对齐 fp12_mul），w³ = v。
+ *
+ * Multiply (aligned with fp12_mul), w³ = v.
  */
 export function fp12Mul(a: Fp12, b: Fp12): Fp12 {
   const r = fp12zero();
@@ -237,6 +322,30 @@ export function fp12Mul(a: Fp12, b: Fp12): Fp12 {
  * 代价：2 次 fp4Sqr + 1 次 fp4Mul（≈9 个 fp2 乘），通用平方是 6 次 fp4Sqr（≈18 个），
  * 且 g2 只以共轭形式出现（免费）。公式已用 Python 对随机子群元素与通用平方
  * 逐字节对拍 4/4 通过。
+ *
+ * out = a² (**cyclotomic subgroup only**, Granger–Scott style).
+ *
+ * Precondition: a ∈ G_{Φ6(p²)}, i.e. a^{p⁴} = a^{p²−1}. Elements satisfying
+ * this include: the value after the easy part, pairing values e(...), and their
+ * products / squares / Frobenius images (the subgroup is closed). **Inputs that
+ * violate the precondition produce a wrong result** — use fp12SqrTo for a
+ * general squaring.
+ *
+ * Derivation (specific to this implementation): expanding a^{p⁴}·a = a^{p²}
+ * component-wise gives
+ *   g1·g2 = (g0² − conj(g0))/v
+ *   2v·g2² = conj(g1)·A2 + γ²·g0g1
+ *   γ·g0g2 = γ·g1² − conj(g2)·A4
+ * where γ = v^((p⁴−1)/3) ∈ Fp is a primitive cube root of unity with γ = A4 and
+ * A2 = γ+1 = −γ² (since 1+γ+γ²=0). Substituting into the generic squaring
+ * formula g² = (g0²+2v·g1g2, 2g0g1+v·g2², g1²+2g0g2) simplifies to:
+ *   r0 = 3g0² − 2·conj(g0)
+ *   r1 = 3g0g1 − conj(g1)
+ *   r2 = 3g1² − 2·conj(g2)
+ * Cost: 2 fp4Sqr + 1 fp4Mul (≈9 fp2 multiplies) versus 6 fp4Sqr (≈18) for the
+ * generic squaring, and g2 only appears conjugated (free). The formulas were
+ * cross-checked byte-for-byte against the generic squaring in Python on random
+ * subgroup elements, 4/4 passing.
  */
 export function fp12SqrCycTo(out: Fp12, a: Fp12): void {
   const g0 = a,
@@ -266,12 +375,18 @@ export function fp12SqrCycTo(out: Fp12, a: Fp12): void {
   fp4SubTo(U2, U2, U3);
 
   // 写 out（所有对 a 的读取已完成，允许 out 与 a 别名）
+  //
+  // Write out (every read of a is done, so out may alias a).
   memory.copy(out, U0, 128);
   memory.copy(w1of(out), U1, 128);
   memory.copy(w2of(out), U2, 128);
 }
 
-/** out = a²（cyclotomic 子群专用，包装版）。 */
+/**
+ * out = a²（cyclotomic 子群专用，包装版）。
+ *
+ * out = a² (cyclotomic subgroup only; allocating wrapper).
+ */
 export function fp12SqrCyc(a: Fp12): Fp12 {
   const r = fp12zero();
   fp12SqrCycTo(r, a);
@@ -289,6 +404,19 @@ export function fp12SqrCyc(a: Fp12): Fp12 {
  * 少一次 Fp2 乘法。这里系数正好是 2a_i a_j，所以不需要再除以 2。
  * final exponent 里有 200 次这样的平方，是 pairing 里最集中的一处。
  * 允许 out 与 a 别名（写 out 前已读完 a）。
+ *
+ * out = a² (aligned with fp12_sqr), w³ = v:
+ *   r0 = a0² + 2·v·(a1 a2)
+ *   r1 = 2 a0 a1 + v·a2²
+ *   r2 = 2 a0 a2 + a1²
+ *
+ * The cross terms 2·a_i·a_j use the Karatsuba form (a_i+a_j)² − a_i² − a_j²,
+ * so all 6 operations are fp4Sqr (previously 3 fp4Sqr + 3 fp4Mul). fp4Sqr uses
+ * complex squaring and saves one Fp2 multiply compared with fp4Mul. The
+ * coefficient here is exactly 2a_i a_j, so no extra division by 2 is needed.
+ * The final exponentiation contains 200 such squarings, which makes this the
+ * most concentrated spot in pairing. out may alias a (a is fully read before
+ * out is written).
  */
 export function fp12SqrTo(out: Fp12, a: Fp12): void {
   fp4SqrTo(U0, a); // A
@@ -316,6 +444,8 @@ export function fp12SqrTo(out: Fp12, a: Fp12): void {
 
 /**
  * 平方（对齐 fp12_sqr），w³ = v。
+ *
+ * Squaring (aligned with fp12_sqr), w³ = v.
  */
 export function fp12Sqr(a: Fp12): Fp12 {
   const r = fp12zero();
@@ -325,6 +455,9 @@ export function fp12Sqr(a: Fp12): Fp12 {
 
 /**
  * out = a^{-1}（对齐 fp12_inv，分 a2 == 0 与否两支）。允许 out 与 a 别名。
+ *
+ * out = a^{-1} (aligned with fp12_inv; two branches, a2 == 0 or not). out may
+ * alias a.
  */
 export function fp12InvTo(out: Fp12, a: Fp12): void {
   if (fp4isZero(w2of(a))) {
@@ -345,6 +478,8 @@ export function fp12InvTo(out: Fp12, a: Fp12): void {
     return;
   }
   // 通用分支
+  //
+  // General branch.
   fp4SqrTo(U0, w1of(a));
   fp4MulTo(U1, a, w2of(a));
   fp4SubTo(U0, U0, U1); // t0 = a1² - a0 a2
@@ -369,6 +504,8 @@ export function fp12InvTo(out: Fp12, a: Fp12): void {
 
 /**
  * 逆（对齐 fp12_inv，分 a2 == 0 与否两支）。
+ *
+ * Inverse (aligned with fp12_inv; two branches, a2 == 0 or not).
  */
 export function fp12Inv(a: Fp12): Fp12 {
   const r = fp12zero();
@@ -388,6 +525,21 @@ export function fp12Inv(a: Fp12): Fp12 {
  * f_i·L0 为稠密×稠密（3 次 fp2Mul），f_i·L2 为稠密×稀疏（2 次 fp2Mul），
  * 共 15 次 fp2Mul，而通用 fp12Mul 是 18 次加一堆 fp4Add/fp4Sub。
  * 省下的还有：调用方不再构造整个 Fp12（12 个 Fp2）只为喂给乘法。
+ *
+ * Sparse multiply: f × line. In the Miller loop the line numerator has only
+ * three non-zero Fp2 components:
+ *   L[0][0] = a0, L[0][1] = a1, L[2][0] = a4 (everything else is 0)
+ *
+ * Expanded directly in sparse form (in Fp4 terms L0 = a0+a1·v, L1 = 0,
+ * L2 = a4):
+ *   r0 = f0·L0 + v·(f1·L2)
+ *   r1 = f1·L0 + v·(f2·L2)
+ *   r2 = f2·L0 + f0·L2
+ *
+ * f_i·L0 is dense×dense (3 fp2Mul) and f_i·L2 is dense×sparse (2 fp2Mul), so
+ * 15 fp2Mul in total, whereas the generic fp12Mul needs 18 plus a pile of
+ * fp4Add/fp4Sub. It also saves the caller from building a whole Fp12 (12 Fp2)
+ * just to feed the multiply.
  */
 export function fp12MulLine(f: Fp12, a0: Fp2, a1: Fp2, a4: Fp2): Fp12 {
   const r = fp12zero();
@@ -398,11 +550,20 @@ export function fp12MulLine(f: Fp12, a0: Fp2, a1: Fp2, a4: Fp2): Fp12 {
 /**
  * out = f × line（稀疏乘的原地版）。允许 out 与 f 别名：所有对 f 的读取
  * （含 f_i·L0、f_i·L2 的全部乘积）都算进 scratch 之后才写 out。
+ *
+ * out = f × line (in-place variant of the sparse multiply). out may alias f:
+ * every read of f (including all f_i·L0 and f_i·L2 products) lands in scratch
+ * before out is written.
  */
 export function fp12MulLineTo(out: Fp12, f: Fp12, a0: Fp2, a1: Fp2, a4: Fp2): void {
-  fp2AddTo(W15, a0, a1); // a0 + a1（六次复用）
+  // a0 + a1（六次复用）
+  //
+  // a0 + a1 (reused six times).
+  fp2AddTo(W15, a0, a1);
 
   // f0·L0 = [x,y]·[a0,a1]：Karatsuba → p0 = W3, q0 = W4
+  //
+  // f0·L0 = [x,y]·[a0,a1]: Karatsuba → p0 = W3, q0 = W4.
   fp2MulTo(W0, f, a0);
   fp2MulTo(W1, fa1(f), a1);
   fp2AddTo(W2, f, fa1(f));
@@ -465,9 +626,27 @@ export function fp12MulLineTo(out: Fp12, f: Fp12, a0: Fp2, a1: Fp2, a4: Fp2): vo
  *
  * 算法在整数域上对 2000 组随机（素模）指数与内置 pow 对拍验证过。
  * k == 0 返回 1；k == 1 走快速路径。
+ *
+ * a^k (k is a 256-bit uint, MSB-first). k is given as a U256 (8×u32,
+ * little-endian limbs).
+ *
+ * **NAF (non-adjacent form) square-and-multiply**: the exponent is first
+ * converted to NAF (digits ∈ {0,±1}, average density 1/3, no two adjacent
+ * non-zero digits) and a -1 digit multiplies by `a^{-1}`. A random pairing
+ * scalar has popcount ≈ 128, while NAF has ≈ 85 non-zero digits on average, so
+ * the number of `fp12Mul` calls drops by about 1/3; `fp12Inv` (one Fp4 inverse
+ * plus a few multiplies) is cheaper than ~8 `fp12Mul`, so the net gain is
+ * positive. The fixed exponents of the final exponentiation (a2 popcount 40 →
+ * NAF 34) benefit as well.
+ *
+ * The algorithm was cross-checked in the integer domain against a built-in pow
+ * on 2000 random (prime-modulus) exponents. k == 0 returns 1; k == 1 takes the
+ * fast path.
  */
 export function fp12Pow(a: Fp12, k: U256): Fp12 {
   // 找最高有效位
+  //
+  // Find the most significant bit.
   let msb = -1;
   for (let i = 255; i >= 0; i--) {
     if (u256bit(k, i) === 1) {
@@ -481,16 +660,24 @@ export function fp12Pow(a: Fp12, k: U256): Fp12 {
   // 标量 NAF（modn.ts 的 u256naf 同款，Fp12 域内联）：
   //   k 奇：digit = 2 - (k mod 4)，k -= digit；否则 digit = 0；k >>= 1
   // 走 256 bit 位串（k < n < 2^256），digit 存 arena 里的 i8 数组。
+  //
+  // Scalar NAF (same scheme as u256naf in modn.ts, inlined inside the Fp12
+  // domain):
+  //   k odd: digit = 2 - (k mod 4), k -= digit; otherwise digit = 0; k >>= 1
+  // Works on the 256-bit string (k < n < 2^256); digits are stored in an i8
+  // array inside the arena.
   const kWork = u256clone(k);
   const naf = arenaAlloc(<usize>(msb + 2));
   for (let i = 0; i <= msb + 1; i++) {
     if (u256isOdd(kWork)) {
       const ki = <i8>(2 - <i32>(load<u32>(kWork) & 3));
-      // kWork -= ki（ki ∈ {1,-1}）
+      // kWork -= ki (ki ∈ {1,-1})
       if (ki === 1) {
         store<u32>(kWork, (load<u32>(kWork) - 1) & 0xffffffff);
       } else {
         // kWork += 1（进位最多传到 msb+1 之外不会：kWork 原奇）
+        //
+        // kWork += 1 (the carry never propagates past msb+1: kWork was odd).
         let c: u64 = 1;
         let idx = 0;
         while (c !== 0 && idx < 8) {
@@ -512,6 +699,17 @@ export function fp12Pow(a: Fp12, k: U256): Fp12 {
   // 平方用 cyclotomic 专用版（fp12SqrCycTo）：**前提是 a 已在 G_{Φ6(p²)} 子群内**。
   // 本函数的所有调用点都满足：hard part 的中间值（easy part 之后）、配对值 e(...)。
   // 子群对乘法/平方/Frobenius 封闭，故循环中 result 始终留在子群内。
+  //
+  // Bit by bit, starting at the highest non-zero NAF digit. The inverse is
+  // computed once into INV_HOLD and the loop runs fully in place (no
+  // allocation).
+  //
+  // Squaring uses the cyclotomic-specific variant (fp12SqrCycTo): **the
+  // precondition is that a already lies in the G_{Φ6(p²)} subgroup**. Every call
+  // site satisfies that: intermediate values of the hard part (after the easy
+  // part) and pairing values e(...). The subgroup is closed under
+  // multiplication / squaring / Frobenius, so result stays inside it throughout
+  // the loop.
   fp12InvTo(INV_HOLD, a);
   let top = msb + 1;
   while (top >= 0 && load<i8>(naf + <usize>top) === 0) top--;
@@ -526,7 +724,11 @@ export function fp12Pow(a: Fp12, k: U256): Fp12 {
   return result;
 }
 
-/** 幂 a^k（k 为小整数 u32）。 */
+/**
+ * 幂 a^k（k 为小整数 u32）。
+ *
+ * a^k for a small u32 exponent k.
+ */
 export function fp12PowSmall(a: Fp12, k: u32): Fp12 {
   let result = fp12one();
   let base = fp12copy(a);
@@ -540,16 +742,29 @@ export function fp12PowSmall(a: Fp12, k: u32): Fp12 {
 }
 
 // ---------- Frobenius 映射 ----------
+// ---------- Frobenius maps ----------
 
+/**
+ * 把一个 Fp 标量（32 字节）当作 a1 为 0 的 Fp2（高位补 0 拷贝）。
+ *
+ * Views an Fp scalar (32 bytes) as an Fp2 with a1 = 0 (copy with high half
+ * zero-filled).
+ */
 function fp2FromFp(k: U256): Fp2 {
   const r = fp2zero();
   memory.copy(r, k, 32);
   return r;
 }
 
-/** Fp12 的 p 次幂（Frobenius），对齐 fp12_frobenius。 */
+/**
+ * Fp12 的 p 次幂（Frobenius），对齐 fp12_frobenius。
+ *
+ * The p-th power (Frobenius) of an Fp12 element, aligned with fp12_frobenius.
+ */
 export function fp12Frobenius(x: Fp12, alphas: StaticArray<U256>): Fp12 {
   // alphas = [alpha1, alpha2, alpha3, alpha4, alpha5]（均为 Fp 标量）
+  //
+  // alphas = [alpha1, alpha2, alpha3, alpha4, alpha5] (all Fp scalars).
   const a1 = alphas[0],
     a2 = alphas[1],
     a3 = alphas[2],
@@ -568,7 +783,11 @@ export function fp12Frobenius(x: Fp12, alphas: StaticArray<U256>): Fp12 {
   return fp12set(ra, rb, rc);
 }
 
-/** Fp12 的 p² 次幂，对齐 fp12_frobenius2。 */
+/**
+ * Fp12 的 p² 次幂，对齐 fp12_frobenius2。
+ *
+ * The p²-th power of an Fp12 element, aligned with fp12_frobenius2.
+ */
 export function fp12Frobenius2(x: Fp12, a2: U256, a4: U256): Fp12 {
   const a = fp4Conjugate(x);
   const b = fp4MulFp(fp4Conjugate(w1of(x)), a2);
@@ -576,7 +795,11 @@ export function fp12Frobenius2(x: Fp12, a2: U256, a4: U256): Fp12 {
   return fp12set(a, b, c);
 }
 
-/** Fp12 的 p³ 次幂，对齐 fp12_frobenius3。 */
+/**
+ * Fp12 的 p³ 次幂，对齐 fp12_frobenius3。
+ *
+ * The p³-th power of an Fp12 element, aligned with fp12_frobenius3.
+ */
 export function fp12Frobenius3(x: Fp12, beta: U256): Fp12 {
   const xa = x,
     xb = w1of(x),
@@ -588,7 +811,11 @@ export function fp12Frobenius3(x: Fp12, beta: U256): Fp12 {
   return fp12set(ra, rb, rc);
 }
 
-/** Fp12 的 p⁶ 次幂，对齐 fp12_frobenius6。 */
+/**
+ * Fp12 的 p⁶ 次幂，对齐 fp12_frobenius6。
+ *
+ * The p⁶-th power of an Fp12 element, aligned with fp12_frobenius6.
+ */
 export function fp12Frobenius6(x: Fp12): Fp12 {
   const a = fp4Conjugate(x);
   const b = fp4Neg(fp4Conjugate(w1of(x)));
@@ -596,6 +823,9 @@ export function fp12Frobenius6(x: Fp12): Fp12 {
   return fp12set(a, b, c);
 }
 
+// Fp12 与 Fp4 的稀疏乘法，用于 final exponentiation。
+//
+// Sparse Fp12 × Fp4 multiplication used in final exponentiation.
 export function fp12MulFp4(a: Fp12, b: Fp4): Fp12 {
   return fp12set(fp4Mul(a, b), fp4Mul(w1of(a), b), fp4Mul(w2of(a), b));
 }

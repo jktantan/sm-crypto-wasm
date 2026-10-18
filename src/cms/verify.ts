@@ -3,6 +3,12 @@
  *
  * 只验证签名与 messageDigest，**不建立信任链**、不检查证书有效期/用途；
  * 需要信任判断时由调用方对 `signers[i].certificate` 另行处理。
+ *
+ * CMS SignedData verification.
+ *
+ * Only the signature and messageDigest are checked; **no trust chain is built** and
+ * certificate validity/key usage are not examined. When a trust decision is needed, the
+ * caller handles `signers[i].certificate` separately.
  */
 
 import { bytesToHex, hexToBytes } from '../runtime/convert.js';
@@ -30,34 +36,97 @@ import {
   parseSignedData,
 } from './parse.js';
 
-/** `verifySignedData` 的选项。 */
+/**
+ * `verifySignedData` 的选项。
+ *
+ * Options of `verifySignedData`.
+ */
 export interface VerifySignedDataOptions {
-  /** detached 模式下的原始内容（字符串按 UTF-8 编码）。 */
+  /**
+   * detached 模式下的原始内容（字符串按 UTF-8 编码）。
+   *
+   * The original content in detached mode (strings are treated as UTF-8).
+   */
   readonly detachedData?: string | Uint8Array;
-  /** 额外候选证书（CMS 未内嵌签名者证书时使用）。 */
+  /**
+   * 额外候选证书（CMS 未内嵌签名者证书时使用）。
+   *
+   * Extra candidate certificates, used when the CMS does not embed the signer
+   * certificate.
+   */
   readonly certificates?: readonly (Certificate | string | Uint8Array)[];
-  /** 显式指定 SM2 用户标识；省略时依次尝试空标识与 GM/T 默认标识。 */
+  /**
+   * 显式指定 SM2 用户标识；省略时依次尝试空标识与 GM/T 默认标识。
+   *
+   * An explicit SM2 user identifier; when omitted, the empty identifier and then the
+   * GM/T default identifier are tried in turn.
+   */
   readonly userID?: Uint8Array;
 }
 
-/** 单个签名者的验签结果。 */
+/**
+ * 单个签名者的验签结果。
+ *
+ * The verification result of a single signer.
+ */
 export interface VerifySignerResult {
+  /**
+   * 是否通过校验（签名 + messageDigest 均通过）。
+   *
+   * Whether both the signature and the messageDigest checks passed.
+   */
   readonly valid: boolean;
+  /**
+   * 匹配到的签名者证书。
+   *
+   * The matched signer certificate.
+   */
   readonly certificate?: Certificate;
+  /**
+   * signedAttrs 中的 signingTime（该属性缺失时为 `undefined`）。
+   *
+   * The signingTime from signedAttrs (`undefined` when the attribute is absent).
+   */
   readonly signingTime?: Date;
-  /** 人类可读的补充说明。 */
+  /**
+   * 人类可读的补充说明。
+   *
+   * A human-readable explanation.
+   */
   readonly error?: string;
-  /** 结构化失败原因（`valid === true` 时不存在）。 */
+  /**
+   * 结构化失败原因（`valid === true` 时不存在）。
+   *
+   * The structured failure reason (absent when `valid === true`).
+   */
   readonly errorCode?: CmsVerifyErrorCode;
 }
 
-/** `verifySignedData` 的结果。 */
+/**
+ * `verifySignedData` 的结果。
+ *
+ * Result of `verifySignedData`.
+ */
 export interface VerifySignedDataResult {
+  /**
+   * 至少有一个签名者且所有签名者都通过校验。
+   *
+   * True when there is at least one signer and every signer is valid.
+   */
   readonly valid: boolean;
+  /**
+   * 每个签名者的结果，顺序与 `signerInfos` 一致。
+   *
+   * Per-signer results, in `signerInfos` order.
+   */
   readonly signers: readonly VerifySignerResult[];
 }
 
-/** SM2 空用户标识（OpenSSL CMS 默认）。 */
+/**
+ * SM2 空用户标识（OpenSSL CMS 默认）。
+ *
+ * The empty SM2 user identifier (the OpenSSL CMS default).
+ */
 const EMPTY_USER_ID = new Uint8Array(0);
 
 /**
@@ -65,6 +134,12 @@ const EMPTY_USER_ID = new Uint8Array(0);
  *
  * 结构完全无法解析时返回 `{ valid: false, signers: [{ errorCode: 'MALFORMED' }] }`，
  * 而不是抛错；wasm 未预热等环境错误仍会抛出。
+ *
+ * Verifies a CMS SignedData.
+ *
+ * When the structure cannot be parsed at all it returns
+ * `{ valid: false, signers: [{ errorCode: 'MALFORMED' }] }` instead of throwing;
+ * environment errors such as an unloaded wasm module are still thrown.
  */
 export function verifySignedData(
   cms: string | Uint8Array,
@@ -101,6 +176,9 @@ export function verifySignedData(
   };
 }
 
+// 验证单个 SignerInfo。
+//
+// Verifies a single SignerInfo.
 function verifySigner(
   parsed: ParsedSignedData,
   signer: CmsSignerInfo,
@@ -176,6 +254,9 @@ function verifySigner(
   };
 }
 
+// 使用指定 SM2 用户 ID 验签。
+//
+// Verifies with an explicit SM2 user ID.
 function verifyWithUserId(
   publicKey: Uint8Array,
   message: Uint8Array,
@@ -186,10 +267,15 @@ function verifyWithUserId(
     return sm2.verifyWithID(publicKey, message, signature, userID);
   }
   // 先试 OpenSSL CMS 的空标识，再试 GM/T 默认标识。
+  //
+  // Try the empty OpenSSL-CMS identifier first, then the GM/T default identifier.
   if (sm2.verifyWithID(publicKey, message, signature, EMPTY_USER_ID)) return true;
   return sm2.verifyWithID(publicKey, message, signature, DEFAULT_SM2_USER_ID);
 }
 
+// 按签名者标识查找证书。
+//
+// Finds the signer certificate by identifier.
 function findCertificate(
   signer: CmsSignerInfo,
   certificates: readonly Certificate[],
@@ -208,6 +294,9 @@ function findCertificate(
   );
 }
 
+// 按 OID 查找签名属性。
+//
+// Finds a signed attribute by OID.
 function attributeByOid(
   attributes: readonly CmsAttribute[],
   target: string,
@@ -215,6 +304,9 @@ function attributeByOid(
   return attributes.find((attribute) => attribute.oid === target);
 }
 
+// 把 Certificate / PEM / DER 输入统一为 Certificate。
+//
+// Normalizes Certificate / PEM / DER input.
 function resolveCertificate(input: Certificate | string | Uint8Array): Certificate {
   if (isCertificateLike(input)) return input;
   try {
@@ -224,6 +316,9 @@ function resolveCertificate(input: Certificate | string | Uint8Array): Certifica
   }
 }
 
+// 判断值是否像 Certificate。
+//
+// Checks whether a value looks like a Certificate.
 function isCertificateLike(value: Certificate | string | Uint8Array): value is Certificate {
   return (
     typeof value === 'object' &&
@@ -234,25 +329,39 @@ function isCertificateLike(value: Certificate | string | Uint8Array): value is C
   );
 }
 
+// 把 data 输入统一为字节。
+//
+// Normalizes data input to bytes.
 function toDataBytes(data: string | Uint8Array): Uint8Array {
   if (data instanceof Uint8Array) return new Uint8Array(data);
   if (typeof data === 'string') return new TextEncoder().encode(data);
   throw new TypeError('verifySignedData: detachedData must be a string or Uint8Array');
 }
 
+// 常量时间比较两个字节数组。
+//
+// Compares two byte arrays in constant time.
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
+  let diff = 0;
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
   }
-  return true;
+  return diff === 0;
 }
 
+// 构造失败结果。
+//
+// Builds a failure result.
 function fail(code: CmsVerifyErrorCode, message: string): VerifySignerResult {
   return { valid: false, errorCode: code, error: message };
 }
 
-/** 供调试：签名者标识的十六进制表示。 */
+/**
+ * 供调试：签名者标识的十六进制表示。
+ *
+ * For debugging: the signer identifier as hex.
+ */
 export function signerIdentifierHex(signer: CmsSignerInfo): string {
   if (signer.sid.type === 'subjectKeyIdentifier') {
     return bytesToHex(signer.sid.keyIdentifier);

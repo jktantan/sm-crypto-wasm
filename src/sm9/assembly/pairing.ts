@@ -8,6 +8,18 @@
 // 与 GmSSL 的 _g 命名一致：num / den 两个 Fp12 分别累积分子与分母。
 //
 // 参考：GM/T 0044-2016。
+//
+// SM9 R-ate pairing (AssemblyScript).
+//
+// Aligned with GmSSL's official SM9 implementation (view/SM9.js):
+//   line function (eval_g_tangent / eval_g_line) → Miller loop →
+//   π1 / π2 correction → final exponentiation.
+//
+// Notation: twist points (G2, Fp2 coordinates) are the uppercase Q, base points
+// (G1, Fp coordinates) are P. Matching GmSSL's _g naming: two Fp12 values num /
+// den accumulate numerator and denominator separately.
+//
+// Reference: GM/T 0044-2016.
 
 import { U256, fpToMont, u256 } from './fp';
 import {
@@ -63,15 +75,23 @@ import {
 } from './point';
 
 // ---------- twist 点自同构 ----------
+// ---------- twist point automorphisms ----------
 
 const PI1_C = '3f23ea58e5720bdb843c6cfa9c08674947c5c86e0ddd04eda91d8354377b698b';
 const PI2_C = 'f300000002a3a6f2780272354f8b78f4d5fc11967be65334';
 
 // 预构造：原先每次 twist 调用都重新解析一遍 hex；系数是 Fp 常量，进 Montgomery 域。
+//
+// Pre-built: each twist call used to re-parse these hex strings; the
+// coefficients are Fp constants and are converted into the Montgomery domain.
 const PI1_C_U = fpToMont(u256(PI1_C));
 const PI2_C_U = fpToMont(u256(PI2_C));
 
-/** π1：Frobenius 自同构。 */
+/**
+ * π1：Frobenius 自同构。
+ *
+ * π1: the Frobenius automorphism.
+ */
 export function twistPi1(Q: G2): G2 {
   const r = g2Copy(Q);
   fp2Put(r.X, fp2Conjugate(r.X));
@@ -80,14 +100,22 @@ export function twistPi1(Q: G2): G2 {
   return r;
 }
 
-/** π2：乘以 twistor。 */
+/**
+ * π2：乘以 twistor。
+ *
+ * π2: multiply by the twistor.
+ */
 export function twistPi2(Q: G2): G2 {
   const r = g2Copy(Q);
   fp2Put(r.Z, fp2MulFp(r.Z, PI2_C_U));
   return r;
 }
 
-/** -π2。 */
+/**
+ * -π2。
+ *
+ * -π2.
+ */
 export function twistNegPi2(Q: G2): G2 {
   const r = g2Copy(Q);
   fp2Put(r.Y, fp2Neg(r.Y));
@@ -95,16 +123,25 @@ export function twistNegPi2(Q: G2): G2 {
   return r;
 }
 
-// ---------- line function ----------
+// ---------- line function（切线 / 割线函数） ----------
+// ---------- line function (tangent / secant) ----------
 
 // line 分子系数 scratch：evalG*Into 写入，millerLoop 读走喂 fp12MulLine。
 // 免掉每轮构造两个完整 Fp12（fp12zero×2 共 24 个 U256）再拆开的浪费。
+//
+// Scratch for the line numerator coefficients: evalG*Into writes them and
+// millerLoop reads them to feed fp12MulLine. This avoids building two complete
+// Fp12 values (fp12zero×2, 24 U256 in total) per round just to tear them apart.
 const L_A0: Fp2 = fp2zero();
 const L_A1: Fp2 = fp2zero();
 const L_A4: Fp2 = fp2zero();
 
 // line function 内部工作区（To 算子，零堆分配；非重入：evalG*Into 是叶子，
 // 内部只调 fp2 层的 To 算子，它们有各自独立的 scratch）。
+//
+// Internal working area for the line functions (To operators, zero heap
+// allocation; not re-entrant: evalG*Into are leaves that only call fp2-layer To
+// operators, which have their own scratch).
 const LE0: Fp2 = fp2zero();
 const LE1: Fp2 = fp2zero();
 const LE2: Fp2 = fp2zero();
@@ -114,6 +151,11 @@ const LE4: Fp2 = fp2zero();
 /**
  * 切线（tangent）系数版：把分子的三个非零 Fp2 系数写入 L_A0/L_A1/L_A4。
  *   num = L_A0 + L_A1·v + L_A4·w²（den 恒被 final exponent 消掉，不产出）
+ *
+ * Tangent coefficients: writes the three non-zero Fp2 coefficients of the
+ * numerator into L_A0/L_A1/L_A4.
+ *   num = L_A0 + L_A1·v + L_A4·w² (den is always killed by the final
+ * exponent, so it is not produced)
  */
 export function evalGTangentInto(T: G2, Q: G1): void {
   const XP = T.X,
@@ -123,6 +165,9 @@ export function evalGTangentInto(T: G2, Q: G1): void {
     yQ = Q.Y;
 
   // 全程走 fp2 的 To 算子（原地写 scratch），不再逐次分配 Fp2。
+  //
+  // Everything goes through fp2's To operators (writing scratch in place), so
+  // no Fp2 is allocated per step.
   fp2SqrTo(LE0, ZP); // t0 = ZP²
   fp2MulTo(LE1, LE0, ZP); // t1 = t0·ZP
   fp2MulTo(LE2, LE1, YP); // b1v = t1·YP
@@ -144,6 +189,9 @@ export function evalGTangentInto(T: G2, Q: G1): void {
 
 /**
  * 割线（line）系数版：把分子的三个非零 Fp2 系数写入 L_A0/L_A1/L_A4。
+ *
+ * Secant (line) coefficients: writes the three non-zero Fp2 coefficients of the
+ * numerator into L_A0/L_A1/L_A4.
  */
 export function evalGLineInto(T: G2, P: G2, Q: G1): void {
   const XT = T.X,
@@ -156,6 +204,9 @@ export function evalGLineInto(T: G2, P: G2, Q: G1): void {
     yQ = Q.Y;
 
   // 全程走 fp2 的 To 算子（原地写 scratch），不再逐次分配 Fp2。
+  //
+  // Everything goes through fp2's To operators (writing scratch in place), so
+  // no Fp2 is allocated per step.
   fp2SqrTo(LE0, ZP); // T0 = ZP²
   fp2MulTo(LE1, LE0, XT); // T1 = T0·XT
   fp2MulTo(LE0, LE0, ZP); // T0 = T0·ZP
@@ -190,12 +241,10 @@ export function evalGLineInto(T: G2, P: G2, Q: G1): void {
  * 切线（tangent）的分子/分母，对应 GmSSL 的 eval_g_tangent(num, den, T, Q)：
  *   T 为 twist 点（G2），Q 为 base 点（G1）。
  * 返回 [num, den]。
- */
-
-/**
- * 切线（tangent）的分子/分母，对应 GmSSL 的 eval_g_tangent(num, den, T, Q)：
- *   T 为 twist 点（G2），Q 为 base 点（G1）。
- * 返回 [num, den]。
+ *
+ * Numerator / denominator of the tangent, corresponding to GmSSL's
+ * eval_g_tangent(num, den, T, Q): T is a twist point (G2) and Q a base point
+ * (G1). Returns [num, den].
  */
 export function evalGTangent(T: G2, Q: G1): StaticArray<Fp12> {
   const XP = T.X,
@@ -234,6 +283,10 @@ export function evalGTangent(T: G2, Q: G1): StaticArray<Fp12> {
  * 割线（line）的分子/分母，对应 GmSSL 的 eval_g_line(num, den, T, P, Q)：
  *   T、P 为 twist 点（G2），Q 为 base 点（G1）。
  * 返回 [num, den]。
+ *
+ * Numerator / denominator of the secant line, corresponding to GmSSL's
+ * eval_g_line(num, den, T, P, Q): T and P are twist points (G2) and Q a base
+ * point (G1). Returns [num, den].
  */
 export function evalGLine(T: G2, P: G2, Q: G1): StaticArray<Fp12> {
   const XT = T.X,
@@ -282,6 +335,11 @@ export function evalGLine(T: G2, P: G2, Q: G1): StaticArray<Fp12> {
   return staticPair(num, den);
 }
 
+/**
+ * 把两个 Fp12 指针装进静态数组返回（供诊断导出用）。
+ *
+ * Packs two Fp12 pointers into a static array (used by the diagnostic exports).
+ */
 function staticPair(a: Fp12, b: Fp12): StaticArray<Fp12> {
   const r = new StaticArray<Fp12>(2);
   r[0] = a;
@@ -290,6 +348,7 @@ function staticPair(a: Fp12, b: Fp12): StaticArray<Fp12> {
 }
 
 // ---------- 最终幂常量 ----------
+// ---------- Final exponentiation constants ----------
 
 const ALPHA1 = '3f23ea58e5720bdb843c6cfa9c08674947c5c86e0ddd04eda91d8354377b698b';
 const ALPHA2 = 'f300000002a3a6f2780272354f8b78f4d5fc11967be65334';
@@ -303,6 +362,12 @@ const FE_A3 = '2400000000215d941';
 // 预构造：原先每次 final exponent 都把这些 hex 重新解析一遍。
 // ALPHA1..5 是 Frobenius 的 Fp 系数（参与 fp*MulFp）→ 转 Montgomery 域；
 // FE_A2 / FE_A3 却是**幂指数**（喂给 fp12Pow），必须保持标准域整数 —— 转了会整条幂次都错。
+//
+// Pre-built: every final exponentiation used to re-parse these hex strings.
+// ALPHA1..5 are the Frobenius Fp coefficients (fed to fp*MulFp) → converted
+// into the Montgomery domain; FE_A2 / FE_A3 on the other hand are **exponents**
+// (fed to fp12Pow) and must stay standard-domain integers — converting them
+// would corrupt the whole exponentiation.
 const ALPHA1_U = fpToMont(u256(ALPHA1));
 const ALPHA2_U = fpToMont(u256(ALPHA2));
 const ALPHA3_U = fpToMont(u256(ALPHA3));
@@ -311,10 +376,20 @@ const ALPHA5_U = fpToMont(u256(ALPHA5));
 const FE_A2_U = u256(FE_A2);
 const FE_A3_U = u256(FE_A3);
 
-/** Frobenius 系数（模块级常量，finalExponentHardPart 每次调用都用到）。 */
+/**
+ * Frobenius 系数（模块级常量，finalExponentHardPart 每次调用都用到）。
+ *
+ * The Frobenius coefficients (module-level constants used by every call to
+ * finalExponentHardPart).
+ */
 const ALPHAS: StaticArray<U256> = [ALPHA1_U, ALPHA2_U, ALPHA3_U, ALPHA4_U, ALPHA5_U];
 
-/** 最终幂的 hard part，对应 GmSSL 的 final_exponent_hard_part。 */
+/**
+ * 最终幂的 hard part，对应 GmSSL 的 final_exponent_hard_part。
+ *
+ * The hard part of the final exponentiation, corresponding to GmSSL's
+ * final_exponent_hard_part.
+ */
 function finalExponentHardPart(f: Fp12): Fp12 {
   const a2 = FE_A2_U;
   const a3 = FE_A3_U;
@@ -345,7 +420,11 @@ function finalExponentHardPart(f: Fp12): Fp12 {
   return t1;
 }
 
-/** 最终幂，对应 GmSSL 的 final_exponent。 */
+/**
+ * 最终幂，对应 GmSSL 的 final_exponent。
+ *
+ * The final exponentiation, corresponding to GmSSL's final_exponent.
+ */
 export function finalExponent(f: Fp12): Fp12 {
   let t0 = fp12Frobenius6(f);
   const t1 = fp12Inv(f);
@@ -358,11 +437,20 @@ export function finalExponent(f: Fp12): Fp12 {
 // ---------- Miller loop ----------
 
 // 循环参数 a 的二进制串（与 GmSSL 一致）。
+//
+// Binary string of the loop parameter a (identical to GmSSL).
 const ABITS = '00100000000000000000000000000000000000010000101011101100100111110';
 
-// 预展开为位图：热循环里逐字符 charCodeAt 换成下标访问（ABITS.length == 65 == i32 位宽）。
+// 预展开为位图：热循环里逐字符 charCodeAt 换成下标访问（ABITS.length == 65，
+// 位图每项占一个 i32 槽）。
+//
+// Expanded into a bitmap up front: inside the hot loop a per-character
+// charCodeAt becomes an indexed load (ABITS.length == 65; each bitmap entry
+// occupies one i32 slot).
 const ABITS_LEN = ABITS.length;
 // 位图落在永久区（跨导出调用只构造一次）。
+//
+// The bitmap lives in permanent memory (built once across all exported calls).
 const ABITS_BITS: usize = permAlloc(<usize>ABITS_LEN * 4);
 for (let i = 0; i < ABITS_LEN; i++)
   store<i32>(ABITS_BITS + ((<usize>i) << 2), ABITS.charCodeAt(i) - 0x30);
@@ -374,6 +462,16 @@ for (let i = 0; i < ABITS_LEN; i++)
  * 而 v^((p⁶−1)(p²+1)) = (v^(p²−1))^(p²+1) = (−1)^(p²+1) = 1，b1v 同理 ——
  * 分母被 final exponent 的 easy part 整个消掉（6 次 twist 曲线的分母消除）。
  * GmSSL 的实现保留了分子分母两路，每次迭代要多一次 fp12Sqr 和 fp12Mul。
+ *
+ * Miller loop accumulation (before the final exponentiation).
+ *
+ * Only the numerator is accumulated: the line function's denominator is always
+ * `b1v · v` (b1v ∈ Fp2 and v is the Fp4 generator), and
+ * v^((p⁶−1)(p²+1)) = (v^(p²−1))^(p²+1) = (−1)^(p²+1) = 1, likewise for b1v —
+ * so the denominator is eliminated entirely by the easy part of the final
+ * exponentiation (the denominator clearing of the 6th-degree twist curve).
+ * GmSSL keeps both numerator and denominator, costing one extra fp12Sqr and
+ * fp12Mul per iteration.
  */
 export function millerLoop(Q: G2, P: G1): Fp12 {
   const T = g2Copy(Q);
@@ -408,6 +506,7 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
 }
 
 // ---------- 诊断：cyclotomic 平方自测 ----------
+// ---------- Diagnostics: cyclotomic squaring self-test ----------
 
 /**
  * 诊断：用 seed 派生伪随机 Fp12，送入 cyclotomic 子群后比较
@@ -415,6 +514,14 @@ export function millerLoop(Q: G2, P: G1): Fp12 {
  *
  * KAT 只能覆盖具体的消息/密钥组合；这个自测用任意子群元素对拍 cyc 平方的
  * 正确性，是 fp12SqrCycTo 的随机输入验证手段。
+ *
+ * Diagnostic: derives a pseudorandom Fp12 from seed, moves it into the
+ * cyclotomic subgroup and compares the generic squaring `fp12Sqr` with the
+ * subgroup-specific `fp12SqrCyc` byte for byte. Returns 1 = match, 0 = mismatch.
+ *
+ * KATs only cover concrete message/key combinations; this self-test checks the
+ * cyc squaring against arbitrary subgroup elements and is the random-input
+ * verification for fp12SqrCycTo.
  */
 export function sqrCycSelfTest(seed: u32): i32 {
   let s: u32 = seed | 1;
@@ -426,23 +533,39 @@ export function sqrCycSelfTest(seed: u32): i32 {
         // 只填低 7 个 limb，保证每个分量 < 2^224 < p：
         // fpAdd/fpSub（modAdd/modSub）只做一次条件减，要求输入已约化；
         // fpMul/fpInv 则不需要（Barrett/EE 对任意 256 位输入都成立）。
+        //
+        // Fill only the low 7 limbs so that each component < 2^224 < p:
+        // fpAdd/fpSub (modAdd/modSub) do a single conditional subtraction and
+        // require already reduced inputs, while fpMul/fpInv do not (Barrett / EE
+        // hold for any 256-bit input).
         store<u32>(limb + 28, 0);
         for (let l = 0; l < 7; l++) {
-          s = s * 1664525 + 1013904223; // LCG 溢出即截断（u32）
+          // LCG 溢出即截断（u32）
+          //
+          // The LCG simply truncates on overflow (u32).
+          s = s * 1664525 + 1013904223;
           store<u32>(limb + ((<usize>l) << 2), s);
         }
       }
     }
   }
   // easy part：把任意 Fp12 送入 G_{Φ6(p²)} 子群
+  //
+  // easy part: map an arbitrary Fp12 into the G_{Φ6(p²)} subgroup.
   const aInv = fp12Inv(a);
   // 诊断码 10：a·a^{-1} != 1（逆元对当前输入不成立）
+  //
+  // Diagnostic code 10: a·a^{-1} != 1 (the inverse does not hold for this
+  // input).
   if (!fp12eq(fp12Mul(a, aInv), fp12one())) return 10;
 
   const t = fp12Mul(fp12Frobenius6(a), aInv);
   const g = fp12Mul(t, fp12Frobenius2(t, ALPHA2_U, ALPHA4_U));
 
   // 1 = cyc 平方与通用平方一致；0 = 不一致；-1 = g 不在子群（easy part 前提被破坏）
+  //
+  // 1 = cyc squaring matches the generic squaring; 0 = mismatch; -1 = g is not
+  // in the subgroup (the easy-part precondition is broken).
   const gInSub = fp12eq(
     fp12Frobenius2(fp12Frobenius2(g, ALPHA2_U, ALPHA4_U), ALPHA2_U, ALPHA4_U),
     fp12Mul(fp12Frobenius2(g, ALPHA2_U, ALPHA4_U), fp12Inv(g)),
@@ -452,8 +575,13 @@ export function sqrCycSelfTest(seed: u32): i32 {
 }
 
 // ---------- 诊断：逐步 Miller loop ----------
+// ---------- Diagnostics: step-by-step Miller loop ----------
 
-/** 诊断：跑到第 step 步时的 T。 */
+/**
+ * 诊断：跑到第 step 步时的 T。
+ *
+ * Diagnostic: the value of T after step iterations.
+ */
 export function millerStepT(step: i32, Q: G2, P: G1): G2 {
   let T = g2Copy(Q);
   let fNum = fp12one();
@@ -473,6 +601,8 @@ export function millerStepT(step: i32, Q: G2, P: G1): G2 {
     }
   }
   // 追加步骤：step 66 → 加 Q1；step 67 → 加 Q2
+  //
+  // Extra steps: step 66 → add Q1; step 67 → add Q2.
   if (step > ABITS.length) {
     const Q1 = twistPi1(Q);
     const g3 = evalGLine(T, Q1, P);
@@ -490,7 +620,11 @@ export function millerStepT(step: i32, Q: G2, P: G1): G2 {
   return T;
 }
 
-/** 诊断：跑到第 step 步时的 [fNum, fDen]。 */
+/**
+ * 诊断：跑到第 step 步时的 [fNum, fDen]。
+ *
+ * Diagnostic: [fNum, fDen] after step iterations.
+ */
 export function millerStepF(step: i32, Q: G2, P: G1): StaticArray<Fp12> {
   let T = g2Copy(Q);
   let fNum = fp12one();
@@ -531,6 +665,11 @@ export function millerStepF(step: i32, Q: G2, P: G1): StaticArray<Fp12> {
  * @param Q twist 点（G2）
  * @param P base 点（G1）
  * @returns Fp12 中的配对值。
+ *
+ * SM9 R-ate pairing: e(Q, P).
+ * @param Q twist point (G2)
+ * @param P base point (G1)
+ * @returns The pairing value in Fp12.
  */
 export function sm9Pairing(Q: G2, P: G1): Fp12 {
   return finalExponent(millerLoop(Q, P));

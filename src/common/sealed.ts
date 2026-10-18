@@ -18,33 +18,97 @@
  *
  * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 2。
+ *
+ * Versioned serialization of the hybrid (sealed) ciphertext.
+ *
+ * Layout (all big-endian):
+ *
+ * ```text
+ *   version(1) || klen(1) || encapLen(2) || encapsulation(encapLen)
+ *              || iv(12) || tag(16) || ct(rest)
+ * ```
+ *
+ * - `version` is currently `1`; an unknown version must be rejected, never silently
+ *   parsed as v1.
+ * - `klen` is the DEM key size in bytes produced by the KEM (fixed 16 for SM4-128).
+ * - `encapLen` lets the parser cut out the KEM encapsulation precisely and also detect
+ *   a "lying" length field.
+ * - `iv` / `tag` are fixed length: GCM recommends a 12-byte IV and a 16-byte tag.
+ *
+ * The object form `SealedObject` is only meant for debugging / self-describing
+ * scenarios; wire transfer should still use a single hex string (`sealedToObject` /
+ * `sealedFromObject` convert between the two).
+ *
+ * spec/plan: `docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md` Task 2.
  */
 
 import { bytesToHex, hexToBytes, toBytes } from '../runtime/convert.js';
 import { InvalidCiphertextError } from '../runtime/errors.js';
 
-/** 当前 sealed 格式版本。 */
+/** 当前 sealed 格式版本。
+ *
+ * The current sealed format version.
+ */
 export const SEALED_VERSION = 1;
 
-/** GCM IV 长度（字节）。 */
+/** GCM IV 长度（字节）。
+ *
+ * GCM IV length in bytes.
+ */
 export const SEALED_IV_LEN = 12;
 
-/** GCM tag 长度（字节）。 */
+/** GCM tag 长度（字节）。
+ *
+ * GCM tag length in bytes.
+ */
 export const SEALED_TAG_LEN = 16;
 
-/** 头部长度：version + klen + encapLen。 */
+/** 头部长度：version + klen + encapLen。
+ *
+ * Header length: version + klen + encapLen.
+ */
 export const SEALED_HEADER_LEN = 4;
 
-/** DEM 密钥长度：SM4-128 固定 16 字节。 */
+/** DEM 密钥长度：SM4-128 固定 16 字节。
+ *
+ * DEM key length: fixed at 16 bytes for SM4-128.
+ */
 export const DEM_KEY_LEN = 16;
 
-/** 解析后的 sealed 各段（字节形态）。 */
+/** 解析后的 sealed 各段（字节形态）。
+ *
+ * The parsed sealed segments (as bytes).
+ */
 export interface SealedParts {
+  /** 格式版本，当前恒为 1。
+   *
+   * Format version; always 1 today.
+   */
   version: number;
+  /** KEM 输出的 DEM 密钥字节数。
+   *
+   * Number of DEM key bytes produced by the KEM.
+   */
   klen: number;
+  /** KEM 封装段（长度由头部 `encapLen` 界定）。
+   *
+   * The KEM encapsulation segment (its length is delimited by the header's `encapLen`).
+   */
   encapsulation: Uint8Array;
+  /** GCM IV（12 字节）。
+   *
+   * GCM IV (12 bytes).
+   */
   iv: Uint8Array;
+  /** GCM tag（16 字节）。
+   *
+   * GCM tag (16 bytes).
+   */
   tag: Uint8Array;
+  /** GCM 密文（余下全部字节，可为空）。
+   *
+   * GCM ciphertext (every remaining byte, may be empty).
+   */
   ct: Uint8Array;
 }
 
@@ -52,23 +116,49 @@ export interface SealedParts {
  * sealed 的对象形态（各字段均为 hex）。
  *
  * 适合日志 / 调试 / 与手工 `kemEncrypt + sm4.encryptGCM` 组装互操作。
+ *
+ * The object form of a sealed ciphertext (every field is hex).
+ *
+ * Suitable for logging / debugging / interoperating with a hand-assembled
+ * `kemEncrypt + sm4.encryptGCM`.
  */
 export interface SealedObject {
-  /** 格式版本，当前必须为 1。 */
+  /** 格式版本，当前必须为 1。
+   *
+   * Format version; currently it must be 1.
+   */
   v: number;
-  /** KEM 输出的 DEM 密钥字节数。 */
+  /** KEM 输出的 DEM 密钥字节数。
+   *
+   * Number of DEM key bytes produced by the KEM.
+   */
   klen: number;
-  /** KEM 封装段。 */
+  /** KEM 封装段。
+   *
+   * The KEM encapsulation segment.
+   */
   encapsulation: string;
-  /** GCM IV（12 字节）。 */
+  /** GCM IV（12 字节）。
+   *
+   * GCM IV (12 bytes).
+   */
   iv: string;
-  /** GCM tag（16 字节）。 */
+  /** GCM tag（16 字节）。
+   *
+   * GCM tag (16 bytes).
+   */
   tag: string;
-  /** GCM 密文（可为空）。 */
+  /** GCM 密文（可为空）。
+   *
+   * GCM ciphertext (may be empty).
+   */
   ct: string;
 }
 
-/** 把各段组装成 sealed 字节。 */
+/** 把各段组装成 sealed 字节。
+ *
+ * Assemble the segments into sealed bytes.
+ */
 export function encodeSealed(parts: SealedParts): Uint8Array {
   const { version, klen, encapsulation, iv, tag, ct } = parts;
   if (!Number.isInteger(version) || version < 0 || version > 0xff) {
@@ -105,7 +195,11 @@ export function encodeSealed(parts: SealedParts): Uint8Array {
   return out;
 }
 
-/** 把输入归一化成 sealed 字节。空输入按密文支错误处理。 */
+/** 把输入归一化成 sealed 字节。空输入按密文支错误处理。
+ *
+ * Normalize the input into sealed bytes. An empty input is handled as a ciphertext-branch
+ * error.
+ */
 function sealedBytes(sealed: string | Uint8Array): Uint8Array {
   if (typeof sealed === 'string' && sealed.length === 0) {
     throw new InvalidCiphertextError('sealed: 密文为空');
@@ -120,6 +214,11 @@ function sealedBytes(sealed: string | Uint8Array): Uint8Array {
  * 严格解析 sealed 字节。
  *
  * @throws {InvalidCiphertextError} 版本未知、长度字段与实长不符、任何一段被截断。
+ *
+ * Strictly parse sealed bytes.
+ *
+ * @throws {InvalidCiphertextError} Unknown version, a length field that disagrees with
+ *   the actual length, or any truncated segment.
  */
 export function decodeSealed(sealed: string | Uint8Array): SealedParts {
   const b = sealedBytes(sealed);
@@ -153,7 +252,10 @@ export function decodeSealed(sealed: string | Uint8Array): SealedParts {
   return { version, klen, encapsulation, iv, tag, ct };
 }
 
-/** sealed → 对象形态（各字段 hex）。 */
+/** sealed → 对象形态（各字段 hex）。
+ *
+ * sealed → object form (every field in hex).
+ */
 export function sealedToObject(sealed: string | Uint8Array): SealedObject {
   const p = decodeSealed(sealed);
   return {
@@ -171,6 +273,12 @@ export function sealedToObject(sealed: string | Uint8Array): SealedObject {
  *
  * 严格校验每个字段：版本、klen、encapsulation 非空、iv/tag 定长。
  * 任何不合法都抛 `InvalidCiphertextError`（对象本身描述的是密文）。
+ *
+ * Object form → sealed hex.
+ *
+ * Every field is strictly validated: version, klen, non-empty encapsulation, fixed-length
+ * iv/tag. Anything illegal throws `InvalidCiphertextError` (the object itself describes
+ * a ciphertext).
  */
 export function sealedFromObject(obj: SealedObject): string {
   if (obj === null || typeof obj !== 'object') {

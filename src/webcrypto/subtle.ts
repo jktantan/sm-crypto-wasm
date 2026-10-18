@@ -6,6 +6,16 @@
  *
  * 所有方法都是异步的（WebCrypto 语义），内部调用仍是同步的 wasm 计算；
  * 首次使用时按算法自动 `ensureLoaded()`。
+ *
+ * A `crypto.subtle`-style adapter for SM2 / SM3 / SM4.
+ *
+ * Note: this is a **standalone object**, not a polyfill of the native `crypto.subtle` —
+ * browsers do not allow registering custom algorithms, and ecosystem libraries will not
+ * recognize it automatically either.
+ *
+ * All methods are async (WebCrypto semantics) while the internal computation is still
+ * the synchronous wasm; the first use triggers `ensureLoaded()` for the algorithm
+ * involved.
  */
 
 import {
@@ -48,24 +58,40 @@ import {
 } from './cryptoKey.js';
 import { dataError, invalidAccess, notSupported, toDOMException } from './errors.js';
 
-/** 密钥对（结构兼容 WebCrypto 的 `CryptoKeyPair`）。 */
+/** 密钥对（结构兼容 WebCrypto 的 `CryptoKeyPair`）。
+ *
+ * A key pair (structurally compatible with WebCrypto's `CryptoKeyPair`).
+ */
 export interface SmCryptoKeyPair {
   readonly privateKey: CryptoKey;
   readonly publicKey: CryptoKey;
 }
 
-/** 支持的密钥格式。JWK 不在范围内。 */
+/** 支持的密钥格式。JWK 不在范围内。
+ *
+ * Supported key formats. JWK is out of scope.
+ */
 export type SmKeyFormat = 'raw' | 'pkcs8' | 'spki' | 'jwk';
 
+/** 各算法允许的密钥用途：私钥签名/解密，公钥验签/加密，HMAC 与 SM4 对称用途。
+ *
+ * Key usages allowed per algorithm: sign/decrypt for a private key, verify/encrypt for
+ * a public key, and the symmetric usages for HMAC and SM4.
+ */
 const SM2_PRIVATE_USAGES: readonly KeyUsage[] = ['sign', 'decrypt'];
 const SM2_PUBLIC_USAGES: readonly KeyUsage[] = ['verify', 'encrypt'];
 const HMAC_USAGES: readonly KeyUsage[] = ['sign', 'verify'];
 const SM4_USAGES: readonly KeyUsage[] = ['encrypt', 'decrypt'];
 
-/** `sm-crypto-wasm/webcrypto` 的 `subtle` 对象。 */
+/** `sm-crypto-wasm/webcrypto` 的 `subtle` 对象。
+ *
+ * The `subtle` object of `sm-crypto-wasm/webcrypto`.
+ */
 export const subtle = {
   /**
    * 摘要。仅支持 `{ name: 'SM3' }`。
+   *
+   * Digest. Only `{ name: 'SM3' }` is supported.
    */
   async digest(
     algorithm: AlgorithmInput,
@@ -88,6 +114,12 @@ export const subtle = {
    * - `{ name: 'SM2' }` → `{ privateKey, publicKey }`
    * - `{ name: 'HMAC', hash: 'SM3', length?: bits }` → secret key
    * - `{ name: 'SM4-*', length: 128 }` → secret key
+   *
+   * Generate a key.
+   *
+   * - `{ name: 'SM2' }` → `{ privateKey, publicKey }`
+   * - `{ name: 'HMAC', hash: 'SM3', length?: bits }` → secret key
+   * - `{ name: 'SM4-*', length: 128 }` → secret key
    */
   async generateKey(
     algorithm: AlgorithmInput,
@@ -102,6 +134,8 @@ export const subtle = {
         await sm2.ensureLoaded();
         const pair = await sm2.generateKeyPair();
         // 复用既有 PEM 解析器，不重复实现 PEM 解包。
+        //
+        // Reuse the existing PEM parser instead of reimplementing PEM unwrapping.
         const priv = new Uint8Array(parseSm2PrivateKeyPem(pair.privateKeyPem));
         const pub = new Uint8Array(parseSm2PublicKeyPem(pair.publicKeyPem));
         return {
@@ -169,6 +203,12 @@ export const subtle = {
    * - `raw`：HMAC / SM4
    * - `pkcs8`：SM2 私钥 DER
    * - `spki`：SM2 公钥 DER
+   *
+   * Import a key.
+   *
+   * - `raw`: HMAC / SM4
+   * - `pkcs8`: SM2 private key DER
+   * - `spki`: SM2 public key DER
    */
   async importKey(
     format: SmKeyFormat,
@@ -241,6 +281,10 @@ export const subtle = {
    * 导出密钥。
    *
    * `extractable === false` 时抛 `InvalidAccessError`（红线 #7）。
+   *
+   * Export a key.
+   *
+   * Throws `InvalidAccessError` when `extractable === false` (red line #7).
    */
   async exportKey(format: SmKeyFormat, key: CryptoKey): Promise<ArrayBuffer> {
     try {
@@ -275,6 +319,11 @@ export const subtle = {
    *
    * - `HMAC` + `hash: 'SM3'`
    * - `SM2`（64 字节 `r ‖ s`，与 `sm2.sign` 一致）
+   *
+   * Sign.
+   *
+   * - `HMAC` + `hash: 'SM3'`
+   * - `SM2` (64 bytes `r ‖ s`, matching `sm2.sign`)
    */
   async sign(
     algorithm: AlgorithmInput,
@@ -315,6 +364,8 @@ export const subtle = {
 
   /**
    * 验签。
+   *
+   * Verify a signature.
    */
   async verify(
     algorithm: AlgorithmInput,
@@ -361,6 +412,10 @@ export const subtle = {
    * 加密。
    *
    * SM4-GCM 输出 `ciphertext ‖ tag`（tag 在尾部，与原生 AES-GCM 一致）。
+   *
+   * Encrypt.
+   *
+   * SM4-GCM outputs `ciphertext ‖ tag` (the tag at the end, matching native AES-GCM).
    */
   async encrypt(
     algorithm: AlgorithmInput,
@@ -406,6 +461,8 @@ export const subtle = {
 
   /**
    * 解密。
+   *
+   * Decrypt.
    */
   async decrypt(
     algorithm: AlgorithmInput,
@@ -454,7 +511,12 @@ export const subtle = {
 };
 
 // ---------- 内部 ----------
+//
+// ---------- Internals ----------
 
+// 校验 HMAC 的 hash 参数。
+//
+// Validates the HMAC hash parameter.
 function assertHmacHash(key: CryptoKey): void {
   const hash = key.algorithm.hash as { readonly name?: unknown } | undefined;
   if (hash?.name !== 'SM3') {
@@ -462,6 +524,9 @@ function assertHmacHash(key: CryptoKey): void {
   }
 }
 
+// 把 keyData 输入转为字节。
+//
+// Normalizes keyData input to bytes.
 function keyDataBytes(keyData: unknown): Uint8Array {
   if (keyData instanceof ArrayBuffer) return new Uint8Array(keyData.slice(0));
   if (ArrayBuffer.isView(keyData)) {
@@ -470,12 +535,18 @@ function keyDataBytes(keyData: unknown): Uint8Array {
   throw dataError('keyData must be an ArrayBuffer or ArrayBufferView');
 }
 
+// 把 Uint8Array 转为独立 ArrayBuffer。
+//
+// Converts a Uint8Array to a standalone ArrayBuffer.
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.length);
   copy.set(bytes);
   return copy.buffer;
 }
 
+// 拼接两个字节数组。
+//
+// Concatenates two byte arrays.
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
@@ -483,6 +554,9 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
+// 常量时间比较两个字节数组。
+//
+// Compares two byte arrays in constant time.
 function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;

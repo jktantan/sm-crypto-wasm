@@ -9,18 +9,47 @@
 // - LFSR 反馈中 `2^k · s` 用 31-bit 循环左移实现（等价于 mod 2^31-1 的乘 2^k）
 // - addMod：单轮规约 (n & 2^31-1) + (n >>> 31)
 //
-// 导出：alloc / freeAll / zucKeystream
+// 导出：alloc / freeAll / zucKeystream / zucEia3Out。
 //
 // 署名：算法逻辑参考 gmkits/gmkit（Apache-2.0）。见仓库 LICENSE 与 NOTICE。
+//
+// AssemblyScript ZUC stream-cipher core (GM/T 0001-2012 = GB/T 33133.1-2016, ZUC-128).
+//
+// This implementation follows the verified gmkitx `ZUCState` reference logic
+// (Apache-2.0) and ports it line-by-line to AssemblyScript while preserving the
+// algorithm semantics: key loading, 32 initialization rounds, one discarded
+// warm-up step, keystream generation, 31-bit cyclic shifts in the LFSR feedback,
+// and single-fold modular addition in addMod.
+//
+// Exports: alloc / freeAll / zucKeystream / zucEia3Out.
+//
+// Attribution: algorithm logic references gmkits/gmkit (Apache-2.0).
+// See LICENSE and NOTICE.
 
+/**
+ * 持住已分配缓冲，防止被 AS GC 回收。
+ *
+ * Holds every allocated buffer so the AS GC cannot reclaim it.
+ */
 const pinned: Array<StaticArray<u8>> = [];
 
+/**
+ * 从 AS 堆分配 n 字节，返回首地址（供 TS 胶水层分配输入 / 输出缓冲区）。
+ *
+ * Allocate n bytes from the AS heap and return the base address (used by the
+ * TypeScript glue layer to allocate input / output buffers).
+ */
 export function alloc(n: i32): usize {
   const a = new StaticArray<u8>(n);
   pinned.push(a);
   return changetype<usize>(a);
 }
 
+/**
+ * 释放全部缓冲，供加载器在每次调用前复用线性内存。
+ *
+ * Releases all buffers so the loader can reuse linear memory between calls.
+ */
 export function freeAll(): void {
   pinned.length = 0;
 }
@@ -31,33 +60,59 @@ export function freeAll(): void {
  * 原先每个入口都 `new StaticArray<u32>(16/4/2)`，且每拍对这些数组做大量
  * `__get`/`__set` runtime 调用。`zucKeystream` 与 `zucEia3Out` 各自独占一次
  * 调用（互不嵌套），因此跨调用复用安全。
+ *
+ * LFSR state (s) / bit-reorganisation output (x) / F-function registers (r), held as
+ * raw pointers into module-level linear memory.
+ *
+ * Each entry point used to allocate `new StaticArray<u32>(16/4/2)` and then make a
+ * large number of `__get`/`__set` runtime calls on those arrays every clock.
+ * `zucKeystream` and `zucEia3Out` each own one call at a time (they never nest), so
+ * reusing these regions across calls is safe.
  */
 const S_PTR: usize = heap.alloc(16 * 4);
 const X_PTR: usize = heap.alloc(4 * 4);
 const R_PTR: usize = heap.alloc(2 * 4);
 
-/** 32-bit 循环左移。 */
+/**
+ * 32-bit 循环左移。
+ *
+ * Rotate a 32-bit word left.
+ */
 function rotl32(x: u32, n: i32): u32 {
   return ((x << n) | (x >>> (32 - n))) & 0xffffffff;
 }
 
-/** 31-bit 循环左移（= (x * 2^n) mod (2^31-1)）。 */
+/**
+ * 31-bit 循环左移（= (x * 2^n) mod (2^31-1)）。
+ *
+ * Rotate a 31-bit word left (= (x * 2^n) mod (2^31-1)).
+ */
 function rotl31(x: u32, n: i32): u32 {
   return ((x << n) | (x >>> (31 - n))) & 0x7fffffff;
 }
 
-/** mod 2^31-1 加法：单轮规约。 */
+/**
+ * mod 2^31-1 加法：单轮规约。
+ *
+ * Addition mod 2^31-1 with single-fold reduction.
+ */
 function addMod(a: u32, b: u32): u32 {
   const n = (a + b) & 0xffffffff;
   return ((n & 0x7fffffff) + (n >>> 31)) & 0xffffffff;
 }
 
-/** (x * 2^k) mod (2^31-1)。 */
+/**
+ * (x * 2^k) mod (2^31-1)。
+ *
+ * Multiply x by 2^k modulo 2^31-1.
+ */
 function mulByPow2(x: u32, k: i32): u32 {
   return rotl31(x & 0x7fffffff, k);
 }
 
 // D 常量（15-bit，键加载用）。
+//
+// The D constants (15-bit) used during key loading.
 const D: usize = memory.data<u32>([
   0x44d7, 0x26bc, 0x626b, 0x135e, 0x5789, 0x35e2, 0x7135, 0x09af, 0x4d78, 0x2f13, 0x6bc4, 0x1af1,
   0x5e26, 0x3c4d, 0x789a, 0x47ac,
@@ -65,6 +120,10 @@ const D: usize = memory.data<u32>([
 
 // S0、S1 盒（内存数据段裸指针：每拍 4 次查表，StaticArray 索引会退化成
 // `__get` runtime 调用，是每拍成本的大头）。
+//
+// S0 and S1 S-boxes (held as raw pointers into the data segment: each clock does
+// four lookups, and indexing a StaticArray would degrade into `__get` runtime calls,
+// which dominate the per-clock cost).
 const S0: usize = memory.data<u8>([
   0x3e, 0x72, 0x5b, 0x47, 0xca, 0xe0, 0x00, 0x33, 0x04, 0xd1, 0x54, 0x98, 0x09, 0xb9, 0x6d, 0xcb,
   0x7b, 0x1b, 0xf9, 0x32, 0xaf, 0x9d, 0x6a, 0xa5, 0xb8, 0x2d, 0xfc, 0x1d, 0x08, 0x53, 0x03, 0x90,
@@ -103,7 +162,11 @@ const S1: usize = memory.data<u8>([
   0x64, 0xbe, 0x85, 0x9b, 0x2f, 0x59, 0x8a, 0xd7, 0xb0, 0x25, 0xac, 0xaf, 0x12, 0x03, 0xe2, 0xf2,
 ]);
 
-/** S 盒代换：S0||S1 交替作用于 4 字节。 */
+/**
+ * S 盒代换：S0||S1 交替作用于 4 字节。
+ *
+ * S-box substitution: S0 and S1 applied alternately to the four bytes.
+ */
 function sTransform(u: u32): u32 {
   const b0 = <u32>load<u8>(S0 + ((u >>> 24) & 0xff));
   const b1 = <u32>load<u8>(S1 + ((u >>> 16) & 0xff));
@@ -112,14 +175,28 @@ function sTransform(u: u32): u32 {
   return ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 0xffffffff;
 }
 
+/**
+ * 线性变换 L1。
+ *
+ * Linear transformation L1.
+ */
 function l1x(x: u32): u32 {
   return (x ^ rotl32(x, 2) ^ rotl32(x, 10) ^ rotl32(x, 18) ^ rotl32(x, 24)) & 0xffffffff;
 }
+/**
+ * 线性变换 L2。
+ *
+ * Linear transformation L2.
+ */
 function l2x(x: u32): u32 {
   return (x ^ rotl32(x, 8) ^ rotl32(x, 14) ^ rotl32(x, 22) ^ rotl32(x, 30)) & 0xffffffff;
 }
 
-/** LFSR 反馈值 v（mod 2^31-1）。 */
+/**
+ * LFSR 反馈值 v（mod 2^31-1）。
+ *
+ * LFSR feedback value v (mod 2^31-1).
+ */
 function lfsrFeedback(): u32 {
   let t = mulByPow2(load<u32>(S_PTR + 15 * 4), 15);
   t = addMod(t, mulByPow2(load<u32>(S_PTR + 13 * 4), 17));
@@ -130,6 +207,12 @@ function lfsrFeedback(): u32 {
   return t;
 }
 
+/**
+ * LFSR 整体左移一格，并将新值 s16 写入 s15（截断到 31 bit）。
+ *
+ * Shift the whole LFSR by one cell and store the new value s16 into s15
+ * (truncated to 31 bits).
+ */
 function shiftLfsr(s16: u32): void {
   for (let i = 0; i < 15; i++) {
     store<u32>(S_PTR + ((<usize>i) << 2), load<u32>(S_PTR + ((<usize>(i + 1)) << 2)));
@@ -137,23 +220,39 @@ function shiftLfsr(s16: u32): void {
   store<u32>(S_PTR + 15 * 4, s16 & 0x7fffffff);
 }
 
-/** 初始化模式 LFSR：v = feedback + u；0 → 2^31-1。 */
+/**
+ * 初始化模式 LFSR：v = feedback + u；0 → 2^31-1。
+ *
+ * LFSR in initialization mode: v = feedback + u; a zero result becomes 2^31-1.
+ */
 function lfsrWithInitMode(u: u32): void {
   let v = addMod(lfsrFeedback(), u & 0x7fffffff);
   if (v === 0) v = 0x7fffffff;
   shiftLfsr(v);
 }
 
-/** 工作模式 LFSR。 */
+/**
+ * 工作模式 LFSR。
+ *
+ * LFSR in working mode.
+ */
 function lfsrWithWorkMode(): void {
   let v = lfsrFeedback();
   if (v === 0) v = 0x7fffffff;
   shiftLfsr(v);
 }
 
-/** 比特重组 + 非线性函数 F。返回 W；R1/R2 写回 R_PTR，X3 存 X_PTR 供下一拍用。 */
+/**
+ * 比特重组 + 非线性函数 F。返回 W；R1/R2 写回 R_PTR，X3 存 X_PTR 供下一拍用。
+ *
+ * Bit reorganisation plus the non-linear function F. Returns W; R1/R2 are written
+ * back to R_PTR and X3 is kept in X_PTR for the next clock.
+ */
 function fFunction(): u32 {
   // 比特重组（X0..X2 是局部量；X3 需保留给密钥字异或，存回 X_PTR）。
+  //
+  // Bit reorganisation (X0..X2 are locals; X3 must survive for the keystream word XOR,
+  // so it is stored back into X_PTR).
   const x0 =
     (((load<u32>(S_PTR + 15 * 4) & 0x7fff8000) << 1) | (load<u32>(S_PTR + 14 * 4) & 0xffff)) &
     0xffffffff;
@@ -181,6 +280,16 @@ function fFunction(): u32 {
 /**
  * 键加载 + 32 轮初始化 + 丢弃一拍（GM/T 0001-2012 §5.2、§5.3），
  * 建立工作模式状态。EEA3 密钥流与 EIA3 完整性共用。
+ *
+ * @param keyPtr 16 字节密钥起始地址。
+ * @param ivPtr 16 字节 IV 起始地址。
+ *
+ * Key loading, 32 initialization rounds and one discarded clock (GM/T 0001-2012
+ * §5.2 and §5.3), leaving the state in working mode. Shared by the EEA3 keystream
+ * and EIA3 integrity paths.
+ *
+ * @param keyPtr Start address of the 16-byte key.
+ * @param ivPtr Start address of the 16-byte IV.
  */
 function initState(keyPtr: usize, ivPtr: usize): void {
   for (let i = 0; i < 16; i++) {
@@ -195,16 +304,24 @@ function initState(keyPtr: usize, ivPtr: usize): void {
   store<u32>(R_PTR + 4, 0);
 
   // 初始化 32 轮。
+  //
+  // 32 initialization rounds.
   for (let round = 0; round < 32; round++) {
     const w = fFunction();
     lfsrWithInitMode(w >>> 1);
   }
   // 丢弃一拍。
+  //
+  // Discard one clock.
   fFunction();
   lfsrWithWorkMode();
 }
 
-/** 推进一拍，返回该拍密钥字（W ^ X3）。 */
+/**
+ * 推进一拍，返回该拍密钥字（W ^ X3）。
+ *
+ * Advance one clock and return that clock's keystream word (W ^ X3).
+ */
 function nextKeyword(): u32 {
   const w = fFunction();
   const ks = (w ^ load<u32>(X_PTR + 12)) & 0xffffffff;
@@ -214,11 +331,21 @@ function nextKeyword(): u32 {
 
 /**
  * 生成 nbytes 字节 ZUC 密钥流。
+ *
+ * Generate nbytes of ZUC keystream.
+ *
+ * @param keyPtr Start address of the 16-byte key.
+ * @param ivPtr Start address of the 16-byte IV.
+ * @param outPtr Start address of the keystream output buffer.
+ * @param nbytes Number of keystream bytes to write.
  */
 export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes: i32): void {
   initState(keyPtr, ivPtr);
 
   // 生成密钥流：密钥字 = W ^ X3。整字用 store<u32>（大端），余数按字节。
+  //
+  // Keystream generation: word = W ^ X3. Whole words go through a big-endian
+  // store<u32>; the remainder is written byte by byte.
   let written = 0;
   while (written + 4 <= nbytes) {
     store<u32>(outPtr + <usize>written, bswap<u32>(nextKeyword()));
@@ -243,6 +370,18 @@ export function zucKeystream(keyPtr: usize, ivPtr: usize, outPtr: usize, nbytes:
  * - 收尾：T ^= 窗口(nbits)，再 T ^= 下一拍完整密钥字，得 32-bit MAC（大端写出）。
  *
  * @param nbits 参与计算的消息比特数（可小于 `msgLen * 8`，用于非整字节消息）。
+ *
+ * ZUC-128 EIA3 integrity tag (GM/T 0001.3-2012 / 3GPP TS 35.221).
+ *
+ * Bit-for-bit aligned with GmSSL `zuc_mac_init/update/finish`:
+ * - the caller assembles the IV from COUNT/BEARER/DIRECTION and passes 16 bytes in;
+ * - K0 starts as the first keystream word and T starts as 0;
+ * - when bit i of the message is 1, T ^= the 32-bit sliding window of keystream at i;
+ * - finish: T ^= window(nbits), then T ^= the next full keystream word, giving the
+ *   32-bit MAC (written big-endian).
+ *
+ * @param nbits Number of message bits covered (may be less than `msgLen * 8`, for
+ *   messages that are not a whole number of bytes).
  */
 export function zucEia3Out(
   keyPtr: usize,
@@ -259,6 +398,8 @@ export function zucEia3Out(
   let bitPos = 0;
 
   // 完整 32-bit 消息字。
+  //
+  // Whole 32-bit message words.
   while (bitPos + 32 <= nbits) {
     const base = <usize>(bitPos >> 3);
     let M: u32 = 0;
@@ -274,6 +415,8 @@ export function zucEia3Out(
   }
 
   // 尾部不足 32 位的消息比特：按字节大端对齐，缺位补 0。
+  //
+  // Trailing message bits (fewer than 32): byte-aligned in big-endian order, padded with 0.
   const rem = nbits - bitPos;
   if (rem > 0) {
     const base = <usize>(bitPos >> 3);
@@ -295,6 +438,8 @@ export function zucEia3Out(
   T ^= nextKeyword();
 
   // 大端写出 4 字节 MAC。
+  //
+  // Write the 4-byte MAC in big-endian order.
   store<u8>(macPtr, <u8>((T >>> 24) & 0xff));
   store<u8>(macPtr + 1, <u8>((T >>> 16) & 0xff));
   store<u8>(macPtr + 2, <u8>((T >>> 8) & 0xff));

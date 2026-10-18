@@ -7,11 +7,32 @@
  *
  * 只在 `runtime/convert.ts` 的最后一级回退里使用；Node 有 `Buffer`、浏览器有
  * `btoa` / `atob` 时都不会走到这里。零 `node:*` 引用，可安全进入浏览器/小程序产物。
+ *
+ * Pure-JS base64 (last-resort fallback when the host has neither `Buffer` nor
+ * `btoa` / `atob`).
+ *
+ * Why it exists: runtimes such as WeChat mini programs ship neither `btoa` nor
+ * `atob`, yet SM2 / SM9 PEM key generation and parsing need base64. base64 is a
+ * deterministic encoding, not a cryptographic primitive, so falling back inside the
+ * library does not need the fail-closed stance that RNG does.
+ *
+ * Only used from the last fallback level in `runtime/convert.ts`; when Node has
+ * `Buffer` or the browser has `btoa` / `atob` this file is never reached. Zero
+ * `node:*` references, so it is safe inside browser / mini-program bundles.
  */
 
+// RFC 4648 §4 的标准 base64 字母表：字符下标即 6-bit 值，末尾的 `+` / `/` 与 URL 安全
+// 变体不同（本库只实现标准变体）。
+//
+// The standard base64 alphabet from RFC 4648 §4: the character index is its 6-bit value
+// and the trailing `+` / `/` differ from the URL-safe variant (only the standard variant
+// is implemented here).
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-/** 标准 base64 编码（带 `=` padding）。 */
+/** 标准 base64 编码（带 `=` padding）。
+ *
+ * Standard base64 encoding (with `=` padding).
+ */
 export function encodeBase64(bytes: Uint8Array): string {
   let out = '';
   for (let i = 0; i < bytes.length; i += 3) {
@@ -37,6 +58,15 @@ export function encodeBase64(bytes: Uint8Array): string {
  *
  * @param b64 base64 字符串。
  * @param label 错误信息里的字段名。
+ *
+ * Standard base64 decoding.
+ *
+ * Matches `atob` leniency: whitespace and missing padding are accepted; illegal
+ * characters or an illegal length throw `TypeError` (the contract of
+ * `convert.base64ToBytes` is to throw TypeError on failure).
+ *
+ * @param b64 base64 string.
+ * @param label Field name used in error messages.
  */
 export function decodeBase64(b64: string, label = 'base64'): Uint8Array {
   const stripped = b64.replace(/[\t\n\f\r ]/g, '');

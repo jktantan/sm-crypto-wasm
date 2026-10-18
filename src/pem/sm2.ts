@@ -24,6 +24,32 @@
  *
  * 编码函数接受/产出与解析一致的格式（私钥 PKCS#8、公钥 SPKI），供
  * 密钥生成与测试使用。
+ *
+ * SM2 key PEM encoding/decoding (PKCS#8 / SEC1 / SPKI).
+ *
+ * Unlike the generic parsing in `./pkcs8`, this layer knows the SM2 encodings:
+ * - Private keys:
+ *   - PKCS#8 `PrivateKeyInfo` (`-----BEGIN PRIVATE KEY-----`); its `privateKey` OCTET
+ *     STRING holds an RFC 5915 `ECPrivateKey`:
+ *     ```
+ *     ECPrivateKey ::= SEQUENCE {
+ *       version      INTEGER (1),
+ *       privateKey   OCTET STRING,        -- 32-byte d
+ *       parameters   [0] EXPLICIT OBJECT IDENTIFIER OPTIONAL,  -- sm2p256v1
+ *       publicKey    [1] EXPLICIT BIT STRING OPTIONAL
+ *     }
+ *     ```
+ *   - SEC1 `ECPrivateKey` (`-----BEGIN EC PRIVATE KEY-----`) is exactly that structure.
+ * - Public keys: SPKI `SubjectPublicKeyInfo` (`-----BEGIN PUBLIC KEY-----`) with
+ *   `algorithm = { id-ecPublicKey, sm2p256v1 }` and a 65-byte uncompressed point
+ *   `04 || X || Y` as `subjectPublicKey`.
+ *
+ * Algorithm identifiers / curve OIDs:
+ * - id-ecPublicKey = 1.2.840.10045.2.1
+ * - sm2p256v1      = 1.2.156.10197.1.301
+ *
+ * The encoders produce the same formats the parsers accept (PKCS#8 for private keys,
+ * SPKI for public keys) for key generation and tests.
  */
 
 import { bytesToPem, hexToBytes, pemToBytes, toBytes } from '../runtime/convert.js';
@@ -38,20 +64,41 @@ import {
   parseDer,
 } from './asn1.js';
 
-/** `id-ecPublicKey` OID。 */
+/**
+ * `id-ecPublicKey` OID。
+ *
+ * The `id-ecPublicKey` OID.
+ */
 export const OID_ID_EC_PUBLIC_KEY = '1.2.840.10045.2.1';
 
-/** `sm2p256v1`（推荐曲线）OID。 */
+/**
+ * `sm2p256v1`（推荐曲线）OID。
+ *
+ * The `sm2p256v1` (recommended curve) OID.
+ */
 export const OID_SM2_CURVE = '1.2.156.10197.1.301';
 
+// DER tag 与 class 编号；数值与 `src/asn1` 的 `UniversalTag` / `Asn1Class` 一致，
+// 本文件沿用历史写法以便与旧实现对照。
+//
+// DER tag and class numbers; the values match `UniversalTag` / `Asn1Class` in
+// `src/asn1`. This file keeps the historical style so it can be diffed against the
+// legacy implementation.
 const TAG_INTEGER = 0x02;
 const TAG_BIT_STRING = 0x03;
 const TAG_OCTET_STRING = 0x04;
 const TAG_OID = 0x06;
-const TAG_SEQUENCE = 0x10; // UNIVERSAL SEQUENCE 的 tag 编号
+// UNIVERSAL SEQUENCE 的 tag 编号。
+//
+// Tag number of UNIVERSAL SEQUENCE (its leading byte is 0x30).
+const TAG_SEQUENCE = 0x10;
+// CONTEXT-SPECIFIC 标签类别编号（与 `Asn1Class.ContextSpecific` 一致）。
+//
+// The CONTEXT-SPECIFIC tag class number (same as `Asn1Class.ContextSpecific`).
 const CLS_CONTEXT = 2;
 
 // ---------- 解析 ----------
+// ---------- Parsing ----------
 
 /**
  * 解析 SM2 私钥 PEM，返回 32 字节私钥 d。
@@ -59,6 +106,12 @@ const CLS_CONTEXT = 2;
  * 支持 PKCS#8（`BEGIN PRIVATE KEY`）与 SEC1（`BEGIN EC PRIVATE KEY`）。
  *
  * @throws InvalidKeyError PEM/DER 结构非法、或曲线不是 SM2。
+ *
+ * Parses an SM2 private key PEM and returns the 32-byte private key d.
+ *
+ * Supports PKCS#8 (`BEGIN PRIVATE KEY`) and SEC1 (`BEGIN EC PRIVATE KEY`).
+ *
+ * @throws InvalidKeyError When the PEM/DER structure is invalid or the curve is not SM2.
  */
 export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
   return parseSm2PrivateKeyDer(pemToBytes(pem, 'sm2.privateKey'));
@@ -68,6 +121,10 @@ export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
  * 解析 SM2 私钥 DER（PKCS#8 或 SEC1），返回 32 字节私钥 d。
  *
  * WebCrypto 的 `importKey('pkcs8', ...)` 使用这个入口。
+ *
+ * Parses an SM2 private key DER (PKCS#8 or SEC1) and returns the 32-byte private key d.
+ *
+ * WebCrypto's `importKey('pkcs8', ...)` uses this entry point.
  */
 export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
   const top = parseOrThrow(der, 'parseSm2PrivateKeyPem');
@@ -84,6 +141,8 @@ export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
     kids[2]?.tag === TAG_OCTET_STRING
   ) {
     // PKCS#8 PrivateKeyInfo
+    //
+    // PKCS#8 PrivateKeyInfo.
     assertSm2Curve(kids[1], 'parseSm2PrivateKeyPem');
     ec = parseOrThrow(kids[2].value, 'parseSm2PrivateKeyPem (ECPrivateKey)');
   } else if (
@@ -92,6 +151,8 @@ export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
     kids[1]?.tag === TAG_OCTET_STRING
   ) {
     // SEC1 ECPrivateKey
+    //
+    // SEC1 ECPrivateKey.
     ec = top;
   } else {
     throw new InvalidKeyError('parseSm2PrivateKeyPem: unrecognized private key structure');
@@ -107,6 +168,8 @@ export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
     throw new InvalidKeyError('parseSm2PrivateKeyPem: missing EC private key OCTET STRING');
   }
   // 若带 [0] parameters，则其中的曲线 OID 必须是 SM2。
+  //
+  // If a [0] parameters field is present, its curve OID must be SM2.
   for (const child of ecKids) {
     if (child.cls === CLS_CONTEXT && child.tag === 0 && child.children?.[0]) {
       assertSm2Curve(child, 'parseSm2PrivateKeyPem');
@@ -119,6 +182,12 @@ export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
  * 解析 SM2 公钥 PEM，返回 65 字节未压缩点 `04 || X || Y`。
  *
  * @throws InvalidKeyError PEM/DER 结构非法、曲线不是 SM2、或点不是未压缩形式。
+ *
+ * Parses an SM2 public key PEM and returns the 65-byte uncompressed point
+ * `04 || X || Y`.
+ *
+ * @throws InvalidKeyError When the PEM/DER structure is invalid, the curve is not SM2,
+ *   or the point is not in uncompressed form.
  */
 export function parseSm2PublicKeyPem(pem: string): Uint8Array {
   return parseSm2PublicKeyDer(pemToBytes(pem, 'sm2.publicKey'));
@@ -128,6 +197,10 @@ export function parseSm2PublicKeyPem(pem: string): Uint8Array {
  * 解析 SM2 公钥 DER（SPKI），返回 65 字节未压缩点。
  *
  * WebCrypto 的 `importKey('spki', ...)` 使用这个入口。
+ *
+ * Parses an SM2 public key DER (SPKI) and returns the 65-byte uncompressed point.
+ *
+ * WebCrypto's `importKey('spki', ...)` uses this entry point.
  */
 export function parseSm2PublicKeyDer(der: Uint8Array): Uint8Array {
   const top = parseOrThrow(der, 'parseSm2PublicKeyPem');
@@ -141,6 +214,8 @@ export function parseSm2PublicKeyDer(der: Uint8Array): Uint8Array {
     throw new InvalidKeyError('parseSm2PublicKeyPem: missing BIT STRING');
   }
   // 去掉 BIT STRING 首个「未使用位数」字节。
+  //
+  // Strip the leading "unused bits" byte of the BIT STRING.
   const pub = bitString.value.subarray(1);
   if (pub.length !== 65 || pub[0] !== 0x04) {
     throw new InvalidKeyError(
@@ -151,18 +226,29 @@ export function parseSm2PublicKeyDer(der: Uint8Array): Uint8Array {
 }
 
 // ---------- 编码 ----------
+// ---------- Encoding ----------
 
 /**
  * 编码 SM2 私钥为 PKCS#8 PEM（`BEGIN PRIVATE KEY`）。
  *
  * @param d 32 字节私钥（hex / Uint8Array）。
  * @param pub 可选公钥（64 或 65 字节）；给出则内嵌到 ECPrivateKey 的 `[1]`。
+ *
+ * Encodes an SM2 private key as PKCS#8 PEM (`BEGIN PRIVATE KEY`).
+ *
+ * @param d 32-byte private key (hex / Uint8Array).
+ * @param pub Optional public key (64 or 65 bytes); when given it is embedded into the
+ *   `[1]` field of the ECPrivateKey.
  */
 export function encodeSm2PrivateKeyPem(d: string | Uint8Array, pub?: string | Uint8Array): string {
   return bytesToPem(encodeSm2PrivateKeyDer(d, pub), 'PRIVATE KEY');
 }
 
-/** 编码 SM2 私钥为 PKCS#8 DER。 */
+/**
+ * 编码 SM2 私钥为 PKCS#8 DER。
+ *
+ * Encodes an SM2 private key as PKCS#8 DER.
+ */
 export function encodeSm2PrivateKeyDer(
   d: string | Uint8Array,
   pub?: string | Uint8Array,
@@ -175,7 +261,10 @@ export function encodeSm2PrivateKeyDer(
   ];
   if (pub !== undefined) {
     const point = normalizeUncompressed(pub);
-    const bits = new Uint8Array(point.length + 1); // 首字节 = 未使用位数 0
+    // 首字节是「未使用位数」，固定为 0。
+    //
+    // The leading byte is the unused-bit count, fixed to 0.
+    const bits = new Uint8Array(point.length + 1);
     bits.set(point, 1);
     ecChildren.push(explicit(1, bitStringNode(bits)));
   }
@@ -192,12 +281,20 @@ export function encodeSm2PrivateKeyDer(
  * 编码 SM2 公钥为 SPKI PEM（`BEGIN PUBLIC KEY`）。
  *
  * @param pub 64（X || Y）或 65（04 || X || Y）字节公钥。
+ *
+ * Encodes an SM2 public key as SPKI PEM (`BEGIN PUBLIC KEY`).
+ *
+ * @param pub 64-byte (X || Y) or 65-byte (04 || X || Y) public key.
  */
 export function encodeSm2PublicKeyPem(pub: string | Uint8Array): string {
   return bytesToPem(encodeSm2PublicKeyDer(pub), 'PUBLIC KEY');
 }
 
-/** 编码 SM2 公钥为 SPKI DER。 */
+/**
+ * 编码 SM2 公钥为 SPKI DER。
+ *
+ * Encodes an SM2 public key as SPKI DER.
+ */
 export function encodeSm2PublicKeyDer(pub: string | Uint8Array): Uint8Array {
   const point = normalizeUncompressed(pub);
   const bits = new Uint8Array(point.length + 1);
@@ -210,7 +307,13 @@ export function encodeSm2PublicKeyDer(pub: string | Uint8Array): Uint8Array {
 }
 
 // ---------- 内部 ----------
+// ---------- Internals ----------
 
+/**
+ * 严格 DER 解析，失败时转为 `InvalidKeyError`。
+ *
+ * Parses strict DER and maps failures to `InvalidKeyError`.
+ */
 function parseOrThrow(der: Uint8Array, where: string): Asn1Node {
   try {
     return parseDer(der);
@@ -219,7 +322,12 @@ function parseOrThrow(der: Uint8Array, where: string): Asn1Node {
   }
 }
 
-/** 校验 AlgorithmIdentifier / [0]-parameters 的曲线 OID 为 SM2（若无曲线 OID 则放行）。 */
+/**
+ * 校验 AlgorithmIdentifier / [0]-parameters 的曲线 OID 为 SM2（若无曲线 OID 则放行）。
+ *
+ * Checks that the curve OID of an AlgorithmIdentifier / [0] parameters is SM2 (a
+ * missing curve OID is accepted).
+ */
 function assertSm2Curve(algIdNode: Asn1Node | undefined, where: string): void {
   const curveOid = curveOidOf(algIdNode);
   if (curveOid !== undefined && curveOid !== OID_SM2_CURVE) {
@@ -227,22 +335,37 @@ function assertSm2Curve(algIdNode: Asn1Node | undefined, where: string): void {
   }
 }
 
-/** 从 AlgorithmIdentifier（或 [0] EXPLICIT 包装）里取出曲线 OID（无则 undefined）。 */
+/**
+ * 从 AlgorithmIdentifier（或 [0] EXPLICIT 包装）里取出曲线 OID（无则 undefined）。
+ *
+ * Extracts the curve OID from an AlgorithmIdentifier (or a [0] EXPLICIT wrapper);
+ * `undefined` when absent.
+ */
 function curveOidOf(node: Asn1Node | undefined): string | undefined {
   const children = node?.children;
   if (!children) return undefined;
-  // AlgorithmIdentifier = SEQUENCE { algorithm OID, parameters OID OPTIONAL }
-  // [0] EXPLICIT      = 单个子节点（OID）。
+  // AlgorithmIdentifier = SEQUENCE { algorithm OID, parameters OID OPTIONAL }；
+  // [0] EXPLICIT = 只有一个子节点，即那个 OID。
+  //
+  // AlgorithmIdentifier = SEQUENCE { algorithm OID, parameters OID OPTIONAL };
+  // [0] EXPLICIT is a single child node holding that OID.
   for (const child of children) {
     if (child.tag === TAG_OID) {
       const oid = safeDecodeOid(child.value);
       // 跳过算法 OID（id-ecPublicKey），参数 OID 才是曲线。
+      //
+      // Skip the algorithm OID (id-ecPublicKey); the parameters OID is the curve.
       if (oid !== undefined && oid !== OID_ID_EC_PUBLIC_KEY) return oid;
     }
   }
   return undefined;
 }
 
+/**
+ * 解码 OID，失败时返回 `undefined`（不抛错）。
+ *
+ * Decodes an OID, returning `undefined` instead of throwing on failure.
+ */
 function safeDecodeOid(bytes: Uint8Array): string | undefined {
   try {
     return decodeOid(bytes);
@@ -251,6 +374,12 @@ function safeDecodeOid(bytes: Uint8Array): string | undefined {
   }
 }
 
+/**
+ * 把私钥标量补零/去前导零到 32 字节。
+ *
+ * Normalizes a private key scalar to exactly 32 bytes (dropping leading zeros, padding
+ * on the left).
+ */
 function padScalarTo32(bytes: Uint8Array, where: string): Uint8Array {
   let b = bytes;
   while (b.length > 32 && b[0] === 0) b = b.subarray(1);
@@ -262,12 +391,22 @@ function padScalarTo32(bytes: Uint8Array, where: string): Uint8Array {
   return out;
 }
 
+/**
+ * 把 hex / Uint8Array 私钥统一为 32 字节。
+ *
+ * Normalizes a hex / Uint8Array private key to 32 bytes.
+ */
 function normalizeScalar(d: string | Uint8Array): Uint8Array {
   const b = typeof d === 'string' ? hexToBytes(d, 'sm2.privateKey') : toBytes(d, 'sm2.privateKey');
   if (b.length !== 32) throw new InvalidKeyError('encodeSm2PrivateKeyPem: d must be 32 bytes');
   return b;
 }
 
+/**
+ * 把 64 或 65 字节公钥统一为带 `0x04` 前缀的未压缩点。
+ *
+ * Normalizes a 64- or 65-byte public key to an uncompressed point prefixed with `0x04`.
+ */
 function normalizeUncompressed(pub: string | Uint8Array): Uint8Array {
   const b = toBytes(pub, 'sm2.publicKey');
   if (b.length === 64) {
@@ -280,7 +419,11 @@ function normalizeUncompressed(pub: string | Uint8Array): Uint8Array {
   throw new InvalidKeyError('encodeSm2PublicKeyPem: public key must be 64 or 65 bytes');
 }
 
-/** 构造 BIT STRING 节点（value 需自带首字节「未使用位数」）。 */
+/**
+ * 构造 BIT STRING 节点（value 需自带首字节「未使用位数」）。
+ *
+ * Builds a BIT STRING node (`value` must already start with the unused-bit count byte).
+ */
 function bitStringNode(value: Uint8Array): Asn1Node {
   const raw = concat([new Uint8Array([TAG_BIT_STRING]), encodeLen(value.length), value]);
   return {
@@ -294,7 +437,11 @@ function bitStringNode(value: Uint8Array): Asn1Node {
   };
 }
 
-/** 构造 [n] EXPLICIT 包装节点。 */
+/**
+ * 构造 [n] EXPLICIT 包装节点。
+ *
+ * Builds an [n] EXPLICIT wrapper node.
+ */
 function explicit(tagNum: number, inner: Asn1Node): Asn1Node {
   const raw = concat([new Uint8Array([0xa0 | tagNum]), encodeLen(inner.raw.length), inner.raw]);
   return {
@@ -309,6 +456,11 @@ function explicit(tagNum: number, inner: Asn1Node): Asn1Node {
   };
 }
 
+/**
+ * 编码 DER definite-length。
+ *
+ * Encodes a DER definite length.
+ */
 function encodeLen(n: number): Uint8Array {
   if (n < 0x80) return new Uint8Array([n]);
   const bytes: number[] = [];
@@ -320,6 +472,11 @@ function encodeLen(n: number): Uint8Array {
   return new Uint8Array([0x80 | bytes.length, ...bytes]);
 }
 
+/**
+ * 拼多个字节数组为一个新数组。
+ *
+ * Concatenates byte arrays into a new array.
+ */
 function concat(parts: Uint8Array[]): Uint8Array {
   let total = 0;
   for (const p of parts) total += p.length;

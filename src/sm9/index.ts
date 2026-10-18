@@ -11,6 +11,12 @@
  * - `decrypt(ke, id, ct)`：SM9 解密，输出明文 hex；C3 HMAC 校验失败抛错
  * - `kemEncrypt` / `kemDecrypt`：KEM（GM/T 0044.4，见 `./kem.ts`）
  * - `hybridEncrypt` / `hybridDecrypt`：KEM + SM4-GCM 混合加密（见 `./hybrid.ts`）
+ * - `getUserPublicKey`、`createExchangeInitiator` / `createExchangeResponder`、
+ *   `sealedToObject` / `sealedFromObject`：用户公钥、密钥交换与封包转换。
+ *
+ * User public key, key exchange, and sealed-envelope helpers: `getUserPublicKey`,
+ * `createExchangeInitiator`, `createExchangeResponder`, `sealedToObject`,
+ * `sealedFromObject`. See the corresponding submodules for full signatures.
  *
  * 输入/输出 hex 全部不带 0x 前缀。
  * r 不传时由宿主 CSPRNG 提供（Node: crypto.randomBytes / 浏览器: crypto.getRandomValues）。
@@ -20,9 +26,43 @@
  *   Fp12 序列化: a2||a1||a0
  *   G2 仿射: X[1]||X[0]||Y[1]||Y[0]（Fp2 各 64 字节）
  *   签名: h(32)||Sx(32)||Sy(32)
- *   密文: C1(65B 压缩 G1)||C3(32B HMAC-SM3)||C2(|msg|B XOR KDF)
+ *   密文: C1(65B 未压缩 G1，04||x||y)||C3(32B HMAC-SM3)||C2(|msg|B XOR KDF)
  *
  * spec/plan 对应：plan Task 10；spec §6 API、§12.1 Q2（同步优先）、Q3（PKCS#8 + SM9 OID）。
+ *
+ * SM9 business API (the TypeScript glue layer that calls WASM).
+ *
+ * High-level capabilities:
+ * - `ensureLoaded()`: load sm9.wasm
+ * - `getSignPublicKey(ks)`: derive the signing master public key [ks]P2 from the
+ *   signing master private key ks (128-byte G2 affine)
+ * - `getEncPublicKey(ke)`: derive the encryption master public key [ke]P1 from the
+ *   encryption master private key ke (64-byte G1 affine)
+ * - `sign(ks, id, msg, r?)`: SM9 signature (GM/T 0044 §5), 96-byte signature hex
+ * - `verify(ks, id, msg, sig)`: SM9 signature verification, true when it passes
+ * - `encrypt(ke, id, msg, r?)`: SM9 encryption, outputs C1||C3||C2 hex
+ *   (C1=65B, C3=32B, C2=|msg|)
+ * - `decrypt(ke, id, ct)`: SM9 decryption, outputs the plaintext hex; a failed C3
+ *   HMAC check throws
+ * - `kemEncrypt` / `kemDecrypt`: KEM (GM/T 0044.4, see `./kem.ts`)
+ * - `hybridEncrypt` / `hybridDecrypt`: KEM + SM4-GCM hybrid encryption (see `./hybrid.ts`)
+ * - `getUserPublicKey`, `createExchangeInitiator` / `createExchangeResponder`,
+ *   `sealedToObject` / `sealedFromObject`: user public keys, key exchange, and
+ *   sealed-envelope conversion.
+ *
+ * All input/output hex is unprefixed (no leading 0x).
+ * When r is omitted the host CSPRNG supplies it (Node: crypto.randomBytes /
+ * browser: crypto.getRandomValues).
+ *
+ * Byte-order conventions (matching GmSSL's C sm9test.c):
+ *   Fp2 serialisation: a1||a0 (a1 first)
+ *   Fp12 serialisation: a2||a1||a0
+ *   G2 affine: X[1]||X[0]||Y[1]||Y[0] (64 bytes per Fp2 element)
+ *   Signature: h(32)||Sx(32)||Sy(32)
+ *   Ciphertext: C1(65B uncompressed G1, 04||x||y)||C3(32B HMAC-SM3)||C2(|msg|B XOR KDF)
+ *
+ * Spec / plan: plan Task 10; spec §6 API, §12.1 Q2 (sync preferred), Q3
+ * (PKCS#8 + SM9 OID).
  */
 
 import { encodeSm9PrivateKeyPem, encodeSm9PublicKeyPem } from '../pem/sm9.js';
@@ -41,36 +81,80 @@ import {
   toBytes,
 } from './input.js';
 
+// 转出 wasm 模块预热入口，调用方可用 `sm9.ensureLoaded()` 预加载。
+//
+// Re-exports the wasm preload entry point so callers can preload via
+// `sm9.ensureLoaded()`.
 export { ensureLoaded };
 
 // ---------------- API ----------------
 
-/** SM9 主密钥用途。 */
+/**
+ * SM9 主密钥用途。
+ *
+ * Purpose of an SM9 master key.
+ */
 export type Sm9KeyPurpose = 'sign' | 'enc';
 
-/** `generateKeyPair` 选项。 */
+/**
+ * `generateKeyPair` 选项。
+ *
+ * Options for `generateKeyPair`.
+ */
 export interface Sm9KeyPairOptions {
-  /** 用户标识（用户私钥绑定到该 id）。 */
+  /**
+   * 用户标识（用户私钥绑定到该 id）。
+   *
+   * User identity (the user private key is bound to this id).
+   */
   id: string | Uint8Array;
-  /** 主密钥用途：`'sign'`（默认）或 `'enc'`。 */
+  /**
+   * 主密钥用途：`'sign'`（默认）或 `'enc'`。
+   *
+   * Master-key purpose: `'sign'` (default) or `'enc'`.
+   */
   purpose?: Sm9KeyPurpose;
 }
 
 /**
  * SM9 密钥对（PEM 形态：PKCS#8 私钥 / SPKI 公钥，算法 OID `1.2.156.10197.1.100`）。
+ *
+ * An SM9 key pair in PEM form (PKCS#8 private key / SPKI public key, algorithm OID
+ * `1.2.156.10197.1.100`).
  */
 export interface Sm9KeyPair {
-  /** 主私钥（32 字节标量：签名 ks / 加密 ke）。 */
+  /**
+   * 主私钥（32 字节标量：签名 ks / 加密 ke）。
+   *
+   * Master private key (32-byte scalar: ks for signing / ke for encryption).
+   */
   masterPrivatePem: string;
-  /** 主公钥点：签名 `[ks]P2`（G2，128B）/ 加密 `[ke]P1`（G1，64B）。 */
+  /**
+   * 主公钥点：签名 `[ks]P2`（G2，128B）/ 加密 `[ke]P1`（G1，64B）。
+   *
+   * Master public-key point: signing `[ks]P2` (G2, 128B) / encryption `[ke]P1`
+   * (G1, 64B).
+   */
   masterPublicPem: string;
-  /** 用户私钥点：签名 ds（G1，64B）/ 加密 de（G2，128B）。 */
+  /**
+   * 用户私钥点：签名 ds（G1，64B）/ 加密 de（G2，128B）。
+   *
+   * User private-key point: ds for signing (G1, 64B) / de for encryption
+   * (G2, 128B).
+   */
   userPrivatePem: string;
   /**
    * 用户公钥点 `Q = [H1(id,hid)]P1|P2 + Ppub`：签名（G2，128B）/ 加密（G1，64B）。
    *
    * 它是 `(id, 主公钥)` 的确定函数、不是独立秘密，第三方可用
    * `getUserPublicKey(masterPublicPem, id)` 自行复算。
+   *
+   * User public-key point `Q = [H1(id,hid)]P1|P2 + Ppub`: signing (G2, 128B) /
+   * encryption (G1, 64B).
+   *
+   * It is a deterministic function of `(id, master public key)`, not an independent
+   * secret, so third parties can recompute it with
+   * `getUserPublicKey(masterPublicPem, id)`.
    */
   userPublicPem: string;
 }
@@ -81,6 +165,14 @@ export interface Sm9KeyPair {
  * 异步：含 wasm 实例化与宿主 CSPRNG 取主私钥。
  *
  * @param opts `id` 与 `purpose`（默认 `'sign'`）。
+ *
+ * Generates an SM9 master key pair and the matching user private key (spec §6,
+ * §12.1 Q3).
+ *
+ * Asynchronous: it instantiates wasm and draws the master private key from the host
+ * CSPRNG.
+ *
+ * @param opts `id` and `purpose` (default `'sign'`).
  */
 export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPair> {
   await ensureLoaded();
@@ -115,12 +207,18 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
       userLen = 128;
     }
     // 用户公钥 Q = [H1(id, hid)]P1|P2 + Ppub —— (id, 主公钥) 的确定函数。
+    //
+    // User public key Q = [H1(id, hid)]P1|P2 + Ppub — a deterministic function of
+    // (id, master public key).
     if (purpose === 'sign') {
       exports.sm9UserSignPubOut(pubPtr, idPtr, idB.length, userPubPtr);
     } else {
       exports.sm9UserEncPubOut(pubPtr, idPtr, idB.length, userPubPtr);
     }
     // 调用后重新取 buffer 视图：WASM 内存可能在分配后增长。
+    //
+    // Take a fresh buffer view after the calls: the WASM memory may have grown
+    // during allocation.
     const memView = mem();
     return {
       masterPrivatePem: encodeSm9PrivateKeyPem(hexToBytes(masterHex)),
@@ -139,7 +237,12 @@ export async function generateKeyPair(opts: Sm9KeyPairOptions): Promise<Sm9KeyPa
   }
 }
 
-/** 32 字节签名主私钥 ks → 256 字节 G2 仿射（X[1]||X[0]||Y[1]||Y[0]）= 128 字节 hex。 */
+/**
+ * 32 字节签名主私钥 ks → G2 仿射点（`X[1]||X[0]||Y[1]||Y[0]`，128 字节），输出 256 字符 hex。
+ *
+ * 32-byte signing master private key ks → G2 affine point
+ * (`X[1]||X[0]||Y[1]||Y[0]`, 128 bytes) as a 256-character hex string.
+ */
 export function getSignPublicKey(ks: string | Uint8Array): string {
   const k = masterPrivateBytes(ks, 'ks');
   const { exports } = getModule();
@@ -154,7 +257,12 @@ export function getSignPublicKey(ks: string | Uint8Array): string {
   }
 }
 
-/** 32 字节加密主私钥 ke → 64 字节 G1 仿射（x||y）= 128 字符 hex。 */
+/**
+ * 32 字节加密主私钥 ke → 64 字节 G1 仿射（x||y）= 128 字符 hex。
+ *
+ * 32-byte encryption master private key ke → 64-byte G1 affine point (`x||y`) as a
+ * 128-character hex string.
+ */
 export function getEncPublicKey(ke: string | Uint8Array): string {
   const k = masterPrivateBytes(ke, 'ke');
   const { exports } = getModule();
@@ -175,6 +283,14 @@ export function getEncPublicKey(ke: string | Uint8Array): string {
  * 对 `seed` 派生的伪随机 Fp12 送入 cyclotomic 子群后，用子群专用平方
  * （fp12SqrCycTo）与通用平方（fp12SqrTo）各算一次并逐字节比较，返回是否一致。
  * 用于覆盖 KAT 覆盖不到的随机子群元素。
+ *
+ * Diagnostic (not public API, only for tests / internal checks): cyclotomic
+ * squaring self-test.
+ *
+ * For a pseudo-random Fp12 derived from `seed`, pushed into the cyclotomic subgroup,
+ * it computes one squaring with the subgroup-specific routine (fp12SqrCycTo) and one
+ * with the generic routine (fp12SqrTo), then compares them byte by byte and returns
+ * whether they agree. It covers random subgroup elements that the KATs miss.
  */
 export function sqrCycSelfTest(seed: number): number {
   const { exports } = getModule();
@@ -188,6 +304,14 @@ export function sqrCycSelfTest(seed: number): number {
  * @param msg 消息字符串（UTF-8）/ Uint8Array / hex 字符串
  * @param r   32 字节随机数 hex（可选；不传则由宿主 CSPRNG 提供）
  * @returns   192 字符 hex 签（h||Sx||Sy）
+ *
+ * SM9 signature (GM/T 0044 §5).
+ *
+ * @param ks 32-byte signing master private key as hex.
+ * @param id User identity string (e.g. 'Alice') or `Uint8Array`.
+ * @param msg Message string (UTF-8) / `Uint8Array` / hex string.
+ * @param r 32-byte nonce as hex (optional; the host CSPRNG supplies it otherwise).
+ * @returns A 192-character hex signature (h||Sx||Sy).
  */
 export function sign(
   ks: string | Uint8Array,
@@ -225,6 +349,15 @@ export function sign(
  * @param publicKey 32 字节签名主私钥（hex / PKCS#8 私钥 PEM），或 128 字节签名主公钥
  *   `[ks]P2`（点字节 / SPKI 公钥 PEM）—— 后者是 spec §6 里的形态，长度即可区分。
  * @returns true = 通过；false = 拒绝（签错、id 错、msg 错、tampered）
+ *
+ * SM9 signature verification (GM/T 0044 §5).
+ *
+ * @param publicKey 32-byte signing master private key (hex / PKCS#8 private-key
+ *   PEM), or the 128-byte signing master public key `[ks]P2` (point bytes / SPKI
+ *   public-key PEM) — the latter is the shape spec §6 documents; the length alone
+ *   tells them apart.
+ * @returns true = accepted; false = rejected (bad signature, wrong id, wrong msg,
+ *   tampered input).
  */
 export function verify(
   publicKey: string | Uint8Array,
@@ -267,6 +400,18 @@ export function verify(
  * @param msg 明文（字符串按 UTF-8；也可传 Uint8Array 或 hex）
  * @param r   32 字节随机数 hex（可选）
  * @returns   密文 hex（C1=65B + C3=32B + C2=|msg|B = 65+32+|msg| 字节）
+ *
+ * SM9 encryption (GM/T 0044 §6).
+ *
+ * @param publicKey 32-byte encryption master private key (hex / PKCS#8 private-key
+ *   PEM), or the 64-byte encryption master public key `[ke]P1` (point bytes / SPKI
+ *   public-key PEM) — the latter is the shape spec §6 documents; the length alone
+ *   tells them apart.
+ * @param id Receiver identity.
+ * @param msg Plaintext (a string is treated as UTF-8; `Uint8Array` or hex also
+ *   accepted).
+ * @param r 32-byte nonce as hex (optional).
+ * @returns Ciphertext hex (C1=65B + C3=32B + C2=|msg|B = 65+32+|msg| bytes).
  */
 export function encrypt(
   publicKey: string | Uint8Array,
@@ -288,6 +433,12 @@ export function encrypt(
   // 密文布局 C1(65) || C3(32) || C2(|msg|)，长度随明文增长 —— 按实际长度分配，
   // 并把容量一并交给 wasm 侧校验。曾硬编码 alloc(4096)：明文超过 3999 字节时
   // sm9Encrypt 会写越界、破坏 GC 堆（几轮后 RuntimeError: memory access out of bounds）。
+  //
+  // Ciphertext layout C1(65) || C3(32) || C2(|msg|), growing with the plaintext —
+  // allocate exactly that length and hand the capacity to the wasm side for checking.
+  // It used to hard-code alloc(4096): with a plaintext above 3999 bytes sm9Encrypt
+  // wrote out of bounds and corrupted the GC heap (RuntimeError: memory access out
+  // of bounds after a few rounds).
   const ctCap = 65 + 32 + msgB.length;
   const ctP = exports.alloc(ctCap);
   try {
@@ -314,6 +465,15 @@ export function encrypt(
  *
  * @param masterPublicKey 主公钥（点字节 / SPKI 公钥 PEM）。
  * @param id 用户标识。
+ *
+ * Derives a user public key (PEM) from a master public key and a user identity, so a
+ * third party can recompute it without the KGC.
+ *
+ * Signing master public key (128B G2) → `[H1(id, hid=1)]P2 + Ppub-s` (G2, 128B);
+ * encryption master public key (64B G1) → `[H1(id, hid=3)]P1 + Ppub-e` (G1, 64B).
+ *
+ * @param masterPublicKey Master public key (point bytes / SPKI public-key PEM).
+ * @param id User identity.
  */
 export function getUserPublicKey(
   masterPublicKey: string | Uint8Array,
@@ -341,18 +501,44 @@ export function getUserPublicKey(
 }
 
 /**
- * SM9 解密。校验失败（C3 HMAC 不通过、长度错、首字节非 0x04 等）抛错。
- * @returns 明文 hex
+ * `sm9.decrypt` 选项。
+ *
+ * Options for `sm9.decrypt`.
  */
-/** `sm9.decrypt` 选项。 */
 export interface Sm9DecryptOptions {
   /**
    * 解密失败时返回 `null` 而不抛错（plan Review Focus #4）。
    * 只覆盖密文支错误（`CiphertextError`）。
+   *
+   * Return `null` instead of throwing when decryption fails (plan Review Focus #4).
+   * It covers only ciphertext-branch errors (`CiphertextError`).
    */
   safeMode?: boolean;
 }
 
+/**
+ * SM9 解密入口：校验失败抛错；`safeMode` 时把密文支错误转成 `null`。
+ *
+ * 校验失败包括 C3 HMAC 不通过、长度错、首字节非 0x04 等情形。
+ *
+ * @param ke 加密主私钥（32 字节 / PKCS#8 PEM）。
+ * @param id 接收方标识。
+ * @param ct 密文 hex（C1||C3||C2）。
+ * @param opts `safeMode`：失败时返回 `null`。
+ * @returns 明文 hex。
+ *
+ * SM9 decryption entry point: throws on verification failure; in `safeMode` it turns
+ * ciphertext-branch errors into `null`.
+ *
+ * Failures include a C3 HMAC mismatch, a wrong length, and a first byte that is not
+ * 0x04.
+ *
+ * @param ke Encryption master private key (32 bytes / PKCS#8 PEM).
+ * @param id Receiver identity.
+ * @param ct Ciphertext as hex (C1||C3||C2).
+ * @param opts `safeMode`: return `null` on failure.
+ * @returns Plaintext as hex.
+ */
 export function decrypt(
   ke: string | Uint8Array,
   id: string | Uint8Array,
@@ -379,7 +565,12 @@ export function decrypt(
   }
 }
 
-/** `decrypt` 的实作：校验失败抛 `DecryptionError`。 */
+/**
+ * `decrypt` 的实作：校验失败抛 `DecryptionError`。
+ *
+ * The actual `decrypt` implementation: throws `DecryptionError` on verification
+ * failure.
+ */
 function decryptUnsafe(
   ke: string | Uint8Array,
   id: string | Uint8Array,
@@ -409,41 +600,114 @@ function decryptUnsafe(
 }
 
 // KEM 实现拆到 ./kem.ts，供 hybrid.ts 复用且避免循环依赖。
+//
+// The KEM implementation lives in ./kem.ts so hybrid.ts can reuse it without a
+// circular import.
 export { type KemResult, kemDecrypt, kemEncrypt } from './kem.js';
 
 // ---------------- 密钥交换（GM/T 0044.3） ----------------
+// ---------------- Key exchange (GM/T 0044.3) ----------------
 
-/** 密钥交换端点配置。 */
+/**
+ * 密钥交换端点配置。
+ *
+ * Configuration for a key-exchange endpoint.
+ */
 export interface Sm9ExchangeOptions {
-  /** 会话密钥字节长度（默认 32）。 */
+  /**
+   * 会话密钥字节长度（默认 32）。
+   *
+   * Session-key length in bytes (default 32).
+   */
   kLen?: number;
-  /** 测试注入：本端临时私钥 r（32 字节）。默认由宿主 CSPRNG 生成。 */
+  /**
+   * 测试注入：本端临时私钥 r（32 字节）。默认由宿主 CSPRNG 生成。
+   *
+   * Test injection: the local ephemeral private key r (32 bytes). Generated from the
+   * host CSPRNG by default.
+   */
   ephemeral?: string | Uint8Array;
 }
 
-/** 阶段 1 消息：发起方临时点 RA（65 字节未压缩 G1 点 hex）。 */
+/**
+ * 阶段 1 消息：发起方临时点 RA（65 字节未压缩 G1 点 hex）。
+ *
+ * Stage 1 message: the initiator's ephemeral point RA (65-byte uncompressed G1 point
+ * as hex).
+ */
 export interface Sm9InitiatorMessage {
   ephemeral: string;
 }
-/** 阶段 2 消息：响应方临时点 RB + 确认值 SB。 */
+/**
+ * 阶段 2 消息：响应方临时点 RB + 确认值 SB。
+ *
+ * Stage 2 message: the responder's ephemeral point RB plus confirmation value SB.
+ */
 export interface Sm9ResponderMessage extends Sm9InitiatorMessage {
   confirm: string;
 }
-/** 阶段 3 消息：发起方确认值 SA。 */
+/**
+ * 阶段 3 消息：发起方确认值 SA。
+ *
+ * Stage 3 message: the initiator's confirmation value SA.
+ */
 export interface Sm9InitiatorConfirm {
   confirm: string;
 }
 
+/**
+ * SM9 密钥交换发起方端点（A）。
+ *
+ * SM9 key-exchange initiator endpoint (A).
+ */
 export interface Sm9KeyExchangeInitiator {
+  /**
+   * 阶段 1：生成本端临时点 RA（只能调用一次）。
+   *
+   * Stage 1: generate the local ephemeral point RA (callable once only).
+   */
   initiate(): Sm9InitiatorMessage;
+  /**
+   * 阶段 3：校验响应方 S_B 并返回本端确认值 SA。
+   *
+   * Stage 3: verify the responder's S_B and return the local confirmation value SA.
+   */
   confirm(msg: Sm9ResponderMessage): Sm9InitiatorConfirm;
+  /**
+   * 派生会话密钥；`confirm` 已算过且 `kLen` 相同时直接复用缓存。
+   *
+   * Derive the shared key; the cached result is reused when `confirm` already computed
+   * it with the same `kLen`.
+   */
   getSharedKey(msg: Sm9ResponderMessage, kLen?: number): string;
 }
+/**
+ * SM9 密钥交换响应方端点。
+ *
+ * SM9 key-exchange responder endpoint.
+ */
 export interface Sm9KeyExchangeResponder {
+  /**
+   * 阶段 2：根据 RA 生成本端临时点 RB 与确认值 SB（只能调用一次）。
+   *
+   * Stage 2: generate the local ephemeral point RB and the confirmation value SB from
+   * RA (callable once only).
+   */
   respond(msg: Sm9InitiatorMessage): Sm9ResponderMessage;
+  /**
+   * 阶段 4：校验发起方 S_A 并返回会话密钥。
+   *
+   * Stage 4: verify the initiator's S_A and return the shared key.
+   */
   getSharedKey(msg: Sm9InitiatorConfirm, kLen?: number): string;
 }
 
+/**
+ * 常量时间字节比较（MAC / 确认值校验用，不用 `===`）。
+ *
+ * Constant-time byte comparison (used for MAC / confirmation-value checks instead of
+ * `===`).
+ */
 function ctEq(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let d = 0;
@@ -451,6 +715,12 @@ function ctEq(a: Uint8Array, b: Uint8Array): boolean {
   return d === 0;
 }
 
+/**
+ * 取本端临时私钥 r（测试可注入），并校验为 32 字节。
+ *
+ * Returns the local ephemeral private key r (injectable in tests) and validates that
+ * it is 32 bytes.
+ */
 function r32(options: Sm9ExchangeOptions): Uint8Array {
   const r =
     options.ephemeral !== undefined
@@ -460,7 +730,11 @@ function r32(options: Sm9ExchangeOptions): Uint8Array {
   return r;
 }
 
-/** 本端临时点 R = [r](H1(ID_peer||hid,N)P1 + Ppube)，65 字节。 */
+/**
+ * 本端临时点 R = [r](H1(ID_peer||hid,N)P1 + Ppube)，65 字节。
+ *
+ * The local ephemeral point R = [r](H1(ID_peer||hid,N)P1 + Ppube), 65 bytes.
+ */
 function exchEphemeral(ke: Uint8Array, peerId: Uint8Array, r: Uint8Array): Uint8Array {
   const { exports } = getModule();
   const keP = exports.alloc(32);
@@ -478,7 +752,11 @@ function exchEphemeral(ke: Uint8Array, peerId: Uint8Array, r: Uint8Array): Uint8
   }
 }
 
-/** 一次算出的结果：SA(0x83)、SB(0x82) 与共享密钥。 */
+/**
+ * 一次算出的结果：SA(0x83)、SB(0x82) 与共享密钥。
+ *
+ * Everything computed in one pass: SA (0x83), SB (0x82), and the shared key.
+ */
 interface ExchAll {
   sa: string;
   sb: string;
@@ -488,6 +766,11 @@ interface ExchAll {
 /**
  * 调用一次 wasm（`sm9ExchAllOut`）即得 SA/SB/共享密钥，避免重复 pairing。
  * SA 为发起方确认值（prefix 0x83）、SB 为响应方确认值（prefix 0x82）。
+ *
+ * A single wasm call (`sm9ExchAllOut`) yields SA/SB and the shared key, avoiding a
+ * second pairing computation.
+ * SA is the initiator's confirmation value (prefix 0x83) and SB the responder's
+ * (prefix 0x82).
  */
 function exchAll(
   ke: Uint8Array,
@@ -539,6 +822,12 @@ function exchAll(
   }
 }
 
+/**
+ * 读取 65 字节未压缩 G1 点（`04 || x || y`）并按给定标签校验。
+ *
+ * Reads a 65-byte uncompressed G1 point (`04 || x || y`) and validates it under the
+ * given label.
+ */
 function readPoint65(b: string | Uint8Array, label: string): Uint8Array {
   const p = toBytes(b, label);
   if (p.length !== 65) throw new RangeError(`sm9.exch: ${label} 必须是 65 字节未压缩点`);
@@ -551,6 +840,13 @@ function readPoint65(b: string | Uint8Array, label: string): Uint8Array {
  * @param ke 本端（A）加密主私钥
  * @param selfId 本端标识 ID_A
  * @param peerId 对端标识 ID_B
+ *
+ * Builds the initiator side of an SM9 key exchange (GM/T 0044.3). A is the initiator
+ * and B the responder.
+ *
+ * @param ke Local (A) encryption master private key.
+ * @param selfId Local identity ID_A.
+ * @param peerId Peer identity ID_B.
  */
 export async function createExchangeInitiator(
   ke: string | Uint8Array,
@@ -604,6 +900,12 @@ export async function createExchangeInitiator(
  * @param ke 本端（B）加密主私钥
  * @param selfId 本端标识 ID_B
  * @param peerId 对端（A）标识 ID_A
+ *
+ * Builds the responder side of an SM9 key exchange (GM/T 0044.3). B is the responder.
+ *
+ * @param ke Local (B) encryption master private key.
+ * @param selfId Local identity ID_B.
+ * @param peerId Peer (A) identity ID_A.
  */
 export async function createExchangeResponder(
   ke: string | Uint8Array,
@@ -652,4 +954,6 @@ export async function createExchangeResponder(
 }
 
 // SM9 混合加密（KEM + SM4-GCM）。
+//
+// SM9 hybrid encryption (KEM + SM4-GCM).
 export * from './hybrid.js';

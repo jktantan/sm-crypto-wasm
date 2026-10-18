@@ -6,6 +6,14 @@
  * - `InvalidAccessError`：密钥用途或 `extractable` 不允许；
  * - `DataError`：密钥/数据格式非法；
  * - `OperationError`：加解密/验签失败。
+ *
+ * Error mapping for the WebCrypto adapter layer.
+ *
+ * Every outward failure is mapped to a `DOMException` (the WebCrypto convention):
+ * - `NotSupportedError`: unknown algorithm/format or unsupported parameter;
+ * - `InvalidAccessError`: the key usage or `extractable` flag does not allow it;
+ * - `DataError`: illegal key/data format;
+ * - `OperationError`: encryption/decryption/verification failed.
  */
 
 import {
@@ -16,27 +24,43 @@ import {
   SmCryptoError,
 } from '../runtime/errors.js';
 
-/** 构造 `DOMException` 的便捷函数。 */
+/** 构造 `DOMException` 的便捷函数。
+ *
+ * Convenience helper for building a `DOMException`.
+ */
 export function notSupported(message: string): DOMException {
   return new DOMException(message, 'NotSupportedError');
 }
 
-/** 构造 `InvalidAccessError`。 */
+/** 构造 `InvalidAccessError`。
+ *
+ * Build an `InvalidAccessError`.
+ */
 export function invalidAccess(message: string): DOMException {
   return new DOMException(message, 'InvalidAccessError');
 }
 
-/** 构造 `DataError`。 */
+/** 构造 `DataError`。
+ *
+ * Build a `DataError`.
+ */
 export function dataError(message: string): DOMException {
   return new DOMException(message, 'DataError');
 }
 
-/** 构造 `OperationError`。 */
+/** 构造 `OperationError`。
+ *
+ * Build an `OperationError`.
+ */
 export function operationError(message: string): DOMException {
   return new DOMException(message, 'OperationError');
 }
 
-/** 把库内错误映射为 `DOMException`；已经是 `DOMException` 时原样返回。 */
+/** 把库内错误映射为 `DOMException`；已经是 `DOMException` 时原样返回。
+ *
+ * Map a library error to a `DOMException`; a value that already is a `DOMException` is
+ * returned as is.
+ */
 export function toDOMException(
   err: unknown,
   fallback: 'OperationError' | 'DataError' = 'OperationError',

@@ -6,6 +6,16 @@
  *
  * 范围：SM3、HMAC(SM3)、SM2、SM4-ECB/CBC/CTR/CFB/OFB/GCM。
  * 不做 JWK、deriveKey/deriveBits、wrapKey/unwrapKey、postMessage 克隆语义。
+ *
+ * WebCrypto adapter layer (`sm-crypto-wasm/webcrypto`).
+ *
+ * This is a **standalone** `subtle` object, not a polyfill of the native
+ * `crypto.subtle`: browsers do not allow registering custom algorithms, and third-party
+ * libraries will not recognize it automatically either.
+ *
+ * Scope: SM3, HMAC(SM3), SM2, SM4-ECB/CBC/CTR/CFB/OFB/GCM.
+ * JWK, deriveKey/deriveBits, wrapKey/unwrapKey and postMessage clone semantics are not
+ * covered.
  */
 
 export type { AlgorithmInput, NormalizedAlgorithm } from './algorithms.js';

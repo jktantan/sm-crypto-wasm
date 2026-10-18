@@ -7,6 +7,18 @@
  * - 单个证书必须恰好是一个完整 DER 对象，尾部多余字节直接拒绝；
  * - X.509 路径不使用 BER indefinite-length；
  * - 未知扩展 / 未知算法 / 未知 Name 属性不抛错，保留原始值（红线 #9）。
+ *
+ * X.509 certificate parsing (read-only).
+ *
+ * Accepts DER / PEM / base64 input; performs no chain validation and fetches no
+ * CRL/OCSP.
+ *
+ * Strictness (red line #3):
+ * - a single certificate must be exactly one complete DER object; trailing bytes
+ *   are rejected outright;
+ * - the X.509 path never uses BER indefinite-length form;
+ * - unknown extensions / algorithms / Name attributes never throw and keep their
+ *   raw values (red line #9).
  */
 
 import {
@@ -76,12 +88,19 @@ import {
 } from './verify.js';
 
 // ---------- 公开入口 ----------
+//
+// ---------- Public entry points ----------
 
 /**
  * 解析单张证书。
  *
  * @param input PEM 字符串、base64 字符串、hex 字符串或 DER 字节。
  * @throws CertificateError 结构非法、截断或尾部有多余字节。
+ *
+ * Parses a single certificate.
+ *
+ * @param input A PEM string, base64 string, hex string or DER bytes.
+ * @throws CertificateError Malformed or truncated structure, or trailing bytes.
  */
 export function parseCertificate(input: CertificateInput): Certificate {
   const der = decodeCertificateInput(input);
@@ -97,6 +116,10 @@ export function parseCertificate(input: CertificateInput): Certificate {
  * 解析一个或多个证书（PEM bundle / 连续 DER）。
  *
  * @throws CertificateError 任一证书结构非法。
+ *
+ * Parses one or more certificates (PEM bundle or concatenated DER).
+ *
+ * @throws CertificateError Any certificate in the input is malformed.
  */
 export function parseCertificates(input: CertificateInput): Certificate[] {
   if (typeof input === 'string') {
@@ -128,7 +151,12 @@ export function parseCertificates(input: CertificateInput): Certificate[] {
 }
 
 // ---------- 输入解码 ----------
+//
+// ---------- Input decoding ----------
 
+// 解码 DER / PEM / base64 证书输入为 DER 字节。
+//
+// Decodes DER / PEM / base64 certificate input to DER bytes.
 function decodeCertificateInput(input: CertificateInput): Uint8Array {
   if (input instanceof Uint8Array) {
     if (input.length === 0) throw new CertificateError('parseCertificate: empty input');
@@ -144,6 +172,9 @@ function decodeCertificateInput(input: CertificateInput): Uint8Array {
   if (block !== undefined) return pemBodyToDer(block);
 
   // 非 PEM：依次尝试 hex 与 base64，以“能否解析出完整 DER 对象”为准。
+  //
+  // Not PEM: try hex and then base64, deciding by "does it parse as one complete
+  // DER object".
   const candidates: Uint8Array[] = [];
   const compact = text.replace(/\s+/g, '');
   if (/^[0-9a-fA-F]+$/.test(compact) && compact.length % 2 === 0) {
@@ -153,6 +184,9 @@ function decodeCertificateInput(input: CertificateInput): Uint8Array {
     candidates.push(base64ToBytes(compact, 'certificate'));
   } catch {
     // 不是 base64；保留 hex 候选（若也没有，下面统一报错）。
+    //
+    // Not base64; keep the hex candidate (if that fails too, a single error is
+    // raised below).
   }
   for (const candidate of candidates) {
     try {
@@ -160,11 +194,16 @@ function decodeCertificateInput(input: CertificateInput): Uint8Array {
       return candidate;
     } catch {
       // 换下一个候选。
+      //
+      // Try the next candidate.
     }
   }
   throw new CertificateError('parseCertificate: input is neither PEM, hex nor base64 DER');
 }
 
+// 提取 PEM 块（CERTIFICATE / TRUSTED CERTIFICATE）。
+//
+// Extracts PEM blocks (CERTIFICATE / TRUSTED CERTIFICATE).
 function extractPemBlocks(text: string): string[] {
   const blocks: string[] = [];
   const re = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/g;
@@ -176,6 +215,9 @@ function extractPemBlocks(text: string): string[] {
   return blocks;
 }
 
+// 把 PEM body 转为 DER 字节。
+//
+// Converts a PEM body to DER bytes.
 function pemBodyToDer(pem: string): Uint8Array {
   const match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
   if (match === null) throw new CertificateError('parseCertificate: missing CERTIFICATE PEM block');
@@ -187,6 +229,9 @@ function pemBodyToDer(pem: string): Uint8Array {
   }
 }
 
+// 判断字节是否看起来像 PEM 文本。
+//
+// Checks whether bytes look like PEM text.
 function isPemText(bytes: Uint8Array): boolean {
   const prefix = '-----BEGIN ';
   if (bytes.length < prefix.length) return false;
@@ -198,6 +243,9 @@ function isPemText(bytes: Uint8Array): boolean {
 
 // ---------- Certificate ----------
 
+// 从 Certificate ASN.1 节点构建公开结构。
+//
+// Builds the public Certificate structure from an ASN.1 node.
 function certificateFromNode(top: Asn1Node): Certificate {
   const kids = expectSequence(top, 'Certificate');
   if (kids.length !== 3) {
@@ -277,6 +325,9 @@ function certificateFromNode(top: Asn1Node): Certificate {
   return cert;
 }
 
+// TBSCertificate 的中间解析结果（尚未构造公开的 `Certificate`）。
+//
+// Intermediate TBSCertificate parse result, before the public `Certificate` is built.
 interface ParsedTbs {
   version: 1 | 2 | 3;
   serialNumber: bigint;
@@ -287,6 +338,9 @@ interface ParsedTbs {
   extensions: Extension[];
 }
 
+// 解析 TBSCertificate。
+//
+// Parses TBSCertificate.
 function parseTbsCertificate(tbsNode: Asn1Node): ParsedTbs {
   const kids = expectSequence(tbsNode, 'TBSCertificate');
   let index = 0;
@@ -311,6 +365,9 @@ function parseTbsCertificate(tbsNode: Asn1Node): ParsedTbs {
       })();
 
   // TBS 内签名算法（与外层应一致；这里只解析，不做强一致断言）。
+  //
+  // The signature algorithm inside the TBS (it should match the outer one; it is
+  // parsed only, with no strict equality assertion).
   parseAlgorithmIdentifier(kids[index++], 'signature');
   const issuer = parseName(kids[index++], 'issuer');
   const validity = parseValidity(kids[index++]);
@@ -326,11 +383,16 @@ function parseTbsCertificate(tbsNode: Asn1Node): ParsedTbs {
       extensions = parseExtensions(node);
     }
     // [1] issuerUniqueID / [2] subjectUniqueID 与未知尾部字段：忽略。
+    //
+    // [1] issuerUniqueID / [2] subjectUniqueID and unknown trailing fields are ignored.
   }
 
   return { version, serialNumber, issuer, validity, subject, subjectPublicKeyInfo, extensions };
 }
 
+// 解析 Validity（notBefore / notAfter）。
+//
+// Parses Validity (notBefore / notAfter).
 function parseValidity(node: Asn1Node | undefined): Validity {
   const kids = expectSequence(node, 'validity');
   if (kids.length < 2) throw new CertificateError('validity: expected notBefore and notAfter');
@@ -340,6 +402,9 @@ function parseValidity(node: Asn1Node | undefined): Validity {
   };
 }
 
+// 解析 SubjectPublicKeyInfo。
+//
+// Parses SubjectPublicKeyInfo.
 function parseSpki(node: Asn1Node): SubjectPublicKeyInfo {
   const kids = expectSequence(node, 'subjectPublicKeyInfo');
   if (kids.length < 2) throw new CertificateError('subjectPublicKeyInfo: missing public key');
@@ -352,6 +417,9 @@ function parseSpki(node: Asn1Node): SubjectPublicKeyInfo {
   };
 }
 
+// 解析 AlgorithmIdentifier。
+//
+// Parses AlgorithmIdentifier.
 function parseAlgorithmIdentifier(node: Asn1Node | undefined, what: string): AlgorithmIdentifier {
   const kids = expectSequence(node, what);
   const first = kids[0];
@@ -368,6 +436,9 @@ function parseAlgorithmIdentifier(node: Asn1Node | undefined, what: string): Alg
 
 // ---------- Name ----------
 
+// 解析 Name / RDNSequence。
+//
+// Parses Name / RDNSequence.
 function parseName(node: Asn1Node | undefined, what: string): Name {
   const rdns = expectSequence(node, what);
   const attributes: NameAttribute[] = [];
@@ -407,21 +478,33 @@ function parseName(node: Asn1Node | undefined, what: string): Name {
   };
 }
 
+// 解码 Name 属性值。
+//
+// Decodes a Name attribute value.
 function decodeAttributeValue(node: Asn1Node): string {
   try {
     return readString(node, 'Name attribute');
   } catch {
     // 未知字符串类型（如私有编码）：保留原始内容，绝不抛错。
+    //
+    // Unknown string type (a private encoding, say): keep the raw content and never throw.
     return `#${bytesToHex(node.value)}`;
   }
 }
 
+// 按 RFC 4514 格式化 Name 属性。
+//
+// Formats a Name attribute per RFC 4514.
 function formatNameAttribute(oid: string, value: string): string {
   const label = NAME_OID_LABELS[oid] ?? oid;
   return `${label}=${escapeRdnValue(value)}`;
 }
 
-/** RFC 4514 的最小转义集。 */
+/**
+ * RFC 4514 的最小转义集。
+ *
+ * The minimal RFC 4514 escape set.
+ */
 function escapeRdnValue(value: string): string {
   let out = value.replace(/([,+"\\<>;])/g, '\\$1');
   if (out.startsWith(' ')) out = `\\${out}`;
@@ -432,6 +515,9 @@ function escapeRdnValue(value: string): string {
 
 // ---------- Extensions ----------
 
+// 解析证书扩展列表。
+//
+// Parses the certificate extension list.
 function parseExtensions(node: Asn1Node): Extension[] {
   const inner = node.children?.[0];
   const listNode = expectUniversal(inner, UniversalTag.Sequence, 'extensions');
@@ -463,6 +549,17 @@ function parseExtensions(node: Asn1Node): Extension[] {
   });
 }
 
+/**
+ * 取第一个匹配 OID 的扩展并解析；缺失或解析失败返回 `undefined`。
+ *
+ * @internal 让可选扩展字段在解析失败时退化为缺失（红线 #9）。
+ *
+ * Finds the first extension with a matching OID and parses it; returns
+ * `undefined` when it is absent or unparsable.
+ *
+ * @internal Lets optional extension fields degrade to absent on parse failure
+ * (red line #9).
+ */
 function extensionValue<T>(
   extensions: readonly Extension[],
   oid: string,
@@ -474,12 +571,20 @@ function extensionValue<T>(
     return parse(extension.value);
   } catch {
     // 已知扩展损坏 → 视为缺失（红线 #9：不让真实证书解析失败）。
+    //
+    // A corrupted known extension counts as absent (red line #9: never make a real
+    // certificate fail to parse).
     return undefined;
   }
 }
 
 // ---------- 辅助 ----------
+//
+// ---------- Helpers ----------
 
+// 根据 AlgorithmIdentifier 分类公钥类型。
+//
+// Classifies the public-key algorithm.
 function classifyPublicKey(algorithm: AlgorithmIdentifier): 'SM2' | 'RSA' | 'UNKNOWN' {
   if (algorithm.oid === OID_SM2_CURVE) return 'SM2';
   if (algorithm.oid === OID_ID_EC_PUBLIC_KEY) {
@@ -496,6 +601,9 @@ function classifyPublicKey(algorithm: AlgorithmIdentifier): 'SM2' | 'RSA' | 'UNK
   return 'UNKNOWN';
 }
 
+// 从 issuer 证书或原始公钥解析验签公钥。
+//
+// Resolves the issuer public key from a certificate or raw key.
 function resolveIssuerPublicKey(issuer: Certificate | Uint8Array): Uint8Array | null {
   if (isCertificateLike(issuer)) return issuer.subjectPublicKey;
   if (issuer.length === 64 || issuer.length === 65) {
@@ -508,6 +616,9 @@ function resolveIssuerPublicKey(issuer: Certificate | Uint8Array): Uint8Array | 
   }
 }
 
+// 判断值是否像 Certificate 结构。
+//
+// Checks whether a value looks like a Certificate.
 function isCertificateLike(value: Certificate | Uint8Array): value is Certificate {
   return (
     typeof value === 'object' &&
@@ -517,10 +628,16 @@ function isCertificateLike(value: Certificate | Uint8Array): value is Certificat
   );
 }
 
+// 复制字节数组。
+//
+// Copies a byte array.
 function copy(bytes: Uint8Array): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+// 把未知异常转成可读消息。
+//
+// Converts an unknown error to a readable message.
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

@@ -4,8 +4,19 @@
  * 不引入新依赖、不新增 wasm：X.509 API 是同步的，无法调用宿主的
  * `crypto.subtle.digest`；Node 的 `node:crypto` 又会让浏览器构建失败。
  * 这里实现 FIPS 180-4 的标准算法，输出小写 hex。
+ *
+ * A pure-JS SHA-256, used only for certificate fingerprints.
+ *
+ * No new dependencies and no extra wasm: the X.509 API is synchronous, so the
+ * host's `crypto.subtle.digest` cannot be used, and Node's `node:crypto` would
+ * break the browser build. This implements the FIPS 180-4 algorithm and outputs
+ * lowercase hex.
  */
 
+// SHA-256 轮常量 K，FIPS 180-4 §4.2.2（前 64 个素数立方根小数部分的前 32 位）。
+//
+// SHA-256 round constants K, FIPS 180-4 §4.2.2 (the first 32 bits of the
+// fractional parts of the cube roots of the first 64 primes).
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -17,19 +28,32 @@ const K = new Uint32Array([
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
-/** SHA-256 摘要（小写 hex）。 */
+/**
+ * SHA-256 摘要（小写 hex）。
+ *
+ * SHA-256 digest as lowercase hex.
+ */
 export function sha256Hex(input: Uint8Array): string {
   const length = input.length;
   // padding：0x80 + 若干 0 + 8 字节长度，总长为 64 的倍数。
+  //
+  // Padding: 0x80, then zeros, then the 8-byte length; the total is a multiple of 64.
   const paddedLength = Math.ceil((length + 9) / 64) * 64;
   const buffer = new Uint8Array(paddedLength);
   buffer.set(input);
   buffer[length] = 0x80;
   const view = new DataView(buffer.buffer);
   // 长度是 64-bit big-endian（输入实际不会超过 2^32 位，高 32 位取 0）。
+  //
+  // The length is a 64-bit big-endian value (input never exceeds 2^32 bits in
+  // practice, so the high 32 bits are 0).
   view.setUint32(paddedLength - 8, Math.floor(length / 0x20000000));
   view.setUint32(paddedLength - 4, (length * 8) >>> 0);
 
+  // 初始哈希值 H0..H7，FIPS 180-4 §5.3.3（前 8 个素数平方根小数部分的前 32 位）。
+  //
+  // Initial hash values H0..H7, FIPS 180-4 §5.3.3 (the first 32 bits of the
+  // fractional parts of the square roots of the first 8 primes).
   const h = new Uint32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ]);
@@ -54,6 +78,9 @@ export function sha256Hex(input: Uint8Array): string {
     let g = h[6] as number;
     let hh = h[7] as number;
 
+    // 64 轮压缩函数（FIPS 180-4 §6.2.2）。
+    //
+    // 64-round compression function (FIPS 180-4 §6.2.2).
     for (let i = 0; i < 64; i++) {
       const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
       const ch = (e & f) ^ (~e & g);
@@ -87,6 +114,9 @@ export function sha256Hex(input: Uint8Array): string {
   return out;
 }
 
+// 32-bit 循环右移。
+//
+// 32-bit rotate right.
 function rotr(value: number, shift: number): number {
   return ((value >>> shift) | (value << (32 - shift))) >>> 0;
 }

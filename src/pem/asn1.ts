@@ -10,6 +10,19 @@
  * - `encodeOid` / `decodeOid` / `asn1IntValue` → OID 与 INTEGER 解码
  *
  * spec/plan 对应：X.509/CMS plan 阶段 0「迁移」。
+ *
+ * Legacy ASN.1 entry point (compatibility layer).
+ *
+ * The implementation moved to `src/asn1/` (the shared DER/BER layer). This file only
+ * keeps the historical export names so that `src/pem/*` and the existing tests did not
+ * have to change:
+ *
+ * - `parseDer` → `src/asn1/decode.ts`
+ * - `encodeDer` → `encode` in `src/asn1/encode.ts`
+ * - `asn1Int` / `asn1Octets` / `asn1Oid` / `asn1Null` / `asn1Seq` → the matching builders
+ * - `encodeOid` / `decodeOid` / `asn1IntValue` → OID and INTEGER decoding
+ *
+ * spec/plan: X.509/CMS plan phase 0, "migration".
  */
 
 export {

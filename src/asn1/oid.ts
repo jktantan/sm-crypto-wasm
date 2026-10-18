@@ -6,6 +6,15 @@
  *   长组件不会溢出）；
  * - 首个子标识符也走 base128 编码，支持 `2.999` 这类第二组件 ≥ 40 的 OID；
  * - 解码时拒绝截断、空输入与非最小（前导 0x80）编码。
+ *
+ * OBJECT IDENTIFIER encoding and decoding.
+ *
+ * Differences from the legacy implementation:
+ * - Accumulates in `bigint`, so 32-bit bitwise limits no longer apply (long arcs such
+ *   as `1.2.840.113549...` cannot overflow);
+ * - The first subidentifier also goes through base128, so OIDs whose second arc is
+ *   ≥ 40 (such as `2.999`) are supported;
+ * - Decoding rejects truncation, empty input and non-minimal (leading 0x80) encodings.
  */
 
 import { Asn1Error } from './types.js';
@@ -15,6 +24,11 @@ import { Asn1Error } from './types.js';
  *
  * @param oid 形如 `"1.2.156.10197.1.100"`。
  * @throws Asn1Error 格式非法或组件越界。
+ *
+ * Dotted OID → content bytes (without tag and length).
+ *
+ * @param oid Something like `"1.2.156.10197.1.100"`.
+ * @throws Asn1Error On malformed syntax or out-of-range components.
  */
 export function encodeOid(oid: string): Uint8Array {
   const parts = parseOidComponents(oid);
@@ -30,6 +44,10 @@ export function encodeOid(oid: string): Uint8Array {
  * 内容字节 → 点分 OID。
  *
  * @throws Asn1Error 空输入、截断或非法 base128 编码。
+ *
+ * Content bytes → dotted OID.
+ *
+ * @throws Asn1Error On empty input, truncation, or an invalid base128 encoding.
  */
 export function decodeOid(bytes: Uint8Array): string {
   if (bytes.length === 0) throw new Asn1Error('decodeOid: empty');
@@ -39,6 +57,8 @@ export function decodeOid(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) {
     const octet = bytes[i] ?? 0;
     // 每个子标识符的编码不得以 0x80 开头（非最小编码）。
+    //
+    // A subidentifier's encoding must not start with 0x80 (non-minimal encoding).
     if (!pending && octet === 0x80) {
       throw new Asn1Error('decodeOid: non-minimal base128 encoding');
     }
@@ -67,6 +87,11 @@ export function decodeOid(bytes: Uint8Array): string {
   return parts.map((v) => v.toString(10)).join('.');
 }
 
+/**
+ * 校验并拆分点分 OID（每个组件为无符号十进制整数）。
+ *
+ * Validates and splits a dotted OID (each component is an unsigned decimal integer).
+ */
 function parseOidComponents(oid: string): bigint[] {
   if (typeof oid !== 'string' || oid.length === 0) {
     throw new Asn1Error(`encodeOid: bad oid "${String(oid)}"`);
@@ -91,7 +116,11 @@ function parseOidComponents(oid: string): bigint[] {
   return parts;
 }
 
-/** 无符号 bigint → base128 字节（高位 bit 为续行标志）。 */
+/**
+ * 无符号 bigint → base128 字节（高位 bit 为续行标志）。
+ *
+ * Unsigned bigint → base128 bytes (the high bit marks a continuation).
+ */
 function encodeBase128(value: bigint): number[] {
   if (value < 0n) throw new Asn1Error(`encodeBase128: negative value ${value}`);
   const groups: number[] = [];

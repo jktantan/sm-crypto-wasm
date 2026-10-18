@@ -3,6 +3,12 @@
  *
  * 只负责把结构化输入编码为 RFC 5280 证书；签名算法固定为 SM3withSM2。
  * 编码复用 `src/asn1/`，不重复实现任何算法。
+ *
+ * X.509 certificate DER encoding (issuance side).
+ *
+ * Only encodes structured input into an RFC 5280 certificate; the signature
+ * algorithm is fixed to SM3withSM2. Encoding reuses `src/asn1/` and does not
+ * reimplement any algorithm.
  */
 
 import {
@@ -48,7 +54,11 @@ import type {
   Validity,
 } from './types.js';
 
-/** KeyUsage 的位顺序（RFC 5280）。 */
+/**
+ * KeyUsage 的位顺序（RFC 5280）。
+ *
+ * KeyUsage bit order (RFC 5280).
+ */
 const KEY_USAGE_ORDER = [
   'digitalSignature',
   'nonRepudiation',
@@ -61,14 +71,22 @@ const KEY_USAGE_ORDER = [
   'decipherOnly',
 ] as const;
 
-/** 待编码的一个扩展。 */
+/**
+ * 待编码的一个扩展。
+ *
+ * One extension waiting to be encoded.
+ */
 export interface EncodedExtension {
   readonly oid: string;
   readonly critical: boolean;
   readonly value: Uint8Array;
 }
 
-/** 编码 Name（RDNSequence）。 */
+/**
+ * 编码 Name（RDNSequence）。
+ *
+ * Encodes a Name (RDNSequence).
+ */
 export function encodeName(dn: DistinguishedNameInput): Asn1Node {
   const rdns: Asn1Node[] = [];
   const add = (
@@ -92,23 +110,39 @@ export function encodeName(dn: DistinguishedNameInput): Asn1Node {
   return seq(rdns);
 }
 
-/** 编码 SM2 的 SubjectPublicKeyInfo。 */
+/**
+ * 编码 SM2 的 SubjectPublicKeyInfo。
+ *
+ * Encodes the SubjectPublicKeyInfo for SM2.
+ */
 export function encodeSubjectPublicKeyInfo(publicKey: Uint8Array): Asn1Node {
   const point = normalizePublicKey(publicKey);
   return seq([seq([oid(OID_ID_EC_PUBLIC_KEY), oid(OID_SM2_CURVE)]), bitString(point)]);
 }
 
-/** 编码 Validity。 */
+/**
+ * 编码 Validity。
+ *
+ * Encodes Validity.
+ */
 export function encodeValidity(validity: Validity): Asn1Node {
   return seq([time(validity.notBefore), time(validity.notAfter)]);
 }
 
-/** 编码 AlgorithmIdentifier（SM3withSM2，无参数）。 */
+/**
+ * 编码 AlgorithmIdentifier（SM3withSM2，无参数）。
+ *
+ * Encodes the AlgorithmIdentifier (SM3withSM2, no parameters).
+ */
 export function encodeSignatureAlgorithm(): Asn1Node {
   return seq([oid(OID_SM3_WITH_SM2)]);
 }
 
-/** 编码 BasicConstraints 的 extnValue。 */
+/**
+ * 编码 BasicConstraints 的 extnValue。
+ *
+ * Encodes the extnValue of BasicConstraints.
+ */
 export function encodeBasicConstraints(input: BasicConstraintsInput): Uint8Array {
   if (!input.ca && input.pathLen !== undefined) {
     throw new RangeError('basicConstraints.pathLen is only valid for CA certificates');
@@ -122,7 +156,11 @@ export function encodeBasicConstraints(input: BasicConstraintsInput): Uint8Array
   return seq(children).raw;
 }
 
-/** 编码 KeyUsage 的 extnValue（BIT STRING）。 */
+/**
+ * 编码 KeyUsage 的 extnValue（BIT STRING）。
+ *
+ * Encodes the extnValue of KeyUsage as a BIT STRING.
+ */
 export function encodeKeyUsage(names: readonly string[]): Uint8Array {
   let maxBit = -1;
   for (const name of names) {
@@ -141,16 +179,27 @@ export function encodeKeyUsage(names: readonly string[]): Uint8Array {
   return bitString(bytes, unusedBits).raw;
 }
 
-/** 编码 ExtendedKeyUsage 的 extnValue（SEQUENCE OF OID）。 */
+/**
+ * 编码 ExtendedKeyUsage 的 extnValue（SEQUENCE OF OID）。
+ *
+ * Encodes the extnValue of ExtendedKeyUsage (SEQUENCE OF OID).
+ */
 export function encodeExtendedKeyUsage(oids: readonly string[]): Uint8Array {
   return seq(oids.map((value) => oid(value))).raw;
 }
 
-/** 编码 SubjectAltName 的 extnValue（SEQUENCE OF GeneralName）。 */
+/**
+ * 编码 SubjectAltName 的 extnValue（SEQUENCE OF GeneralName）。
+ *
+ * Encodes the extnValue of SubjectAltName (SEQUENCE OF GeneralName).
+ */
 export function encodeSubjectAltName(names: readonly SubjectAltNameInput[]): Uint8Array {
   return seq(names.map(encodeGeneralName)).raw;
 }
 
+// 编码 GeneralName。
+//
+// Encodes a GeneralName.
 function encodeGeneralName(name: SubjectAltNameInput): Asn1Node {
   switch (name.type) {
     case 'dns':
@@ -168,17 +217,29 @@ function encodeGeneralName(name: SubjectAltNameInput): Asn1Node {
   }
 }
 
-/** 编码 SubjectKeyIdentifier 的 extnValue（OCTET STRING）。 */
+/**
+ * 编码 SubjectKeyIdentifier 的 extnValue（OCTET STRING）。
+ *
+ * Encodes the extnValue of SubjectKeyIdentifier (OCTET STRING).
+ */
 export function encodeSubjectKeyIdentifier(keyIdentifier: Uint8Array): Uint8Array {
   return octetString(keyIdentifier).raw;
 }
 
-/** 编码 AuthorityKeyIdentifier 的 extnValue（[0] keyIdentifier）。 */
+/**
+ * 编码 AuthorityKeyIdentifier 的 extnValue（[0] keyIdentifier）。
+ *
+ * Encodes the extnValue of AuthorityKeyIdentifier ([0] keyIdentifier).
+ */
 export function encodeAuthorityKeyIdentifier(keyIdentifier: Uint8Array): Uint8Array {
   return seq([implicit(0, octetString(keyIdentifier))]).raw;
 }
 
-/** 把扩展列表编码为 `[3] EXPLICIT Extensions`。 */
+/**
+ * 把扩展列表编码为 `[3] EXPLICIT Extensions`。
+ *
+ * Encodes the extension list as `[3] EXPLICIT Extensions`.
+ */
 export function encodeExtensions(extensions: readonly EncodedExtension[]): Asn1Node {
   const entries = extensions.map((ext) => {
     const children: Asn1Node[] = [oid(ext.oid)];
@@ -189,7 +250,11 @@ export function encodeExtensions(extensions: readonly EncodedExtension[]): Asn1N
   return explicit(3, seq(entries));
 }
 
-/** 编码 TBSCertificate。 */
+/**
+ * 编码 TBSCertificate。
+ *
+ * Encodes a TBSCertificate.
+ */
 export function encodeTbsCertificate(input: {
   version: 1 | 2 | 3;
   serialNumber: bigint;
@@ -214,12 +279,20 @@ export function encodeTbsCertificate(input: {
   return seq(children);
 }
 
-/** 组装 Certificate ::= SEQUENCE { tbs, signatureAlgorithm, signatureValue }。 */
+/**
+ * 组装 Certificate ::= SEQUENCE { tbs, signatureAlgorithm, signatureValue }。
+ *
+ * Assembles Certificate ::= SEQUENCE { tbs, signatureAlgorithm, signatureValue }.
+ */
 export function encodeCertificate(tbs: Asn1Node, signatureDer: Uint8Array): Uint8Array {
   return seq([tbs, encodeSignatureAlgorithm(), bitString(signatureDer)]).raw;
 }
 
-/** 64/65 字节公钥 → 65 字节未压缩点。 */
+/**
+ * 64/65 字节公钥 → 65 字节未压缩点。
+ *
+ * A 64/65-byte public key to the 65-byte uncompressed point form.
+ */
 export function normalizePublicKey(publicKey: Uint8Array): Uint8Array {
   if (publicKey.length === 65 && publicKey[0] === 0x04) return new Uint8Array(publicKey);
   if (publicKey.length === 64) {
@@ -231,7 +304,11 @@ export function normalizePublicKey(publicKey: Uint8Array): Uint8Array {
   throw new CertificateError('publicKey: expected 64 or 65 (uncompressed) bytes');
 }
 
-/** 扩展 OID 常量（供签发逻辑使用）。 */
+/**
+ * 扩展 OID 常量（供签发逻辑使用）。
+ *
+ * Extension OID constants, used by the issuance logic.
+ */
 export const EXTENSION_OIDS = {
   basicConstraints: OID_BASIC_CONSTRAINTS,
   keyUsage: OID_KEY_USAGE,
