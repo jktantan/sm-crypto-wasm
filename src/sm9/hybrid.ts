@@ -19,7 +19,7 @@
  * 错误 id / 错误主公钥会得到不同的 K，最终由 GCM tag 认证失败暴露。因此
  * `hybridDecrypt` 对错误 id 抛的是 GCM 的 `DecryptionError`，而不是 KEM 错误。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 4。
  */
 

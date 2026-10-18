@@ -20,7 +20,7 @@
  * `hybridEncrypt` / `hybridDecrypt` 是同步函数（`.wasm` 由
  * `await Promise.all([sm2.ensureLoaded(), sm4.ensureLoaded()])` 预热）。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 2 / Task 3。
  */
 

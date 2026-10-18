@@ -15,7 +15,7 @@
  * 若需要“公钥只保护短密钥、数据交给对称算法”的完整用法，直接用
  * `hybridEncrypt` / `hybridDecrypt`（本模块的 KEM + SM4-GCM 组装）。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 1。
  */
 

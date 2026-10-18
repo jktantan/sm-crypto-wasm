@@ -8,7 +8,7 @@
  *
  * 解封装只有 `kemDecrypt(ke, id, encapsulation, klen)`：必须持有加密主私钥。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 4。
  */
 

@@ -16,7 +16,7 @@
  * 对象形态 `SealedObject` 只用于调试 / 自描述场景；线上传输仍建议用单个
  * hex 字符串（`sealedToObject` / `sealedFromObject` 负责互转）。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`
  * Task 2。
  */
 

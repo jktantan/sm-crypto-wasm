@@ -8,7 +8,7 @@
 
 **由来:** 2026-10-17 评估 Non-Goal 清单时确认：X.509 解析与签发是国密项目的高频缺口（拿到 SM2 证书读不出公钥/SAN/用途；内网与设备证书需要自签）；CMS SignedData 覆盖电子签章/接口签名的大部分需求；WebCrypto 适配层降低前端接入成本。证书链路径校验、CMS EnvelopedData、时间戳仍不做。
 
-**Spec:** 无独立 spec；本计划自带设计。既有 spec：`docs/superpowers/specs/2026-10-13-sm-crypto-wasm-design.md`（其中 X.509/PKCS#7/CMS、WebCrypto 两条 Non-Goal 需要在本计划交付后同步修订）。
+**Spec:** 无独立 spec；本计划自带设计。既有 spec：`docs/design/specs/2026-10-13-sm-crypto-wasm-design.md`（其中 X.509/PKCS#7/CMS、WebCrypto 两条 Non-Goal 需要在本计划交付后同步修订）。
 
 ---
 
@@ -389,7 +389,7 @@ const ct = await subtle.encrypt({ name: 'SM4-GCM', iv, additionalData }, key, pl
 
 - **README 三语**：每个阶段新增对应段落；「不在范围」里删除已交付项，保留未交付项。
 - **website 三语**：`website/guide/`、`website/en/guide/`、`website/ru/guide/` 新增页面；`website/.vitepress/config.ts` 增加侧边栏项。
-- **spec 修订**：`docs/superpowers/specs/2026-10-13-sm-crypto-wasm-design.md` 的 Non-Goals 改为「已交付（附版本）」/「仍不做」，避免文档自相矛盾。
+- **spec 修订**：`docs/design/specs/2026-10-13-sm-crypto-wasm-design.md` 的 Non-Goals 改为「已交付（附版本）」/「仍不做」，避免文档自相矛盾。
 - **发布节奏（实际）**：原计划每阶段打 minor tag；四阶段一次性完成，以 `v0.7.0` 单 tag 收口（0.4.0–0.6.0 的中间版本未单独产出）。
 - **体积预算（2026-10-18 实测，gzip、不含 wasm）**：
   - x509 解析子集 **10.8 KB**（原预算 15 KB）；

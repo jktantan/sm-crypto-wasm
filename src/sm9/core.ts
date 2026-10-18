@@ -4,7 +4,7 @@
  * 把 `ensureLoaded` / `getModule` / 内存视图从业务 API 中拆出来，供
  * `index.ts`、`kem.ts`、`hybrid.ts` 共用，避免模块间循环依赖。
  *
- * spec/plan 对应：`docs/superpowers/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`。
+ * spec/plan 对应：`docs/design/plans/2026-10-16-sm2-sm9-hybrid-encryption.md`。
  */
 
 import { loadWasm } from '../runtime/loadWasm.js';

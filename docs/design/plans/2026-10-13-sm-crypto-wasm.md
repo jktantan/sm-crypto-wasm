@@ -8,7 +8,7 @@
 
 **Tech Stack:** AssemblyScript (`asc` 0.27+), TypeScript 5, Rollup, pnpm 9, vitest 1, fast-check 3, mitata, biome, GitHub Actions, `release-it`.
 
-**Spec:** `docs/superpowers/specs/2026-10-13-sm-crypto-wasm-design.md` (approved 2026-10-13).
+**Spec:** `docs/design/specs/2026-10-13-sm-crypto-wasm-design.md` (approved 2026-10-13).
 
 ---
 
@@ -1290,7 +1290,7 @@ git commit -m "docs: README with 4-recipe quickstart"
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-10-13-sm-crypto-wasm.md`. Please review the plan.
+Plan complete and saved to `docs/design/plans/2026-10-13-sm-crypto-wasm.md`. Please review the plan.
 
 This plan has **15 tasks, each with self-contained tests, layered so Task N only depends on Tasks 1-5**. The implementation surface is large (5 algorithm cores + cross-cutting runtime/PEM/build), and a mistake in the SM2 curve or SM9 pairing would be a silent correctness bug — so independent review at each gate is valuable.
 

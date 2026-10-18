@@ -8,7 +8,7 @@
 
 **由来:** 2026-10-16 排查 JS↔WASM 内存缺陷时确认：SM2/SM9 直接加密大消息在算法上代价高（实测 SM2 1MB 29 MB/s、SM9 10KB 2 MB/s，而 SM4 约 170 MB/s），且整体把消息塞进 WASM 会推高常驻内存水位。正确解法是混合加密，而不是继续优化公钥加密长数据。
 
-**Spec:** 无独立 spec；本计划自带设计。相关既有 spec：`docs/superpowers/specs/2026-10-13-sm-crypto-wasm-design.md`。
+**Spec:** 无独立 spec；本计划自带设计。相关既有 spec：`docs/design/specs/2026-10-13-sm-crypto-wasm-design.md`。
 
 ---
 
