@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
-import v from './vectors/sm2/keyexchange-official.json';
+import v from '../vectors/sm2/keyexchange-official.json';
 
 /**
  * SM2 密钥交换**官方向量** KAT：GB/T 32918.3-2016 附录 A.2 示例 1（Fp-256）。

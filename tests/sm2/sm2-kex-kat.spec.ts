@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm2 from '@/sm2';
-import vectors from './vectors/sm2/keyexchange.json';
+import vectors from '../vectors/sm2/keyexchange.json';
 
 /**
  * SM2 密钥交换 KAT：与 GmSSL 生成向量逐字节比对。

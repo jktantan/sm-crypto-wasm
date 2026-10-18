@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm9 from '@/sm9';
-import v from './vectors/sm9/kem-exch-gmssl.json';
+import v from '../vectors/sm9/kem-exch-gmssl.json';
 
 /**
  * SM9 密钥封装 KEM 与密钥交换 KAT：与 GmSSL 生成向量逐字节比对。

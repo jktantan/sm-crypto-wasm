@@ -9,7 +9,7 @@ import {
   zucKeystream,
   zucMac,
 } from '@/zuc';
-import eia3Vectors from './vectors/zuc/eia3.json';
+import eia3Vectors from '../vectors/zuc/eia3.json';
 
 /**
  * ZUC 与独立参考实现（gmkitx, Apache-2.0）对比。

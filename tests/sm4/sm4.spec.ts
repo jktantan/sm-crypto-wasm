@@ -1,7 +1,7 @@
 import { createCipheriv } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as sm4 from '@/sm4';
-import gcmVectors from './vectors/sm4/gcm.json';
+import gcmVectors from '../vectors/sm4/gcm.json';
 
 /**
  * SM4 与 Node crypto oracle 对比。
