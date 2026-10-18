@@ -1,3 +1,7 @@
+# 允许 ASC 工具链 + Biome 在 install 时执行必要脚本。
+# pnpm 10+ 默认禁止依赖 build 脚本，需要显式批准。
+# esbuild 是 ASC 编译 .ts->.wasm 的核心；biome 用 format/lint；assemblyscript 自身。
 allowBuilds:
   '@biomejs/biome': true
+  assemblyscript: true
   esbuild: true

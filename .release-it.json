@@ -15,6 +15,6 @@
     "publish": true
   },
   "hooks": {
-    "before:init": ["pnpm lint", "pnpm typecheck", "pnpm build", "pnpm test", "pnpm test:browser"]
+    "before:init": ["pnpm lint", "pnpm typecheck", "pnpm build", "pnpm test:unit", "pnpm test:browser"]
   }
 }

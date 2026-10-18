@@ -1,32 +1,42 @@
 {
   "name": "sm-crypto-wasm",
   "version": "0.7.0",
-  "description": "国密 SM2/SM3/SM4/SM9/ZUC 的 WASM 实现，Node 18+ 与现代浏览器均可使用，按算法分包懒加载。",
-  "description:en": "SM2/SM3/SM4/SM9/ZUC (China crypto) implemented in AssemblyScript -> WASM. Node 18+ & modern browsers, per-algorithm lazy loading.",
-  "license": "Apache-2.0",
-  "type": "module",
-  "engines": {
-    "node": ">=18"
-  },
+  "description": "SM2/SM3/SM4/SM9/ZUC (Chinese cryptography) implemented in AssemblyScript → WebAssembly. Node.js 18+ and modern browsers, with per-algorithm lazy loading.",
   "keywords": [
     "sm2",
     "sm3",
     "sm4",
     "sm9",
     "zuc",
+    "sm-crypto",
+    "chinese-cryptography",
     "gm",
+    "gmssl",
+    "cryptography",
+    "encryption",
+    "webassembly",
     "wasm",
     "assemblyscript",
+    "x509",
+    "cms",
+    "webcrypto",
+    "typescript",
     "国密",
-    "chinese-crypto"
+    "商密"
   ],
-  "homepage": "https://github.com/jktantan/sm-crypto-wasm",
+  "homepage": "https://jktantan.github.io/sm-crypto-wasm/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jktantan/sm-crypto-wasm.git"
+    "url": "git+https://github.com/jktantan/sm-crypto-wasm.git"
   },
   "bugs": {
     "url": "https://github.com/jktantan/sm-crypto-wasm/issues"
+  },
+  "author": "jktantan",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,56 +47,63 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./sm2": {
       "types": "./dist/sm2/index.d.ts",
-      "import": "./dist/sm2/index.js"
+      "import": "./dist/sm2/index.js",
+      "default": "./dist/sm2/index.js"
     },
     "./sm3": {
       "types": "./dist/sm3/index.d.ts",
-      "import": "./dist/sm3/index.js"
+      "import": "./dist/sm3/index.js",
+      "default": "./dist/sm3/index.js"
     },
     "./sm4": {
       "types": "./dist/sm4/index.d.ts",
-      "import": "./dist/sm4/index.js"
+      "import": "./dist/sm4/index.js",
+      "default": "./dist/sm4/index.js"
     },
     "./sm9": {
       "types": "./dist/sm9/index.d.ts",
-      "import": "./dist/sm9/index.js"
+      "import": "./dist/sm9/index.js",
+      "default": "./dist/sm9/index.js"
     },
     "./zuc": {
       "types": "./dist/zuc/index.d.ts",
-      "import": "./dist/zuc/index.js"
+      "import": "./dist/zuc/index.js",
+      "default": "./dist/zuc/index.js"
     },
-    "./esbuild-plugin": {
-      "types": "./dist/esbuild-plugin.d.ts",
-      "import": "./dist/esbuild-plugin.js"
-    },
-    "./package.json": "./package.json",
     "./x509": {
       "types": "./dist/x509/index.d.ts",
-      "import": "./dist/x509/index.js"
+      "import": "./dist/x509/index.js",
+      "default": "./dist/x509/index.js"
     },
     "./cms": {
       "types": "./dist/cms/index.d.ts",
-      "import": "./dist/cms/index.js"
+      "import": "./dist/cms/index.js",
+      "default": "./dist/cms/index.js"
     },
     "./webcrypto": {
       "types": "./dist/webcrypto/index.d.ts",
-      "import": "./dist/webcrypto/index.js"
-    }
+      "import": "./dist/webcrypto/index.js",
+      "default": "./dist/webcrypto/index.js"
+    },
+    "./esbuild-plugin": {
+      "types": "./dist/esbuild-plugin.d.ts",
+      "import": "./dist/esbuild-plugin.js",
+      "default": "./dist/esbuild-plugin.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "README.md",
-    "LICENSE",
     "NOTICE"
   ],
   "sideEffects": false,
   "scripts": {
     "build": "pnpm clean && pnpm build:wasm:all && pnpm build:ts",
-    "build:wasm": "pnpm run build:wasm:sm3",
     "build:wasm:sm3": "asc src/sm3/assembly/index.ts --outFile dist/sm3/sm3.wasm --optimize",
     "build:wasm:sm2": "asc src/sm2/assembly/index.ts --outFile dist/sm2/sm2.wasm --optimize",
     "build:wasm:sm4": "asc src/sm4/assembly/index.ts --outFile dist/sm4/sm4.wasm --optimize",
@@ -97,7 +114,8 @@
     "build:ts:debug": "tsc -p tsconfig.build.debug.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true,maxRetries:3,retryDelay:100})\"",
     "pretest": "pnpm run build:wasm:all",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:fuzz": "vitest run --config vitest.fuzz.config.ts",
     "lint": "biome check src tests bench",
@@ -109,7 +127,7 @@
     "docs:build": "pnpm build && vitepress build website",
     "docs:preview": "vitepress preview website",
     "example:wechat:prepare": "node examples/wechat-miniprogram/scripts/prepare.mjs",
-    "prepack": "pnpm build && pnpm test"
+    "prepack": "pnpm build && pnpm run test:unit"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
