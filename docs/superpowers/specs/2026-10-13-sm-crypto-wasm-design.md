@@ -46,9 +46,9 @@
 ### Non-Goals（这次不做，但留扩展点）
 
 - **ZUC-256**（GM/T 0001.1-2021）——独立的 LFSR/初始化/密钥加载，非 ZUC-128 的参数化；无现成第三方 oracle；列为将来支持。
-- WebCrypto 适配层（`crypto.subtle` 风格的 API）；
+- ~~WebCrypto 适配层（`crypto.subtle` 风格的 API）~~ —— **已交付（0.7.0）**：`sm-crypto-wasm/webcrypto`，覆盖 SM3 / HMAC(SM3) / SM2 / SM4 精选子集；不做 JWK、deriveKey、wrapKey，也不挂载到原生 `crypto.subtle`。
 - 国密机 / HSM / PKCS#11 / 软证书句柄（你确认 C 很少）；
-- X.509 / PKCS#7 / CMS / SMIME 协议封装；
+- ~~X.509 / PKCS#7 / CMS / SMIME 协议封装~~ —— **已交付（0.4.0–0.6.0）**：X.509 解析、自签/CA 签发、CMS SignedData（detached/attached）；仍不做证书链路径校验、EnvelopedData、RFC 3161 时间戳与 SMIME 封装。
 - Cloudflare Workers / Vercel Edge 这类"严格流式 WASM"环境；
 - 硬件加速（Intel ADX、ARMv8 CE）；
 - WebAssembly SIMD 优化（AssemblyScript 当前 SIMD 支持有限）—— **仍按 Non-Goal**：SM4 一度试过 `v128` 4 路并行（ECB / CTR / GCM-GCTR），实测慢于标量 8 块交错，已全部移除并改走不依赖 SIMD 的标量交错（见 README 性能小节）；SM2 / SM3 / SM9 / ZUC 同理。

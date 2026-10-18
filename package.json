@@ -1,6 +1,6 @@
 {
   "name": "sm-crypto-wasm",
-  "version": "0.3.1",
+  "version": "0.7.0",
   "description": "国密 SM2/SM3/SM4/SM9/ZUC 的 WASM 实现，Node 18+ 与现代浏览器均可使用，按算法分包懒加载。",
   "description:en": "SM2/SM3/SM4/SM9/ZUC (China crypto) implemented in AssemblyScript -> WASM. Node 18+ & modern browsers, per-algorithm lazy loading.",
   "license": "Apache-2.0",
@@ -63,7 +63,19 @@
       "types": "./dist/esbuild-plugin.d.ts",
       "import": "./dist/esbuild-plugin.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./x509": {
+      "types": "./dist/x509/index.d.ts",
+      "import": "./dist/x509/index.js"
+    },
+    "./cms": {
+      "types": "./dist/cms/index.d.ts",
+      "import": "./dist/cms/index.js"
+    },
+    "./webcrypto": {
+      "types": "./dist/webcrypto/index.d.ts",
+      "import": "./dist/webcrypto/index.js"
+    }
   },
   "files": [
     "dist",
@@ -87,7 +99,7 @@
     "pretest": "pnpm run build:wasm:all",
     "test": "vitest run --config vitest.config.ts",
     "test:browser": "vitest run --config vitest.browser.config.ts",
-    "test:fuzz": "vitest run --config vitest.config.ts tests/fuzz",
+    "test:fuzz": "vitest run --config vitest.fuzz.config.ts",
     "lint": "biome check src tests bench",
     "format": "biome format --write src tests bench",
     "typecheck": "tsc --noEmit",

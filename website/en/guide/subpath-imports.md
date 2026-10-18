@@ -9,7 +9,7 @@ import { hash, hmac } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
 
 |  | Aggregate entry | Sub-path |
 | --- | --- | --- |

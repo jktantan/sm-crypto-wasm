@@ -16,6 +16,9 @@ import { encryptCBC } from 'sm-crypto-wasm/sm4';
 | `sm-crypto-wasm/sm3` | `ensureLoaded` · `hash` · `hmac` |
 | `sm-crypto-wasm/sm4` | `ensureLoaded` · `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm-crypto-wasm/sm9` | `ensureLoaded` · `generateKeyPair` · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` / `kemDecrypt` · `hybridEncrypt` / `hybridDecrypt` · `sealedToObject` / `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` / `createExchangeResponder` |
+| `sm-crypto-wasm/x509` | `parseCertificate` · `parseCertificates` · `verifyCertificateSignature` · `isWithinValidity` · `CertificateError` · OID 常量 |
+| `sm-crypto-wasm/cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
+| `sm-crypto-wasm/webcrypto` | `subtle` · `CryptoKey` |
 | `sm-crypto-wasm/zuc` | `ensureLoaded` · `zucKeystream` · `zucEncrypt` / `zucDecrypt` · `zucMac` · `zucEia3Iv` · `configureReuseGuard` / `resetReuseGuard` |
 
 ## 两种入口的区别

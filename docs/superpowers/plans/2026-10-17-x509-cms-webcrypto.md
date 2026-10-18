@@ -1,8 +1,8 @@
 # X.509 / CMS SignedData / WebCrypto 适配层 — Implementation Plan
 
-> **For agentic workers:** 用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务执行。步骤用复选框（`- [ ]`）跟踪。
+> **For agentic workers:** 用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务执行。步骤用复选框（`- [x]`）跟踪。
 >
-> **状态：已定稿（2026-10-17）。** 范围由用户指定：X.509 解析（只读）、X.509 签发（自签 + 简单 CA）、CMS SignedData 签名/验签、WebCrypto 适配层（精选子集）。文末 5 个决策已全部采用推荐项，并补入「以后补」需要的零成本口子，可直接开工。
+> **状态：已完成（2026-10-18）。** 范围由用户指定：X.509 解析（只读）、X.509 签发（自签 + 简单 CA）、CMS SignedData 签名/验签、WebCrypto 适配层（精选子集）。文末 5 个决策已全部采用推荐项。四阶段在同一工作区一次性完成，发布以单个 `v0.7.0` tag 收口（未拆 0.4.0–0.6.0 的中间可构建快照）。
 
 **Goal:** 在现有算法库之上补一层 PKI / 协议能力，让调用方可以：读国密证书、签发内网/测试证书、对报文做 CMS 签名与验签、用 `crypto.subtle` 风格调用 SM2/SM3/SM4。算法实现（`src/sm2|sm3|sm4`）不重写，全部复用。
 
@@ -77,22 +77,22 @@ Phase 0 是单点前置，必须先完成并通过全量回归；Phase 1 的解�
 
 ### 任务
 
-- [ ] 新建 `src/asn1/types.ts`：`Asn1Node` 增加 `constructed: boolean`、`indefinite: boolean`、`raw: Uint8Array`（保留原始切片）；新增 `Asn1Class` 常量。
-- [ ] 新建 `src/asn1/decode.ts`：
-  - [ ] 支持 BER indefinite-length（`0x80` + EOC `0x00 0x00`），仅用于 CMS；
-  - [ ] 支持高 tag number（`0x1f` 后续 base128）；
-  - [ ] `parseDer`（严格：拒绝 indefinite、拒绝尾部多余字节）与 `parseBer`（宽松）；
-  - [ ] `parseDerAll`（bundle / 多对象）；
-  - [ ] 保留每个节点的 `raw`，供 CMS 验签与证书 TBS 使用。
-- [ ] 新建 `src/asn1/encode.ts`：
-  - [ ] `encode(node)` 按 `cls + constructed + tag` 重建首字节（修复现有 `encodeDer` 丢 constructed 位的问题）；
-  - [ ] 构造器：`seq` / `set` / `setOf` / `explicit` / `implicit` / `bitString` / `octetString` / `boolean` / `utf8String` / `printableString` / `ia5String` / `utcTime` / `generalizedTime` / `integer` / `oid` / `null`；
-  - [ ] DER 规则：SET OF 按编码字节排序、BOOLEAN 非默认值才编码、INTEGER 最小补码编码。
-- [ ] 新建 `src/asn1/oid.ts`：`decodeOid` 改 bigint 累加；`encodeOid` 首字节走 base128（修复 `2.999` 这类 OID）。
-- [ ] 新建 `src/asn1/time.ts`：`UTCTime`（1950–2049）与 `GeneralizedTime` 的编码/解析，接受无秒、带时区偏移的输入。
-- [ ] 迁移：`src/pem/asn1.ts` 改为 re-export `src/asn1/index.js`，保持导出符号不变；`pkcs8.ts` / `sm2.ts` 的导入指向新层。
-- [ ] 测试：`tests/asn1/` 覆盖 round-trip、indefinite-length、高 tag、SET 排序、时间边界（2049/2050）、OID 大组件、畸形输入。
-- [ ] 回归：`pnpm test` 全绿（现有 `tests/pem/*` 不改断言）。
+- [x] 新建 `src/asn1/types.ts`：`Asn1Node` 增加 `constructed: boolean`、`indefinite: boolean`、`raw: Uint8Array`（保留原始切片）；新增 `Asn1Class` 常量。
+- [x] 新建 `src/asn1/decode.ts`：
+  - [x] 支持 BER indefinite-length（`0x80` + EOC `0x00 0x00`），仅用于 CMS；
+  - [x] 支持高 tag number（`0x1f` 后续 base128）；
+  - [x] `parseDer`（严格：拒绝 indefinite、拒绝尾部多余字节）与 `parseBer`（宽松）；
+  - [x] `parseDerAll`（bundle / 多对象）；
+  - [x] 保留每个节点的 `raw`，供 CMS 验签与证书 TBS 使用。
+- [x] 新建 `src/asn1/encode.ts`：
+  - [x] `encode(node)` 按 `cls + constructed + tag` 重建首字节（修复现有 `encodeDer` 丢 constructed 位的问题）；
+  - [x] 构造器：`seq` / `set` / `setOf` / `explicit` / `implicit` / `bitString` / `octetString` / `boolean` / `utf8String` / `printableString` / `ia5String` / `utcTime` / `generalizedTime` / `integer` / `oid` / `null`；
+  - [x] DER 规则：SET OF 按编码字节排序、BOOLEAN 非默认值才编码、INTEGER 最小补码编码。
+- [x] 新建 `src/asn1/oid.ts`：`decodeOid` 改 bigint 累加；`encodeOid` 首字节走 base128（修复 `2.999` 这类 OID）。
+- [x] 新建 `src/asn1/time.ts`：`UTCTime`（1950–2049）与 `GeneralizedTime` 的编码/解析，接受无秒、带时区偏移的输入。
+- [x] 迁移：`src/pem/asn1.ts` 改为 re-export `src/asn1/index.js`，保持导出符号不变；`pkcs8.ts` / `sm2.ts` 的导入指向新层。
+- [x] 测试：`tests/asn1/` 覆盖 round-trip、indefinite-length、高 tag、SET 排序、时间边界（2049/2050）、OID 大组件、畸形输入。
+- [x] 回归：`pnpm test` 全绿（现有 `tests/pem/*` 不改断言）。
 
 ### 验收
 
@@ -144,16 +144,16 @@ export function parseCertificates(input: string | Uint8Array): Certificate[]; //
 
 ### 任务
 
-- [ ] `src/x509/oids.ts`：SM2 曲线、SM3withSM2、id-ecPublicKey、常用扩展 OID、Name 属性 OID。
-- [ ] `src/x509/parse.ts`：Certificate / TBSCertificate / AlgorithmIdentifier / Name / Validity / SPKI / Extension 的解析。
-- [ ] 非 SM2 证书（RSA 等）：正常解析字段并用 `publicKeyAlgorithm` 标注；`verifySignature` 返回 `false` 且 `supported=false`，不把「不支持」误报成「签名无效」。
-- [ ] 时间规范化到秒（X.509 精度）：`Date` 的毫秒部分截断，保证 `parse → encode` 的 round-trip 一致。
-- [ ] `src/x509/extensions.ts`：解析 KeyUsage、BasicConstraints、SubjectAltName、SubjectKeyIdentifier、AuthorityKeyIdentifier、ExtendedKeyUsage；未知扩展保留 `{ oid, critical, value }`。
-- [ ] `src/x509/verify.ts`：单证书验签（SM3withSM2：`ZA` 默认 `1234567812345678`，签名值 DER→`r‖s`）+ `checkValidity`。
-- [ ] `src/x509/errors.ts`：`CertificateError extends SmCryptoError`。
-- [ ] `src/x509/index.ts` + `package.json` 的 `./x509` 子路径 + `src/index.ts` 命名空间导出。
-- [ ] 测试：`tests/x509/parse.spec.ts`、`tests/x509/verify.spec.ts`；向量放 `tests/vectors/x509/`（见下）。
-- [ ] 文档：README 三语 + `website/{,en/,ru/}guide/` 新增 X.509 小节。
+- [x] `src/x509/oids.ts`：SM2 曲线、SM3withSM2、id-ecPublicKey、常用扩展 OID、Name 属性 OID。
+- [x] `src/x509/parse.ts`：Certificate / TBSCertificate / AlgorithmIdentifier / Name / Validity / SPKI / Extension 的解析。
+- [x] 非 SM2 证书（RSA 等）：正常解析字段并用 `publicKeyAlgorithm` 标注；`verifySignature` 返回 `false` 且 `supported=false`，不把「不支持」误报成「签名无效」。
+- [x] 时间规范化到秒（X.509 精度）：`Date` 的毫秒部分截断，保证 `parse → encode` 的 round-trip 一致。
+- [x] `src/x509/extensions.ts`：解析 KeyUsage、BasicConstraints、SubjectAltName、SubjectKeyIdentifier、AuthorityKeyIdentifier、ExtendedKeyUsage；未知扩展保留 `{ oid, critical, value }`。
+- [x] `src/x509/verify.ts`：单证书验签（SM3withSM2：`ZA` 默认 `1234567812345678`，签名值 DER→`r‖s`）+ `checkValidity`。
+- [x] `src/x509/errors.ts`：`CertificateError extends SmCryptoError`。
+- [x] `src/x509/index.ts` + `package.json` 的 `./x509` 子路径 + `src/index.ts` 命名空间导出。
+- [x] 测试：`tests/x509/parse.spec.ts`、`tests/x509/verify.spec.ts`；向量放 `tests/vectors/x509/`（见下）。
+- [x] 文档：README 三语 + `website/{,en/,ru/}guide/` 新增 X.509 小节。
 
 ### 测试向量（提交到仓库，注明生成命令）
 
@@ -224,13 +224,13 @@ export function createSelfSignedCertificate(
 
 ### 任务
 
-- [ ] `src/x509/encode.ts`：TBSCertificate、Name、Validity、SPKI、Extensions 的 DER 编码；`r‖s` ↔ DER `SEQUENCE { r, s }` 转换（放在 `src/x509/sig.ts`，CMS 复用）。
-- [ ] `src/x509/issue.ts`：自签与 CA 签发；`issuer` 缺省取 `subject`；AKI 用签发者证书的 SKI；SKI 默认 `SM3(公钥)` 前 20 字节，接受 `{ hash: 'sha1' }` 以兼容 OpenSSL 默认（避免外部 CA 的 AKI 匹配失败）。
-- [ ] DN 字符串解析：`"CN=foo,O=bar,C=CN"` → `DistinguishedNameInput`（仅支持 `,` 分隔与反斜杠转义；不做完整 RFC 4514）。
-- [ ] 时间编码：1950–2049 用 UTCTime，其余用 GeneralizedTime；`notAfter` 必须晚于 `notBefore`。
-- [ ] 输入校验：`country` 2 字母、SAN IP 合法、`basicConstraints.ca=false` 时禁止 `keyCertSign`（红线 #4/#5）。
-- [ ] 测试：`tests/x509/issue.spec.ts`；自签证书用 `openssl verify -CAfile` 交叉验证；CA→终端链用 `openssl verify -CAfile ca.pem leaf.pem`。
-- [ ] 文档：签发示例（自签 + CA）+ 安全边界说明（不生成密钥、不管理私钥）。
+- [x] `src/x509/encode.ts`：TBSCertificate、Name、Validity、SPKI、Extensions 的 DER 编码；`r‖s` ↔ DER `SEQUENCE { r, s }` 转换（放在 `src/x509/sig.ts`，CMS 复用）。
+- [x] `src/x509/issue.ts`：自签与 CA 签发；`issuer` 缺省取 `subject`；AKI 用签发者证书的 SKI；SKI 默认 `SM3(公钥)` 前 20 字节，接受 `{ hash: 'sha1' }` 以兼容 OpenSSL 默认（避免外部 CA 的 AKI 匹配失败）。
+- [x] DN 字符串解析：`"CN=foo,O=bar,C=CN"` → `DistinguishedNameInput`（仅支持 `,` 分隔与反斜杠转义；不做完整 RFC 4514）。
+- [x] 时间编码：1950–2049 用 UTCTime，其余用 GeneralizedTime；`notAfter` 必须晚于 `notBefore`。
+- [x] 输入校验：`country` 2 字母、SAN IP 合法、`basicConstraints.ca=false` 时禁止 `keyCertSign`（红线 #4/#5）。
+- [x] 测试：`tests/x509/issue.spec.ts`；自签证书用 `openssl verify -CAfile` 交叉验证；CA→终端链用 `openssl verify -CAfile ca.pem leaf.pem`。
+- [x] 文档：签发示例（自签 + CA）+ 安全边界说明（不生成密钥、不管理私钥）。
 
 ### 验收
 
@@ -288,15 +288,15 @@ export function verifySignedData(
 
 ### 任务
 
-- [ ] `src/cms/parse.ts`：ContentInfo / SignedData / EncapsulatedContentInfo / SignerInfo / 证书集合；**保留 `signedAttrs` 原始字节**（红线 #1）。
-- [ ] `src/cms/sign.ts`：构造 `signedAttrs`（contentType + messageDigest + signingTime）→ 用原始 DER 编码做 SM3 摘要 → SM2 签名 → DER 签名值 → 组装 SignedData。
-- [ ] `src/cms/verify.ts`：按 `issuerAndSerialNumber` 或 `subjectKeyIdentifier` 匹配证书；优先用 CMS 内嵌证书，其次用调用方传入；对原始 `signedAttrs` 做摘要后验签；`detached` 时校验 `detachedData` 的摘要。
-- [ ] `src/cms/verify.ts` 的失败原因用结构化 `errorCode` 返回（`NO_CERTIFICATE` / `DIGEST_MISMATCH` / `SIGNATURE_INVALID` / `UNSUPPORTED_ALGORITHM` / `MALFORMED`），`error` 仅作人类可读补充。
-- [ ] `src/cms/errors.ts`：`CmsError extends SmCryptoError`。
-- [ ] `src/cms/index.ts` + `package.json` 的 `./cms` 子路径 + 主入口命名空间。
-- [ ] 测试：`tests/cms/sign.spec.ts`、`tests/cms/verify.spec.ts`、`tests/cms/interop.spec.ts`。
-- [ ] 向量：`tests/vectors/cms/`（detached/attached、单签名者、BER indefinite-length、篡改样本）。
-- [ ] 文档：三语 README + website；说明「只验签名、不建信任链」。
+- [x] `src/cms/parse.ts`：ContentInfo / SignedData / EncapsulatedContentInfo / SignerInfo / 证书集合；**保留 `signedAttrs` 原始字节**（红线 #1）。
+- [x] `src/cms/sign.ts`：构造 `signedAttrs`（contentType + messageDigest + signingTime）→ 用原始 DER 编码做 SM3 摘要 → SM2 签名 → DER 签名值 → 组装 SignedData。
+- [x] `src/cms/verify.ts`：按 `issuerAndSerialNumber` 或 `subjectKeyIdentifier` 匹配证书；优先用 CMS 内嵌证书，其次用调用方传入；对原始 `signedAttrs` 做摘要后验签；`detached` 时校验 `detachedData` 的摘要。
+- [x] `src/cms/verify.ts` 的失败原因用结构化 `errorCode` 返回（`NO_CERTIFICATE` / `DIGEST_MISMATCH` / `SIGNATURE_INVALID` / `UNSUPPORTED_ALGORITHM` / `MALFORMED`），`error` 仅作人类可读补充。
+- [x] `src/cms/errors.ts`：`CmsError extends SmCryptoError`。
+- [x] `src/cms/index.ts` + `package.json` 的 `./cms` 子路径 + 主入口命名空间。
+- [x] 测试：`tests/cms/sign.spec.ts`、`tests/cms/verify.spec.ts`、`tests/cms/interop.spec.ts`。
+- [x] 向量：`tests/vectors/cms/`（detached/attached、单签名者、BER indefinite-length、篡改样本）。
+- [x] 文档：三语 README + website；说明「只验签名、不建信任链」。
 
 ### 互操作测试（本阶段的核心验收）
 
@@ -353,16 +353,16 @@ const ct = await subtle.encrypt({ name: 'SM4-GCM', iv, additionalData }, key, pl
 
 ### 任务
 
-- [ ] `src/webcrypto/algorithms.ts`：算法名归一化（大小写不敏感）、参数校验、算法类别表。
-- [ ] `src/webcrypto/cryptoKey.ts`：`CryptoKey` 类；材料存 `WeakMap`；只读 `type` / `extractable` / `algorithm` / `usages`。
-- [ ] 材料用联合类型 `KeyMaterial = { kind: 'bytes'; bytes: Uint8Array } | { kind: 'provider'; provider: KeyProvider }`；v1 只实现 `bytes`，为将来 HSM/RemoteSigner 留口子（不改变公共 API）。
-- [ ] `src/webcrypto/subtle.ts`：`generateKey` / `importKey` / `exportKey` / `digest` / `sign` / `verify` / `encrypt` / `decrypt`。
-- [ ] `src/webcrypto/errors.ts`：`SmCryptoError` → `DOMException` 映射（`NotSupportedError` / `InvalidAccessError` / `DataError` / `OperationError`）。
-- [ ] `src/webcrypto/index.ts` + `package.json` 的 `./webcrypto` 子路径 + 主入口命名空间。
-- [ ] 密钥格式：`raw`（SM4/HMAC）、`pkcs8`（SM2 私钥 DER）、`spki`（SM2 公钥 DER）；需要从 `src/pem/*` 拆出 DER 版本（不新写编码逻辑）。
-- [ ] 与 X.509 协同：`importKey('spki', cert.subjectPublicKeyInfoRaw)` 可直接用于验签。
-- [ ] 测试：`tests/webcrypto/` 覆盖每个算法、`usages` 负例、`extractable` 负例、错误映射、GCM tag 布局、SM2 签名与 `sm2.sign` 一致。
-- [ ] 文档：三语 README + website；明确「不是原生 `crypto.subtle` 的 polyfill，生态库不会自动识别」。
+- [x] `src/webcrypto/algorithms.ts`：算法名归一化（大小写不敏感）、参数校验、算法类别表。
+- [x] `src/webcrypto/cryptoKey.ts`：`CryptoKey` 类；材料存 `WeakMap`；只读 `type` / `extractable` / `algorithm` / `usages`。
+- [x] 材料用联合类型 `KeyMaterial = { kind: 'bytes'; bytes: Uint8Array } | { kind: 'provider'; provider: KeyProvider }`；v1 只实现 `bytes`，为将来 HSM/RemoteSigner 留口子（不改变公共 API）。
+- [x] `src/webcrypto/subtle.ts`：`generateKey` / `importKey` / `exportKey` / `digest` / `sign` / `verify` / `encrypt` / `decrypt`。
+- [x] `src/webcrypto/errors.ts`：`SmCryptoError` → `DOMException` 映射（`NotSupportedError` / `InvalidAccessError` / `DataError` / `OperationError`）。
+- [x] `src/webcrypto/index.ts` + `package.json` 的 `./webcrypto` 子路径 + 主入口命名空间。
+- [x] 密钥格式：`raw`（SM4/HMAC）、`pkcs8`（SM2 私钥 DER）、`spki`（SM2 公钥 DER）；需要从 `src/pem/*` 拆出 DER 版本（不新写编码逻辑）。
+- [x] 与 X.509 协同：`importKey('spki', cert.subjectPublicKeyInfoRaw)` 可直接用于验签。
+- [x] 测试：`tests/webcrypto/` 覆盖每个算法、`usages` 负例、`extractable` 负例、错误映射、GCM tag 布局、SM2 签名与 `sm2.sign` 一致。
+- [x] 文档：三语 README + website；明确「不是原生 `crypto.subtle` 的 polyfill，生态库不会自动识别」。
 
 ### 验收
 
@@ -390,12 +390,13 @@ const ct = await subtle.encrypt({ name: 'SM4-GCM', iv, additionalData }, key, pl
 - **README 三语**：每个阶段新增对应段落；「不在范围」里删除已交付项，保留未交付项。
 - **website 三语**：`website/guide/`、`website/en/guide/`、`website/ru/guide/` 新增页面；`website/.vitepress/config.ts` 增加侧边栏项。
 - **spec 修订**：`docs/superpowers/specs/2026-10-13-sm-crypto-wasm-design.md` 的 Non-Goals 改为「已交付（附版本）」/「仍不做」，避免文档自相矛盾。
-- **发布节奏**：每阶段结束打 minor tag（当前 0.3.0）：
-  - 0.4.0：X.509 解析
-  - 0.5.0：X.509 签发
-  - 0.6.0：CMS SignedData
-  - 0.7.0：WebCrypto 适配层
-- **体积预算**：新增 JS（不含 wasm）gzip 后 x509 ≤ 15 KB、cms ≤ 20 KB、webcrypto ≤ 10 KB；超预算先查重复编码逻辑。
+- **发布节奏（实际）**：原计划每阶段打 minor tag；四阶段一次性完成，以 `v0.7.0` 单 tag 收口（0.4.0–0.6.0 的中间版本未单独产出）。
+- **体积预算（2026-10-18 实测，gzip、不含 wasm）**：
+  - x509 解析子集 **10.8 KB**（原预算 15 KB）；
+  - x509 全量（解析 + 签发）**18.1 KB**（原预算 15 KB；签发阶段新增 DER 编码与输入校验，预算调整为 20 KB）；
+  - cms **6.9 KB**（预算 20 KB）；
+  - webcrypto **6.1 KB**（预算 10 KB）。
+  CI 已按上述阈值检查。
 
 ---
 

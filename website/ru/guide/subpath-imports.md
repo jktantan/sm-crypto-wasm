@@ -9,7 +9,7 @@ import { hash, hmac } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
 
 |  | Агрегированный вход | Подпуть |
 | --- | --- | --- |

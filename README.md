@@ -205,11 +205,32 @@ zuc.zucMac(key, macIv, '616263');               // → 4 字节标签
 
 ---
 
+### X.509 · CMS · WebCrypto
+
+```ts
+import { x509, cms, webcrypto } from 'sm-crypto-wasm';
+
+const cert = x509.parseCertificate(pem);
+const signed = cms.signData({ data, privateKey, certificate: cert });
+const digest = await webcrypto.subtle.digest('SM3', data);
+```
+
+- **X.509**：证书解析、单证书验签、自签 / 简单 CA 签发（[文档](https://jktantan.github.io/sm-crypto-wasm/guide/x509)）；
+- **CMS**：SignedData detached / attached、`signedAttrs` 原始 DER 验签、BER（[文档](https://jktantan.github.io/sm-crypto-wasm/guide/cms)）；
+- **WebCrypto**：`subtle` 风格的 SM3 / HMAC(SM3) / SM2 / SM4 子集（[文档](https://jktantan.github.io/sm-crypto-wasm/guide/webcrypto)）。
+
+X.509 / CMS 不做证书链路径校验、CRL/OCSP；WebCrypto 不是原生 `crypto.subtle` 的 polyfill。
+
+---
+
 ## API 一览
 
 | 模块 | 函数 |
 |---|---|
 | `sm2` | `generateKeyPair`(async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey`(async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
+| `webcrypto` | `subtle` · `CryptoKey` |
+| `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
+| `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB`/`decryptECB` · `encryptCBC`/`decryptCBC` · `encryptCTR`/`decryptCTR` · `encryptCFB`/`decryptCFB` · `encryptOFB`/`decryptOFB` · `encryptGCM`/`decryptGCM` |
 | `sm9` | `generateKeyPair`(async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator`(async) · `createExchangeResponder`(async) |
@@ -228,7 +249,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-可用子路径：`sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`。
+可用子路径：`sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`。
 
 ---
 
@@ -566,11 +587,32 @@ zuc.zucMac(key, macIv, '616263');               // → 4-byte tag
 
 ---
 
+### X.509 · CMS · WebCrypto
+
+```ts
+import { x509, cms, webcrypto } from 'sm-crypto-wasm';
+
+const cert = x509.parseCertificate(pem);
+const signed = cms.signData({ data, privateKey, certificate: cert });
+const digest = await webcrypto.subtle.digest('SM3', data);
+```
+
+- **X.509** — parsing, single-certificate verification, self-signed / simple CA issuing ([docs](https://jktantan.github.io/sm-crypto-wasm/en/guide/x509));
+- **CMS** — detached / attached SignedData, original-DER `signedAttrs` verification, BER ([docs](https://jktantan.github.io/sm-crypto-wasm/en/guide/cms));
+- **WebCrypto** — a `subtle`-style subset: SM3 / HMAC(SM3) / SM2 / SM4 ([docs](https://jktantan.github.io/sm-crypto-wasm/en/guide/webcrypto)).
+
+No certificate-chain validation or CRL/OCSP for X.509/CMS; the WebCrypto adapter is not a polyfill of native `crypto.subtle`.
+
+---
+
 ## API at a glance
 
 | Module | Functions |
 |---|---|
 | `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `webcrypto` | `subtle` · `CryptoKey` |
+| `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
+| `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
@@ -594,7 +636,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+Available sub-paths: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
 
 ---
 
@@ -961,11 +1003,32 @@ zuc.zucMac(key, macIv, '616263');               // → 4-байтовый тег
 
 ---
 
+### X.509 · CMS · WebCrypto
+
+```ts
+import { x509, cms, webcrypto } from 'sm-crypto-wasm';
+
+const cert = x509.parseCertificate(pem);
+const signed = cms.signData({ data, privateKey, certificate: cert });
+const digest = await webcrypto.subtle.digest('SM3', data);
+```
+
+- **X.509** — разбор, проверка одного сертификата, самоподпись / выпуск через простой CA ([документация](https://jktantan.github.io/sm-crypto-wasm/ru/guide/x509));
+- **CMS** — detached / attached SignedData, проверка по исходным DER `signedAttrs`, BER ([документация](https://jktantan.github.io/sm-crypto-wasm/ru/guide/cms));
+- **WebCrypto** — подмножество в стиле `subtle`: SM3 / HMAC(SM3) / SM2 / SM4 ([документация](https://jktantan.github.io/sm-crypto-wasm/ru/guide/webcrypto)).
+
+Для X.509 / CMS нет проверки цепочки и CRL/OCSP; WebCrypto — не polyfill нативного `crypto.subtle`.
+
+---
+
 ## Сводка API
 
 | Модуль | Функции |
 |---|---|
 | `sm2` | `generateKeyPair` (async) · `getPublicKey` · `sign` · `verify` · `encrypt` · `decrypt` · `preparePublicKey` (async) · `configurePreparedKeyCache` · `clearPreparedPublicKeys` · `getPreparedPublicKeys` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
+| `webcrypto` | `subtle` · `CryptoKey` |
+| `cms` | `signData` · `verifySignedData` · `parseSignedData` · `CmsError` |
+| `x509` | `parseCertificate` · `parseCertificates` · `createSelfSignedCertificate` · `issueCertificate` · `parseDistinguishedName` · `verifyCertificateSignature` |
 | `sm3` | `hash` · `hmac` |
 | `sm4` | `encryptECB` / `decryptECB` · `encryptCBC` / `decryptCBC` · `encryptCTR` / `decryptCTR` · `encryptCFB` / `decryptCFB` · `encryptOFB` / `decryptOFB` · `encryptGCM` / `decryptGCM` |
 | `sm9` | `generateKeyPair` (async) · `sign` · `verify` · `encrypt` · `decrypt` · `kemEncrypt` · `kemDecrypt` · `hybridEncrypt` · `hybridDecrypt` · `sealedToObject` · `sealedFromObject` · `getSignPublicKey` · `getEncPublicKey` · `getUserPublicKey` · `createExchangeInitiator` (async) · `createExchangeResponder` (async) |
@@ -989,7 +1052,7 @@ import { hash } from 'sm-crypto-wasm/sm3';
 import { encryptCBC } from 'sm-crypto-wasm/sm4';
 ```
 
-Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/zuc`.
+Доступные подпути: `sm-crypto-wasm/sm2` · `/sm3` · `/sm4` · `/sm9` · `/x509` · `/cms` · `/webcrypto` · `/zuc`.
 
 ---
 

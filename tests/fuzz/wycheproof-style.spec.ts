@@ -1,4 +1,4 @@
-import { hash as nodeSm3 } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fc from 'fast-check';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DecryptionError, InvalidPublicKeyError } from '@/runtime';
@@ -52,7 +52,7 @@ describe('Wycheproof 风格 fuzz', () => {
     await fc.assert(
       fc.asyncProperty(fc.uint8Array({ minLength: 1, maxLength: 256 }), async (data) => {
         const ours = sm3.hash(new Uint8Array(data));
-        const theirs = nodeSm3(Buffer.from(data)).digest('hex');
+        const theirs = createHash('sm3').update(Buffer.from(data)).digest('hex');
         expect(ours).toBe(theirs);
       }),
       { numRuns: 50 },

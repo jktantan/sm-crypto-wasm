@@ -45,7 +45,42 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # build = clean + asc（5 个 wasm）+ tsc
       - run: pnpm build
+
+      # X.509 / CMS 互操作测试依赖 OpenSSL 3.x（缺 SM2 时相关用例自动 skip）。
+      - name: OpenSSL 版本
+        run: openssl version
+
+      # 新子路径产物必须存在（package.json exports 依赖这些文件）。
+      - name: 新增子路径产物检查
+        run: |
+          set -euo pipefail
+          for p in x509 cms webcrypto; do
+            test -f "dist/$p/index.js"
+            test -f "dist/$p/index.d.ts"
+            echo "OK: dist/$p"
+          done
+
+      # 体积预算（plan「体积预算」）：不含 wasm，按 gzip 后合并测量。
+      # x509 全量包含解析 + 签发；解析子集单独按 15 KB 检查。
+      - name: 新增模块 JS 体积（gzip）
+        run: |
+          set -euo pipefail
+          gzip_size() { cat "$@" | gzip -c | wc -c; }
+          cms=$(gzip_size dist/cms/*.js)
+          webcrypto=$(gzip_size dist/webcrypto/*.js)
+          x509=$(gzip_size dist/x509/*.js)
+          x509_parse=$(gzip_size dist/x509/{parse,extensions,verify,sig,sha256,oids,errors}.js)
+          echo "cms gzip = $cms bytes (budget 20480)"
+          echo "webcrypto gzip = $webcrypto bytes (budget 10240)"
+          echo "x509 gzip = $x509 bytes (budget 20480)"
+          echo "x509 parse subset gzip = $x509_parse bytes (budget 15360)"
+          test "$cms" -le 20480
+          test "$webcrypto" -le 10240
+          test "$x509" -le 20480
+          test "$x509_parse" -le 15360
+
       - run: pnpm test
+      - run: pnpm test:fuzz
       - run: pnpm test:browser
       - name: wasm 体积检查
         run: |

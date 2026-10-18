@@ -175,7 +175,9 @@ function bitStringNode(value: Uint8Array): {
   length: number;
   value: Uint8Array;
   raw: Uint8Array;
-  cls: number;
+  cls: 0;
+  constructed: false;
+  indefinite: false;
 } {
   const lengthBytes = encodeLen(value.length);
   const raw = new Uint8Array(1 + lengthBytes.length + value.length);
@@ -184,7 +186,15 @@ function bitStringNode(value: Uint8Array): {
   for (let i = 0; i < value.length; i++) {
     raw[1 + lengthBytes.length + i] = value[i] ?? 0;
   }
-  return { cls: 0, tag: 0x03, length: value.length, value, raw };
+  return {
+    cls: 0,
+    tag: 0x03,
+    constructed: false,
+    indefinite: false,
+    length: value.length,
+    value,
+    raw,
+  };
 }
 
 function encodeLen(n: number): Uint8Array {

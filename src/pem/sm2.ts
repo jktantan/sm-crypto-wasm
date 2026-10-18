@@ -61,7 +61,15 @@ const CLS_CONTEXT = 2;
  * @throws InvalidKeyError PEM/DER 结构非法、或曲线不是 SM2。
  */
 export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
-  const der = pemToBytes(pem, 'sm2.privateKey');
+  return parseSm2PrivateKeyDer(pemToBytes(pem, 'sm2.privateKey'));
+}
+
+/**
+ * 解析 SM2 私钥 DER（PKCS#8 或 SEC1），返回 32 字节私钥 d。
+ *
+ * WebCrypto 的 `importKey('pkcs8', ...)` 使用这个入口。
+ */
+export function parseSm2PrivateKeyDer(der: Uint8Array): Uint8Array {
   const top = parseOrThrow(der, 'parseSm2PrivateKeyPem');
   const kids = top.children;
   if (top.tag !== TAG_SEQUENCE || !kids) {
@@ -113,7 +121,15 @@ export function parseSm2PrivateKeyPem(pem: string): Uint8Array {
  * @throws InvalidKeyError PEM/DER 结构非法、曲线不是 SM2、或点不是未压缩形式。
  */
 export function parseSm2PublicKeyPem(pem: string): Uint8Array {
-  const der = pemToBytes(pem, 'sm2.publicKey');
+  return parseSm2PublicKeyDer(pemToBytes(pem, 'sm2.publicKey'));
+}
+
+/**
+ * 解析 SM2 公钥 DER（SPKI），返回 65 字节未压缩点。
+ *
+ * WebCrypto 的 `importKey('spki', ...)` 使用这个入口。
+ */
+export function parseSm2PublicKeyDer(der: Uint8Array): Uint8Array {
   const top = parseOrThrow(der, 'parseSm2PublicKeyPem');
   const kids = top.children;
   if (top.tag !== TAG_SEQUENCE || !kids || kids.length < 2) {
@@ -143,6 +159,14 @@ export function parseSm2PublicKeyPem(pem: string): Uint8Array {
  * @param pub 可选公钥（64 或 65 字节）；给出则内嵌到 ECPrivateKey 的 `[1]`。
  */
 export function encodeSm2PrivateKeyPem(d: string | Uint8Array, pub?: string | Uint8Array): string {
+  return bytesToPem(encodeSm2PrivateKeyDer(d, pub), 'PRIVATE KEY');
+}
+
+/** 编码 SM2 私钥为 PKCS#8 DER。 */
+export function encodeSm2PrivateKeyDer(
+  d: string | Uint8Array,
+  pub?: string | Uint8Array,
+): Uint8Array {
   const scalar = normalizeScalar(d);
   const ecChildren: Asn1Node[] = [
     asn1Int(1),
@@ -161,7 +185,7 @@ export function encodeSm2PrivateKeyPem(d: string | Uint8Array, pub?: string | Ui
     asn1Seq([asn1Oid(OID_ID_EC_PUBLIC_KEY), asn1Oid(OID_SM2_CURVE)]),
     asn1Octets(ec.raw),
   ]);
-  return bytesToPem(pkcs8.raw, 'PRIVATE KEY');
+  return pkcs8.raw;
 }
 
 /**
@@ -170,6 +194,11 @@ export function encodeSm2PrivateKeyPem(d: string | Uint8Array, pub?: string | Ui
  * @param pub 64（X || Y）或 65（04 || X || Y）字节公钥。
  */
 export function encodeSm2PublicKeyPem(pub: string | Uint8Array): string {
+  return bytesToPem(encodeSm2PublicKeyDer(pub), 'PUBLIC KEY');
+}
+
+/** 编码 SM2 公钥为 SPKI DER。 */
+export function encodeSm2PublicKeyDer(pub: string | Uint8Array): Uint8Array {
   const point = normalizeUncompressed(pub);
   const bits = new Uint8Array(point.length + 1);
   bits.set(point, 1);
@@ -177,7 +206,7 @@ export function encodeSm2PublicKeyPem(pub: string | Uint8Array): string {
     asn1Seq([asn1Oid(OID_ID_EC_PUBLIC_KEY), asn1Oid(OID_SM2_CURVE)]),
     bitStringNode(bits),
   ]);
-  return bytesToPem(spki.raw, 'PUBLIC KEY');
+  return spki.raw;
 }
 
 // ---------- 内部 ----------
@@ -254,7 +283,15 @@ function normalizeUncompressed(pub: string | Uint8Array): Uint8Array {
 /** 构造 BIT STRING 节点（value 需自带首字节「未使用位数」）。 */
 function bitStringNode(value: Uint8Array): Asn1Node {
   const raw = concat([new Uint8Array([TAG_BIT_STRING]), encodeLen(value.length), value]);
-  return { cls: 0, tag: TAG_BIT_STRING, length: value.length, value, raw };
+  return {
+    cls: 0,
+    tag: TAG_BIT_STRING,
+    constructed: false,
+    indefinite: false,
+    length: value.length,
+    value,
+    raw,
+  };
 }
 
 /** 构造 [n] EXPLICIT 包装节点。 */
@@ -263,6 +300,8 @@ function explicit(tagNum: number, inner: Asn1Node): Asn1Node {
   return {
     cls: CLS_CONTEXT,
     tag: tagNum,
+    constructed: true,
+    indefinite: false,
     length: inner.raw.length,
     value: inner.raw,
     children: [inner],

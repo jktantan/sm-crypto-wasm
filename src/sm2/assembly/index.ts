@@ -168,6 +168,29 @@ export function signOut(
 }
 
 /**
+ * SM2 签名（自定义用户标识）：out = r(32) || s(32)。返回 0 成功，1 需重试。
+ *
+ * 供 X.509 签发使用：OpenSSL 的 X.509 路径默认使用空标识，GM/T 证书使用
+ * `1234567812345678`，因此需要把用户标识作为显式参数。
+ */
+export function signWithIDOut(
+  privPtr: usize,
+  pubXPtr: usize,
+  pubYPtr: usize,
+  idPtr: usize,
+  idLen: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  kPtr: usize,
+  outPtr: usize,
+): i32 {
+  arenaRewind();
+  const z = new StaticArray<u8>(32);
+  computeZ(pubXPtr, pubYPtr, idPtr, idLen, changetype<usize>(z));
+  return sign(privPtr, changetype<usize>(z), msgPtr, msgLen, kPtr, outPtr, outPtr + 32);
+}
+
+/**
  * SM2 签名（使用调用方预先算好的 `k·G`）：out = r(32) || s(32)。
  *
  * 与 `signOut` 的唯一区别：不再自己做固定基点标量乘（实测占单次签名的 56%），
@@ -213,6 +236,24 @@ export function verifyOut(
   const z = new StaticArray<u8>(32);
   computeZDefaultId(pubXPtr, pubYPtr, changetype<usize>(z));
   return verify(pubXPtr, pubYPtr, changetype<usize>(z), msgPtr, msgLen, sigPtr, sigPtr + 32);
+}
+
+/**
+ * SM2 验签（调用方提供预计算的 Z 值）。sigPtr = r || s。返回 1 有效，0 无效。
+ *
+ * 供 X.509 验证使用：证书签名的用户标识可能是 GM/T 默认值，也可能是
+ * OpenSSL X.509 路径使用的空标识，调用方用 `computeZIdOut` 算好 Z 再调用本函数。
+ */
+export function verifyWithZOut(
+  pubXPtr: usize,
+  pubYPtr: usize,
+  zPtr: usize,
+  msgPtr: usize,
+  msgLen: usize,
+  sigPtr: usize,
+): i32 {
+  arenaRewind();
+  return verify(pubXPtr, pubYPtr, zPtr, msgPtr, msgLen, sigPtr, sigPtr + 32);
 }
 
 /** KDF。返回 1 成功，0 表示输出全 0。 */

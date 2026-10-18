@@ -53,6 +53,17 @@ interface Sm2Exports extends WebAssembly.Exports {
     kxPtr: number,
     outPtr: number,
   ) => number;
+  readonly signWithIDOut: (
+    privPtr: number,
+    pubXPtr: number,
+    pubYPtr: number,
+    idPtr: number,
+    idLen: number,
+    msgPtr: number,
+    msgLen: number,
+    kPtr: number,
+    outPtr: number,
+  ) => number;
   readonly scalarMulGOut: (kPtr: number, outPtr: number) => void;
   readonly verifyOut: (
     pubXPtr: number,
@@ -61,6 +72,21 @@ interface Sm2Exports extends WebAssembly.Exports {
     msgLen: number,
     sigPtr: number,
   ) => number;
+  readonly verifyWithZOut: (
+    pubXPtr: number,
+    pubYPtr: number,
+    zPtr: number,
+    msgPtr: number,
+    msgLen: number,
+    sigPtr: number,
+  ) => number;
+  readonly computeZIdOut: (
+    pubXPtr: number,
+    pubYPtr: number,
+    idPtr: number,
+    idLen: number,
+    outPtr: number,
+  ) => void;
   readonly encryptOut: (
     pubXPtr: number,
     pubYPtr: number,
@@ -494,6 +520,54 @@ export function sign(
 }
 
 /**
+ * SM2 签名（自定义用户标识）。
+ *
+ * 与 `sign` 的区别仅在于 Z 值使用 `userID` 计算。X.509 签发需要它：
+ * OpenSSL 的 X.509 路径默认使用空标识，GM/T 证书使用 `1234567812345678`。
+ *
+ * 不支持 `pointPool`（签发场景不需要；需要时用 `sign` 的默认标识路径）。
+ *
+ * @param privateKey 32 字节私钥（hex / Uint8Array / PEM）。
+ * @param message 待签名消息。
+ * @param userID 用户标识（可为空数组）。
+ * @returns 64 字节签名 `r ‖ s` 的 hex。
+ */
+export function signWithID(
+  privateKey: string | Uint8Array,
+  message: string | Uint8Array,
+  userID: Uint8Array,
+): string {
+  const d = toPrivateKeyBytes(privateKey);
+  const m = toBytes(message, 'message');
+  const id = userID instanceof Uint8Array ? userID : new Uint8Array(0);
+  const pub = derivePublicKeyBytes(d);
+  const { exports, memory } = getModule();
+  const dp = exports.alloc(32);
+  const pxp = exports.alloc(32);
+  const pyp = exports.alloc(32);
+  const idp = exports.alloc(id.length === 0 ? 1 : id.length);
+  const mp = exports.alloc(m.length === 0 ? 1 : m.length);
+  const kp = exports.alloc(32);
+  const op = exports.alloc(64);
+  try {
+    putBytes(d, dp);
+    putBytes(pub.subarray(0, 32), pxp);
+    putBytes(pub.subarray(32, 64), pyp);
+    if (id.length > 0) putBytes(id, idp);
+    putBytes(m, mp);
+    for (let attempt = 0; attempt < 16; attempt++) {
+      putBytes(randomK(), kp);
+      const rc = exports.signWithIDOut(dp, pxp, pyp, idp, id.length, mp, m.length, kp, op);
+      if (rc === 0) return fromBytes(readBytes(op, 64), 'hex');
+    }
+    throw new Error('sm2.signWithID: failed to produce a valid signature after retries');
+  } finally {
+    new Uint8Array(memory.buffer, kp, 32).fill(0);
+    exports.freeAll();
+  }
+}
+
+/**
  * SM2 验签。
  *
  * @returns true 有效。
@@ -520,6 +594,51 @@ export function verify(
     putBytes(m, mp);
     putBytes(sig, sigp);
     return exports.verifyOut(pxp, pyp, mp, m.length, sigp) === 1;
+  } finally {
+    exports.freeAll();
+  }
+}
+
+/**
+ * SM2 验签（自定义用户标识）。
+ *
+ * 与 `verify` 的区别仅在于 Z 值使用 `userID` 计算。X.509 证书签名需要它：
+ * GM/T 证书使用默认标识 `1234567812345678`，而 OpenSSL 的 X.509 路径
+ * 默认使用空标识。
+ *
+ * @param publicKey 64/65 字节公钥。
+ * @param message 消息。
+ * @param signature 64 字节 `r ‖ s`。
+ * @param userID 用户标识（可为空数组）。
+ * @returns true 有效。
+ */
+export function verifyWithID(
+  publicKey: string | Uint8Array,
+  message: string | Uint8Array,
+  signature: string | Uint8Array,
+  userID: Uint8Array,
+): boolean {
+  const { x, y } = splitPub(publicKey);
+  if (!isOnCurve(x, y)) return false;
+  const m = toBytes(message, 'message');
+  const sig = toBytes(signature, 'signature');
+  if (sig.length !== 64) throw new InvalidCiphertextError('sm2: signature must be 64 bytes');
+  const id = userID instanceof Uint8Array ? userID : new Uint8Array(0);
+  const { exports } = getModule();
+  const pxp = exports.alloc(32);
+  const pyp = exports.alloc(32);
+  const idp = exports.alloc(id.length === 0 ? 1 : id.length);
+  const mp = exports.alloc(m.length === 0 ? 1 : m.length);
+  const sigp = exports.alloc(64);
+  const zp = exports.alloc(32);
+  try {
+    putBytes(x, pxp);
+    putBytes(y, pyp);
+    if (id.length > 0) putBytes(id, idp);
+    putBytes(m, mp);
+    putBytes(sig, sigp);
+    exports.computeZIdOut(pxp, pyp, idp, id.length, zp);
+    return exports.verifyWithZOut(pxp, pyp, zp, mp, m.length, sigp) === 1;
   } finally {
     exports.freeAll();
   }

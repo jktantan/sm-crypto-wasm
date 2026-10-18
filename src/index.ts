@@ -17,6 +17,7 @@
  * spec/plan 对应：plan Task 12；spec §5 产物结构、§6 API。
  */
 
+export * as cms from './cms/index.js';
 export { bytesToHex, fromBytes, hexToBytes, toBytes } from './runtime/convert.js';
 // 运行时工具（错误类型、编解码）也导出，便于调用方捕获本库错误。
 export {
@@ -33,4 +34,6 @@ export * as sm2 from './sm2/index.js';
 export * as sm3 from './sm3/index.js';
 export * as sm4 from './sm4/index.js';
 export * as sm9 from './sm9/index.js';
+export * as webcrypto from './webcrypto/index.js';
+export * as x509 from './x509/index.js';
 export * as zuc from './zuc/index.js';
