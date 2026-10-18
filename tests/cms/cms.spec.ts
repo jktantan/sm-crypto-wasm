@@ -32,6 +32,53 @@ function hasOpenSsl(): boolean {
   }
 }
 
+/**
+ * 探测 OpenSSL 是否支持用 SM2 私钥生成 CMS 签名。
+ *
+ * Ubuntu CI 自带的 OpenSSL 3.0.x 会报
+ * `cms_sd_asn1_ctrl:not supported for this key type`；这类环境只跳过
+ * 动态互操作用例，固定 DER 向量仍由本库验签。
+ */
+function hasOpenSslCmsSm2(): boolean {
+  let dir: string | undefined;
+  try {
+    dir = mkdtempSync(join(tmpdir(), 'sm-crypto-cms-probe-'));
+    const dataPath = join(dir, 'data.bin');
+    const certPath = join(dir, 'cert.pem');
+    const keyPath = join(dir, 'key.pem');
+    writeFileSync(dataPath, Buffer.from(DATA));
+    writeFileSync(certPath, CERT_PEM);
+    writeFileSync(keyPath, KEY_PEM);
+    execFileSync(
+      'openssl',
+      [
+        'cms',
+        '-sign',
+        '-in',
+        dataPath,
+        '-signer',
+        certPath,
+        '-inkey',
+        keyPath,
+        '-outform',
+        'DER',
+        '-md',
+        'sm3',
+        '-binary',
+        '-nodetach',
+        '-out',
+        join(dir, 'probe.der'),
+      ],
+      { stdio: 'ignore' },
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const CERT_PEM = readPem('root-ca.pem');
 const KEY_PEM = readPem('root-ca.key');
 const DATA = new TextEncoder().encode('hello 国密 CMS');
@@ -196,7 +243,7 @@ function stripCertificates(der: Uint8Array): Uint8Array {
   return seq([oid(OID_CMS_SIGNED_DATA), explicit(0, seq(children))]).raw;
 }
 
-const describeOssl = hasOpenSsl() ? describe : describe.skip;
+const describeOssl = hasOpenSsl() && hasOpenSslCmsSm2() ? describe : describe.skip;
 
 describeOssl('OpenSSL interop', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sm-crypto-cms-'));
