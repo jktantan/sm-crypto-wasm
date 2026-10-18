@@ -1,6 +1,6 @@
 {
   "name": "sm-crypto-wasm",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "SM2/SM3/SM4/SM9/ZUC (Chinese cryptography) implemented in AssemblyScript → WebAssembly. Node.js 18+ and modern browsers, with per-algorithm lazy loading.",
   "keywords": [
     "sm2",
@@ -32,7 +32,7 @@
   "bugs": {
     "url": "https://github.com/jktantan/sm-crypto-wasm/issues"
   },
-  "author": "jktantan",
+  "author": "tantan",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
