@@ -125,8 +125,9 @@ KEM 封装 16 字节 DEK，消息交给 SM4-GCM。
 ### 密钥交换（GM/T 0044.3）
 
 ```ts
-const initiator = await sm9.createExchangeInitiator(keSelf, idPeer, idSelf, opts?);
-const responder = await sm9.createExchangeResponder(keSelf, idPeer, idSelf, opts?);
+// 双方须属于同一 KGC，使用同一个加密主密钥 ke；各自传入自己的 ID 和对端 ID。
+const initiator = await sm9.createExchangeInitiator(ke, idSelf, idPeer, opts?);
+const responder = await sm9.createExchangeResponder(ke, idSelf, idPeer, opts?);
 
 const m1 = initiator.initiate();          // 阶段 1
 const m2 = responder.respond(m1);         // 阶段 2（含 confirm）

@@ -130,8 +130,10 @@ have the master public key. One call performs KEM + SM4-GCM: the KEM encapsulate
 ### Key exchange (GM/T 0044.3)
 
 ```ts
-const initiator = await sm9.createExchangeInitiator(keSelf, idPeer, idSelf, opts?);
-const responder = await sm9.createExchangeResponder(keSelf, idPeer, idSelf, opts?);
+// Both sides must belong to the same KGC and share the encryption master key `ke`;
+// each passes its own ID and the peer's ID.
+const initiator = await sm9.createExchangeInitiator(ke, idSelf, idPeer, opts?);
+const responder = await sm9.createExchangeResponder(ke, idSelf, idPeer, opts?);
 
 const m1 = initiator.initiate();          // phase 1
 const m2 = responder.respond(m1);         // phase 2 (carries confirm)

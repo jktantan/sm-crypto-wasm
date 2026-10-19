@@ -131,8 +131,10 @@ KEM + SM4-GCM: KEM инкапсулирует 16-байтовый DEK, а соо
 ### Обмен ключами (GM/T 0044.3)
 
 ```ts
-const initiator = await sm9.createExchangeInitiator(keSelf, idPeer, idSelf, opts?);
-const responder = await sm9.createExchangeResponder(keSelf, idPeer, idSelf, opts?);
+// Обе стороны должны принадлежать одному KGC и использовать один и тот же
+// главный ключ шифрования ke; каждая передаёт свой ID и ID партнёра.
+const initiator = await sm9.createExchangeInitiator(ke, idSelf, idPeer, opts?);
+const responder = await sm9.createExchangeResponder(ke, idSelf, idPeer, opts?);
 
 const m1 = initiator.initiate();          // фаза 1
 const m2 = responder.respond(m1);         // фаза 2 (несёт confirm)
